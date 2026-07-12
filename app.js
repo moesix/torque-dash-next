@@ -6,12 +6,10 @@ const app = express();
 // middleware/rateLimit.js, which keys buckets on req.ip — otherwise every
 // client behind the proxy collapses into a single shared bucket.
 app.set('trust proxy', 1);
-const path = require('path');
 const cors = require('cors');
 // const logger = require('morgan');
 const { sequelize } = require('./models');
 const config = require('./config/config');
-const exphbs = require('express-handlebars');
 const flash = require('connect-flash');
 const session = require('cookie-session');
 const passport = require('passport');
@@ -29,7 +27,6 @@ const corsOpts = {
 // Configure middleware
 app.use('/api', cors(corsOpts));
 app.use(express.urlencoded({ extended: true }));
-app.use(express.static(path.join(__dirname, 'public')));
 // app.use(logger('combined'));
 app.use(session({
     keys: config.session.keys,
@@ -55,20 +52,13 @@ app.use((req, res, next) => {
 // Health probe (no auth)
 app.get('/health', (req, res) => res.json({ status: 'ok', ts: Date.now() }));
 
-// Set templating engine
-app.engine('hbs', exphbs({defaultLayout: 'main', extname: 'hbs'}));
-app.set('view engine', 'hbs');
-app.set('views', path.join(__dirname, '/views'));
-
-// Define routes
-app.use('/', require('./routes/web.js'));
 // Parse JSON bodies for /api (SPA + Torque native clients). Placed BEFORE the
 // api router so req.body is populated for every JSON endpoint. Legacy/native
 // Torque form posts still work via the express.urlencoded() below/above.
 app.use('/api', express.json({ limit: '1mb' }));
 app.use('/api', require('./routes/api.js'));
-// Since this is the last middleware used, assume 404, as nothing else responded.
-app.use('*', require('./routes/404.js'));
+// JSON 404 for any unmatched route (the SPA handles its own not-found UI).
+app.use('*', (req, res) => res.status(404).json({ error: 'Not found' }));
 
 // Connect to database and (non-prod) sync models.
 // In production, migrations in infra/timescale/log_hypertable.sql are the source
