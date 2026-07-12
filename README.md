@@ -103,7 +103,7 @@ In Torque Pro → *Settings → Web Preferences*:
 | `SESSION_KEYS`            | dev defaults                             | Comma-separated cookie-signing keys. **Set this in production.**            |
 | `COOKIE_SECURE`           | `false`                                 | `true` to set `Secure` on session cookies (requires HTTPS).                 |
 | `COOKIE_SAMESITE`         | `lax`                                   | `SameSite` policy for session cookies.                                      |
-| `CORS_ORIGINS`           | _(empty = same-origin only)_            | Comma-separated allowed origins for cross-origin API access. Also serves as the CSRF trust list — state-changing requests from any other origin are rejected (see `middleware/csrfGuard.js`). |
+| `CORS_ORIGINS`           | _(empty = same-origin only)_            | Comma-separated allowed origins for cross-origin API access. Also serves as the CSRF trust list — state-changing requests from any other origin are rejected (see `middleware/csrfGuard.js`). Entries must exactly match the browser `Origin` (correct scheme, no trailing slash). For local dev, use a consistent hostname for the API and SPA (e.g. both `localhost`) to avoid spurious 403s. |
 | `UPLOAD_RATE_LIMIT_MAX`    | `600`                                   | Max uploads per `UPLOAD_RATE_LIMIT_WINDOW_MS` per IP.                       |
 | `UPLOAD_RATE_LIMIT_WINDOW_MS` | `60000`                             | Upload rate-limit window in milliseconds.                                   |
 | `UPLOAD_API_TOKEN`        | _(unset)_                               | If set, requests with `Authorization: bearer <token>` bypass the rate limit.|
@@ -111,7 +111,7 @@ In Torque Pro → *Settings → Web Preferences*:
 | `AUTH_RATE_LIMIT_WINDOW_MS` | `60000`                               | Auth rate-limit window in milliseconds.                                     |
 | `WRITE_RATE_LIMIT_MAX`    | `30`                                    | Max authenticated mutations (PUT settings/forwardurls) per window per IP.   |
 | `WRITE_RATE_LIMIT_WINDOW_MS` | `60000`                              | Write rate-limit window in milliseconds.                                    |
-| `READ_RATE_LIMIT_MAX`     | `100`                                   | Max requests to all other `/api` routes per window per IP.                  |
+| `READ_RATE_LIMIT_MAX`     | `600`                                   | Max requests to all other `/api` routes per window per IP (generous — the SPA polls telemetry during replay). |
 | `READ_RATE_LIMIT_WINDOW_MS` | `60000`                               | Global `/api` rate-limit window in milliseconds.                            |
 | `DISABLE_REGISTRATION`    | _(unset)_                               | If `true`, public sign-up is disabled (admin can still create accounts).    |
 

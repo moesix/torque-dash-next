@@ -40,7 +40,7 @@ test('config exposes tiered rate limits with sane defaults', () => {
         assert.ok(rateLimits[tier].max > 0);
     }
     assert.ok(rateLimits.auth.max < rateLimits.global.max, 'auth should be stricter than global');
-    assert.ok(rateLimits.upload.max > rateLimits.global.max, 'upload absorbs bursts');
+    assert.ok(rateLimits.upload.max >= rateLimits.global.max, 'upload absorbs bursts (>= reads)');
 });
 
 test('bursting past max returns a JSON 429', async () => {

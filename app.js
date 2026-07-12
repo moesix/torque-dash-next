@@ -7,8 +7,8 @@ const app = express();
 // the proxy collapses into a single shared bucket.
 // CSRF protection is provided by middleware/csrfGuard.js — a same-origin Origin
 // check on all state-changing /api requests (OWASP-recommended for JSON SPAs).
-// This avoids the unmaintained `csurf` dependency.
-// codeql[js/missing-csrf-protection] mitigated by same-origin Origin check in middleware/csrfGuard.js
+// This avoids the unmaintained `csurf` dependency. The js/missing-csrf-protection
+// CodeQL alert is suppressed on the cookie-session registration below.
 app.set('trust proxy', 1);
 const cors = require('cors');
 // const logger = require('morgan');
@@ -36,6 +36,7 @@ app.use('/api', cors(corsOpts));
 app.use('/api', csrfGuard(corsOpts.origin));
 app.use(express.urlencoded({ extended: true }));
 // app.use(logger('combined'));
+// codeql[js/missing-csrf-protection] mitigated by same-origin Origin check in middleware/csrfGuard.js
 app.use(session({
     keys: config.session.keys,
     maxAge: 24 * 60 * 60 * 1000,

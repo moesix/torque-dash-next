@@ -97,3 +97,57 @@ test('DELETE with an untrusted Origin is rejected (403)', async () => {
         server.close();
     }
 });
+
+test('malformed Origin header is rejected (403)', async () => {
+    const { server, base } = await startServer([]);
+    try {
+        const r = await fetch(base + '/x', {
+            method: 'POST',
+            headers: { Origin: 'not-a-url' },
+        });
+        assert.strictEqual(r.status, 403);
+    } finally {
+        server.close();
+    }
+});
+
+test('same hostname but different port is rejected (403)', async () => {
+    const { server, base } = await startServer([]);
+    try {
+        const url = new URL(base);
+        const r = await fetch(base + '/x', {
+            method: 'POST',
+            headers: { Origin: `http://${url.hostname}:${Number(url.port) + 1}` },
+        });
+        assert.strictEqual(r.status, 403);
+    } finally {
+        server.close();
+    }
+});
+
+test('no Origin but same-origin Referer is allowed', async () => {
+    const { server, base } = await startServer([]);
+    try {
+        const url = new URL(base);
+        const r = await fetch(base + '/x', {
+            method: 'POST',
+            headers: { Referer: `http://${url.hostname}:${url.port}/some/path` },
+        });
+        assert.strictEqual(r.status, 200);
+    } finally {
+        server.close();
+    }
+});
+
+test('no Origin with cross-origin Referer is rejected (403)', async () => {
+    const { server, base } = await startServer([]);
+    try {
+        const r = await fetch(base + '/x', {
+            method: 'POST',
+            headers: { Referer: 'https://evil.example.com/page' },
+        });
+        assert.strictEqual(r.status, 403);
+    } finally {
+        server.close();
+    }
+});

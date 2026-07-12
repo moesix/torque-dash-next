@@ -34,10 +34,12 @@ let config = {
             windowMs: Number(process.env.WRITE_RATE_LIMIT_WINDOW_MS) || 60000,
             max: Number(process.env.WRITE_RATE_LIMIT_MAX) || 30
         },
-        // Catch-all for every other /api route (reads, session queries).
+        // Catch-all for every other /api route (reads, session queries). Set
+        // generously: the SPA polls the paged telemetry endpoint heavily during
+        // replay, so a low cap would 429 a single legitimate user.
         global: {
             windowMs: Number(process.env.READ_RATE_LIMIT_WINDOW_MS) || 60000,
-            max: Number(process.env.READ_RATE_LIMIT_MAX) || 100
+            max: Number(process.env.READ_RATE_LIMIT_MAX) || 600
         }
     }
 };
