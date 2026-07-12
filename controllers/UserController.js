@@ -1,7 +1,7 @@
 const User = require('../models').User;
 const Settings = require('../models').Settings;
 const passport = require('passport');
-const shortid = require('shortid');
+const { nanoid } = require('nanoid');
 
 class UserController {
     static async login(req, res, next) {
@@ -142,7 +142,7 @@ class UserController {
             });
             let shareId = user.shareId;
             if(!shareId){
-                await user.update({ shareId: shortid.generate() });
+                await user.update({ shareId: nanoid() });
             }
             else {
                 await user.update({ shareId: null });

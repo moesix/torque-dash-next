@@ -5,7 +5,7 @@ const sequelize = require('../models').sequelize;
 const Op = require('../models').Sequelize.Op;
 const moment = require('moment');
 require('moment-duration-format');
-const shortid = require('shortid');
+const { nanoid } = require('nanoid');
 
 class SessionController {
     static async delete(req, res) {
@@ -193,7 +193,7 @@ class SessionController {
                 });
                 // Create a copy of the session
                 let sessionCopy = await Session.create({
-                    sessionId: shortid.generate(),
+                    sessionId: nanoid(),
                     name: req.body.name,
                     startLocation: session.startLocation,
                     endLocation: session.endLocation,
@@ -304,7 +304,7 @@ class SessionController {
             await sequelize.transaction( async (t) => {
                 // create new session
                 let joinSession = await Session.create({
-                    sessionId: shortid.generate(),
+                    sessionId: nanoid(),
                     name: name,
                     userId: req.user.id
                 });
