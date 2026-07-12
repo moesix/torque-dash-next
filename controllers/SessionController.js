@@ -23,18 +23,25 @@ class SessionController {
     }
     static async getOne(req, res) {
         try{
-            // Get session for user
+            // Get session for user (no eager Log load — summary is aggregated)
             let session = await Session.findOne({
                 where: { 
                     userId: req.user.id ,
                     id: req.params.sessionId
-                },
-                include: [ { model: Log, as: 'Logs' } ],
-                order: [[ {model: Log, as: 'Logs'}, 'timestamp', 'ASC' ]]
+                }
             });
             if(!session) return res.status(404).send('Resource not found');
-            await addStartEndData(session)
-            res.send(session);
+
+            // Single aggregate query for start/end + max speed/RPM.
+            const summaries = await aggregateSummaries([session.id]);
+            const s = summaries.get(session.id) || {};
+            const out = session.toJSON();
+            out.startDate = s.start || null;
+            out.endDate = s.end || null;
+            out.duration = formatDuration(s.start, s.end);
+            out.maxSpeed = (s.maxSpeed != null) ? s.maxSpeed : null;
+            out.maxRpm = (s.maxRpm != null) ? s.maxRpm : null;
+            res.json(out);
         }
         catch (err) {
             console.log(err);
@@ -49,15 +56,24 @@ class SessionController {
             });
             if(!user) return res.status(401);
 
-            // Get all sessions for user
+            // Get all sessions for user (no eager Log load)
             let sessions = await Session.findAll({
-                where: { userId: user.id },
-                // Include array of logs from session
-                include: [ { model: Log, as: 'Logs' } ],
-                order: [[ {model: Log, as: 'Logs'}, 'timestamp', 'ASC' ]]
+                where: { userId: user.id }
             });
-            await addStartEndData(sessions);
-            res.send(sessions);
+
+            // ONE grouped aggregate query across every session id — never per-session.
+            const summaries = await aggregateSummaries(sessions.map(s => s.id));
+            const out = sessions.map(session => {
+                const s = summaries.get(session.id) || {};
+                const json = session.toJSON();
+                json.startDate = s.start || null;
+                json.endDate = s.end || null;
+                json.duration = formatDuration(s.start, s.end);
+                json.maxSpeed = (s.maxSpeed != null) ? s.maxSpeed : null;
+                json.maxRpm = (s.maxRpm != null) ? s.maxRpm : null;
+                return json;
+            });
+            res.json(out);
         }
         catch (err) {
             console.log(err);
@@ -72,18 +88,25 @@ class SessionController {
             });
             if(!user) return res.sendStatus(404);
 
-            // Get session for user
+            // Get session for user (no eager Log load)
             let session = await Session.findOne({
                 where: { 
                     userId: user.id,
                     id: req.params.sessionId
-                },
-                // Include array of logs from session
-                include: [ { model: Log, as: 'Logs' } ],
-                order: [[ {model: Log, as: 'Logs'}, 'timestamp', 'ASC' ]]
+                }
             });
-            await addStartEndData(session);
-            res.send(session);
+            if(!session) return res.sendStatus(404);
+
+            // Single aggregate query for start/end + max speed/RPM.
+            const summaries = await aggregateSummaries([session.id]);
+            const s = summaries.get(session.id) || {};
+            const out = session.toJSON();
+            out.startDate = s.start || null;
+            out.endDate = s.end || null;
+            out.duration = formatDuration(s.start, s.end);
+            out.maxSpeed = (s.maxSpeed != null) ? s.maxSpeed : null;
+            out.maxRpm = (s.maxRpm != null) ? s.maxRpm : null;
+            res.json(out);
         }
         catch (err) {
             console.log(err);
@@ -98,15 +121,24 @@ class SessionController {
             });
             if(!user) return res.sendStatus(404);
 
-            // Get all sessions for user
+            // Get all sessions for user (no eager Log load)
             let sessions = await Session.findAll({
-                where: { userId: user.id },
-                // Include array of logs from session
-                include: [ { model: Log, as: 'Logs' } ],
-                order: [[ {model: Log, as: 'Logs'}, 'timestamp', 'ASC' ]]
+                where: { userId: user.id }
             });
-            await addStartEndData(sessions);
-            res.send(sessions);
+
+            // ONE grouped aggregate query across every session id — never per-session.
+            const summaries = await aggregateSummaries(sessions.map(s => s.id));
+            const out = sessions.map(session => {
+                const s = summaries.get(session.id) || {};
+                const json = session.toJSON();
+                json.startDate = s.start || null;
+                json.endDate = s.end || null;
+                json.duration = formatDuration(s.start, s.end);
+                json.maxSpeed = (s.maxSpeed != null) ? s.maxSpeed : null;
+                json.maxRpm = (s.maxRpm != null) ? s.maxRpm : null;
+                return json;
+            });
+            res.json(out);
         }
         catch (err) {
             console.log(err);
@@ -317,51 +349,46 @@ class SessionController {
     }
 }
 
-async function addStartEndData(sessions) {
-    if(Array.isArray(sessions)){
-        for (const session of sessions) {
-            const firstLog = await Log.findAll({
-                limit: 1,
-                where: {
-                    sessionId: session.id
-                },
-                order: [ [ 'timestamp', 'ASC' ]]
-                });
-            const lastLog = await Log.findAll({
-                limit: 1,
-                where: {
-                    sessionId: session.id
-                },
-                order: [ [ 'timestamp', 'DESC' ]],
-            });
-            let duration = moment.duration(lastLog[0].timestamp - firstLog[0].timestamp);
-    
-            session.dataValues.startDate = firstLog[0].timestamp;
-            session.dataValues.endDate = lastLog[0].timestamp;
-            session.dataValues.duration = duration.format('D [day] HH [hour] mm [minute] ss [second]');
-        }
-    }
-    else {
-        const firstLog = await Log.findAll({
-            limit: 1,
-            where: {
-                sessionId: sessions.id
-            },
-            order: [ [ 'timestamp', 'ASC' ]]
-            });
-        const lastLog = await Log.findAll({
-            limit: 1,
-            where: {
-                sessionId: sessions.id
-            },
-            order: [ [ 'timestamp', 'DESC' ]],
-        });
-        let duration = moment.duration(lastLog[0].timestamp - firstLog[0].timestamp);
+// Aggregated session summary (start/end time + max speed/RPM) computed with a
+// single GROUP BY query — replaces the legacy per-session summary that issued
+// two Log.findAll() queries per session and loaded every log row. Uses the real
+// Log columns (vehicle_speed, engine_rpm) confirmed against models/Log.js.
+async function aggregateSummaries(sessionIds) {
+    const map = new Map();
+    if (!sessionIds || sessionIds.length === 0) return map;
 
-        sessions.dataValues.startDate = firstLog[0].timestamp;
-        sessions.dataValues.endDate = lastLog[0].timestamp;
-        sessions.dataValues.duration = duration.format('D [day] HH [hour] mm [minute] ss [second]');
+    const rows = await Log.findAll({
+        where: { sessionId: sessionIds },
+        attributes: [
+            'sessionId',
+            [sequelize.fn('min', sequelize.col('timestamp')), 'start'],
+            [sequelize.fn('max', sequelize.col('timestamp')), 'end'],
+            [sequelize.fn('max', sequelize.col('vehicle_speed')), 'maxSpeed'],
+            [sequelize.fn('max', sequelize.col('engine_rpm')), 'maxRpm']
+        ],
+        group: ['sessionId']
+    });
+
+    for (const row of rows) {
+        const d = row.dataValues;
+        map.set(d.sessionId, {
+            start: d.start || null,
+            end: d.end || null,
+            maxSpeed: (d.maxSpeed != null) ? d.maxSpeed : null,
+            maxRpm: (d.maxRpm != null) ? d.maxRpm : null
+        });
     }
+    return map;
+}
+
+// Format a [start, end] pair into a compact human-readable duration string.
+// Returns null when either bound is missing. moment-duration-format (imported at
+// top) lets us trim leading/trailing zero units, e.g. "1h 02m 05s".
+function formatDuration(start, end) {
+    if (!start || !end) return null;
+    const ms = new Date(end) - new Date(start);
+    if (isNaN(ms) || ms < 0) return null;
+    return moment.duration(ms).format('d[d] h[h] m[m] s[s]', { trim: 'both' });
 }
 
 module.exports = SessionController;

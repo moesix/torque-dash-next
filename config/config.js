@@ -7,7 +7,11 @@ let config = {
         }
     },
     session: {
-        keys: process.env.SESSION_KEYS || ['6a5w4d65a4wd', 'a65w4d6aw4d89a4', '65f4b8b4szd8']
+        // SESSION_KEYS may be a comma-separated string (e.g. in Docker env) or
+        // left unset to use the dev defaults. cookie-session expects an array.
+        keys: process.env.SESSION_KEYS
+            ? process.env.SESSION_KEYS.split(',').map((k) => k.trim()).filter(Boolean)
+            : ['6a5w4d65a4wd', 'a65w4d6aw4d89a4', '65f4b8b4szd8']
     }
 };
 

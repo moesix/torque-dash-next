@@ -1,0 +1,44 @@
+services:
+  db:
+    image: timescale/timescaledb:2.15.3-pg16
+    environment:
+      POSTGRES_DB: torquedash
+      POSTGRES_USER: torquedash
+      POSTGRES_PASSWORD: torquedash
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U torquedash -d torquedash"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    ports:
+      - "5432:5432"
+
+  backend:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://torquedash:torquedash@db:5432/torquedash
+      PORT: "3000"
+      SESSION_KEYS: "please-change-this-in-production"
+      COOKIE_SECURE: "false"
+      COOKIE_SAMESITE: "lax"
+      UPLOAD_RATE_LIMIT_MAX: "600"
+      UPLOAD_RATE_LIMIT_WINDOW_MS: "60000"
+      # UPLOAD_API_TOKEN: "set-this-to-match-your-torque-app-bearer-token"
+      # DISABLE_REGISTRATION: "false"
+    ports:
+      - "3000:3000"
+
+  frontend:
+    build: ./apps/frontend
+    depends_on:
+      - backend
+    ports:
+      - "8080:80"
+
+volumes:
+  pgdata:
