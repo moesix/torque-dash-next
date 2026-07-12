@@ -107,6 +107,12 @@ In Torque Pro → *Settings → Web Preferences*:
 | `UPLOAD_RATE_LIMIT_MAX`    | `600`                                   | Max uploads per `UPLOAD_RATE_LIMIT_WINDOW_MS` per IP.                       |
 | `UPLOAD_RATE_LIMIT_WINDOW_MS` | `60000`                             | Upload rate-limit window in milliseconds.                                   |
 | `UPLOAD_API_TOKEN`        | _(unset)_                               | If set, requests with `Authorization: bearer <token>` bypass the rate limit.|
+| `AUTH_RATE_LIMIT_MAX`     | `10`                                    | Max login/register requests per window per IP.                              |
+| `AUTH_RATE_LIMIT_WINDOW_MS` | `60000`                               | Auth rate-limit window in milliseconds.                                     |
+| `WRITE_RATE_LIMIT_MAX`    | `30`                                    | Max authenticated mutations (PUT settings/forwardurls) per window per IP.   |
+| `WRITE_RATE_LIMIT_WINDOW_MS` | `60000`                              | Write rate-limit window in milliseconds.                                    |
+| `READ_RATE_LIMIT_MAX`     | `100`                                   | Max requests to all other `/api` routes per window per IP.                  |
+| `READ_RATE_LIMIT_WINDOW_MS` | `60000`                               | Global `/api` rate-limit window in milliseconds.                            |
 | `DISABLE_REGISTRATION`    | _(unset)_                               | If `true`, public sign-up is disabled (admin can still create accounts).    |
 
 ## License

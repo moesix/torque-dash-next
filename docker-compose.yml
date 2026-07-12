@@ -29,6 +29,12 @@ services:
       UPLOAD_RATE_LIMIT_MAX: "600"
       UPLOAD_RATE_LIMIT_WINDOW_MS: "60000"
       # UPLOAD_API_TOKEN: "set-this-to-match-your-torque-app-bearer-token"
+      AUTH_RATE_LIMIT_MAX: "10"
+      AUTH_RATE_LIMIT_WINDOW_MS: "60000"
+      WRITE_RATE_LIMIT_MAX: "30"
+      WRITE_RATE_LIMIT_WINDOW_MS: "60000"
+      READ_RATE_LIMIT_MAX: "100"
+      READ_RATE_LIMIT_WINDOW_MS: "60000"
       # DISABLE_REGISTRATION: "false"
     ports:
       - "3000:3000"

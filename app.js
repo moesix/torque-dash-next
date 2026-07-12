@@ -2,9 +2,9 @@
 const express = require('express');
 const app = express();
 // Trust one proxy hop (Nginx / Vite dev proxy) so req.ip reflects the real
-// client IP from X-Forwarded-For. Required for the rate limiter in
-// middleware/rateLimit.js, which keys buckets on req.ip — otherwise every
-// client behind the proxy collapses into a single shared bucket.
+// client IP from X-Forwarded-For. Required for the express-rate-limit tiers in
+// routes/api.js, which key buckets on req.ip — otherwise every client behind
+// the proxy collapses into a single shared bucket.
 app.set('trust proxy', 1);
 const cors = require('cors');
 // const logger = require('morgan');
