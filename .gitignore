@@ -1,3 +1,8 @@
 node_modules/
 .eslintrc.js
 .vscode/
+AGENTS.md
+# Local agent/tooling state — not part of the project source.
+.codegraph/
+.claude/
+CLAUDE.md

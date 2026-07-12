@@ -40,7 +40,7 @@ module.exports = (sequelize, DataTypes) => {
         const schema = {
             email: Joi.string().required().email({ minDomainAtoms: 2 }).error(new Error('Please provide a valid email.')),
             password: Joi.string().min(8).required(),
-            confirmPassword: Joi.string().valid(Joi.ref('password')).error(new Error('Passwords do not match.'))
+            confirmPassword: Joi.string().valid(Joi.ref('password')).optional().error(new Error('Passwords do not match.'))
         }
         return Joi.validate(user, schema);
     }

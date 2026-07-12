@@ -1,13 +1,28 @@
 const User = require('../models').User;
+const Settings = require('../models').Settings;
 const passport = require('passport');
 const shortid = require('shortid');
 
 class UserController {
     static async login(req, res, next) {
-        passport.authenticate('local', {
-            successRedirect: '/',
-            failureRedirect: '/login',
-            failureFlash: true,
+        // Routes are mounted under /api, so req.path is relative to the mount.
+        // Use originalUrl to detect API requests and answer with JSON.
+        const isApi = req.originalUrl.startsWith('/api');
+        passport.authenticate('local', (err, user, info) => {
+            if (err) return next(err);
+            if (!user) {
+                if (isApi) {
+                    return res.status(401).json({ error: (info && info.message) || 'Invalid credentials' });
+                }
+                return res.redirect('/login');
+            }
+            req.logIn(user, (loginErr) => {
+                if (loginErr) return next(loginErr);
+                if (isApi) {
+                    return res.json({ ok: true });
+                }
+                return res.redirect('/');
+            });
         })(req, res, next);
     }
     static logout(req, res) {
@@ -17,21 +32,50 @@ class UserController {
     }
     static async register(req, res) {
         try {
+            // Hard-disable via env always wins (deploy-time kill switch).
+            if (process.env.DISABLE_REGISTRATION === 'true') {
+                if (req.originalUrl.startsWith('/api')) {
+                    return res.status(403).json({ error: 'Registration is disabled.' });
+                }
+                return res.render('register', { error: 'Registration is disabled.' });
+            }
+            // Runtime toggle stored in the singleton Settings row.
+            const settings = await Settings.getSingleton();
+            if (settings.disableRegistration) {
+                if (req.originalUrl.startsWith('/api')) {
+                    return res.status(403).json({ error: 'Registration is currently disabled.' });
+                }
+                return res.render('register', { error: 'Registration is currently disabled.' });
+            }
+
             // Get userdata from request
             let { email, password } = req.body;
 
             // Validate if user data ok
             const { error } = User.validate(req.body);
-            if (error) return res.render('register', { error: error.message });
+            if (error) {
+                if (req.originalUrl.startsWith('/api')) {
+                    return res.status(400).json({ error: error.message });
+                }
+                return res.render('register', { error: error.message });
+            }
 
             // Check if user is already registered
             let user = await User.findOne({ where: { email: email } });
-            if (user) return res.render('register', { error: 'This email is already registered' });
+            if (user) {
+                if (req.originalUrl.startsWith('/api')) {
+                    return res.status(400).json({ error: 'This email is already registered' });
+                }
+                return res.render('register', { error: 'This email is already registered' });
+            }
 
             // Save new user to db
             user = await User.create({ email: email, password: password });
 
             // Send response
+            if (req.originalUrl.startsWith('/api')) {
+                return res.status(201).json({ ok: true });
+            }
             req.flash('success', 'Account created. You may now log in.');
             return res.redirect('/login');
 
@@ -106,6 +150,38 @@ class UserController {
             res.sendStatus(200);
         }
         catch(err) {
+            console.log(err);
+            res.sendStatus(500);
+        }
+    }
+    // Public read of site settings (the register/login pages need this to
+    // decide whether to surface the signup form). The deploy-time env
+    // kill-switch always wins over the runtime toggle, so we OR it in here.
+    static async getSettings(req, res) {
+        try {
+            const settings = await Settings.getSingleton();
+            const envDisabled = process.env.DISABLE_REGISTRATION === 'true';
+            res.json({ disableRegistration: settings.disableRegistration || envDisabled });
+        } catch (err) {
+            console.log(err);
+            res.sendStatus(500);
+        }
+    }
+    // Authenticated toggle of site settings. NOTE: the app is single-operator,
+    // so ANY authenticated user is treated as an operator and may flip this.
+    // The deploy-time DISABLE_REGISTRATION env var always wins over this toggle.
+    static async updateSettings(req, res) {
+        try {
+            const { disableRegistration } = req.body;
+            if (typeof disableRegistration !== 'boolean') {
+                return res.status(400).json({ error: 'disableRegistration must be a boolean.' });
+            }
+            if (process.env.DISABLE_REGISTRATION === 'true') {
+                return res.status(403).json({ error: 'Registration is disabled by configuration.' });
+            }
+            await Settings.upsert({ id: 1, disableRegistration });
+            res.json({ disableRegistration });
+        } catch (err) {
             console.log(err);
             res.sendStatus(500);
         }

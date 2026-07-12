@@ -21,6 +21,16 @@ module.exports = (sequelize, DataTypes) => {
                 values = util.renameKeys(pidNames, values);
                 return values;
               },
+        },
+        // Promoted hot columns (Tier-2 TimescaleDB optimization).
+        // `paranoid` is intentionally NOT added — Log keeps no deletedAt column.
+        engine_rpm: {
+            type: DataTypes.FLOAT,
+            allowNull: true
+        },
+        vehicle_speed: {
+            type: DataTypes.FLOAT,
+            allowNull: true
         }
     }, {});
 
