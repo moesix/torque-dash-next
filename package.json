@@ -1,38 +1,36 @@
 {
-  "name": "torque-dash",
+  "name": "torque-dash-next",
   "version": "1.0.0",
-  "description": "",
+  "description": "Modernization of torque-dash: Express/Sequelize/Postgres + TimescaleDB + React SPA",
   "main": "app.js",
   "scripts": {
     "start": "node app.js",
-    "lint": "./node_modules/.bin/eslint **/*.js",
+    "lint": "eslint .",
     "test": "jest"
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
+  "license": "MIT",
   "devDependencies": {
-    "eslint": "^5.14.1",
-    "morgan": "^1.9.1",
-    "nodemon": "^1.18.10"
+    "eslint": "^8.57.1",
+    "nodemon": "^3.1.7"
   },
   "dependencies": {
-    "bcrypt": "^3.0.4",
+    "bcrypt": "^6.0.0",
     "connect-flash": "^0.1.1",
-    "cookie-session": "^1.3.3",
+    "cookie-session": "^2.1.0",
     "cors": "^2.8.5",
-    "express": "^4.16.4",
-    "express-handlebars": "^3.0.2",
-    "express-session": "^1.15.6",
-    "joi": "^14.3.1",
-    "lodash": "^4.17.13",
-    "moment": "^2.24.0",
-    "moment-duration-format": "^2.2.2",
-    "passport": "^0.4.0",
+    "express": "^4.21.2",
+    "express-handlebars": "^6.0.7",
+    "express-session": "^1.18.1",
+    "joi": "^17.13.3",
+    "lodash": "^4.17.21",
+    "moment": "^2.30.1",
+    "moment-duration-format": "^2.3.2",
+    "nanoid": "^3.3.7",
+    "passport": "^0.7.0",
     "passport-local": "^1.0.0",
-    "pg": "^7.9.0",
-    "request": "^2.88.0",
-    "sequelize": "^5.4.0",
-    "shortid": "^2.2.14"
+    "pg": "^8.13.1",
+    "sequelize": "^6.37.8"
   }
 }
