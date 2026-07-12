@@ -36,8 +36,7 @@ app.use('/api', cors(corsOpts));
 app.use('/api', csrfGuard(corsOpts.origin));
 app.use(express.urlencoded({ extended: true }));
 // app.use(logger('combined'));
-// codeql[js/missing-csrf-protection] mitigated by same-origin Origin check in middleware/csrfGuard.js
-app.use(session({
+app.use(session({ // codeql[js/missing-csrf-protection] mitigated by same-origin Origin check in middleware/csrfGuard.js
     keys: config.session.keys,
     maxAge: 24 * 60 * 60 * 1000,
     cookie: {
