@@ -103,7 +103,7 @@ In Torque Pro → *Settings → Web Preferences*:
 | `SESSION_KEYS`            | dev defaults                             | Comma-separated cookie-signing keys. **Set this in production.**            |
 | `COOKIE_SECURE`           | `false`                                 | `true` to set `Secure` on session cookies (requires HTTPS).                 |
 | `COOKIE_SAMESITE`         | `lax`                                   | `SameSite` policy for session cookies.                                      |
-| `CORS_ORIGINS`            | _(empty = same-origin only)_            | Comma-separated allowed origins for cross-origin API access.                 |
+| `CORS_ORIGINS`           | _(empty = same-origin only)_            | Comma-separated allowed origins for cross-origin API access. Also serves as the CSRF trust list — state-changing requests from any other origin are rejected (see `middleware/csrfGuard.js`). |
 | `UPLOAD_RATE_LIMIT_MAX`    | `600`                                   | Max uploads per `UPLOAD_RATE_LIMIT_WINDOW_MS` per IP.                       |
 | `UPLOAD_RATE_LIMIT_WINDOW_MS` | `60000`                             | Upload rate-limit window in milliseconds.                                   |
 | `UPLOAD_API_TOKEN`        | _(unset)_                               | If set, requests with `Authorization: bearer <token>` bypass the rate limit.|
