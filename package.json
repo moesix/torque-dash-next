@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node app.js",
     "lint": "eslint .",
-    "test": "jest"
+    "test": "node --test"
   },
   "keywords": [],
   "author": "",
@@ -21,6 +21,7 @@
     "cookie-session": "^2.1.0",
     "cors": "^2.8.5",
     "express": "^4.21.2",
+    "express-rate-limit": "^6.7.1",
     "express-session": "^1.18.1",
     "joi": "^17.13.3",
     "lodash": "^4.17.21",
