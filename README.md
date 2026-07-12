@@ -18,7 +18,7 @@ map, session replays, and per-session summaries.
 - **Docker-first deployment** — one `docker compose up` and you're running.
 - **Time-series storage** — TimescaleDB hypertable + continuous aggregate for fast
   per-session queries over large log volumes.
-- **React dashboard** — live vehicle view, route map, replay, and a settings page.
+- **React dashboard** — live vehicle view, route map (OpenStreetMap tiles, no API key), replay, and a settings page.
 - **Controlled ingestion** — email-gated uploads with an optional API-token
   (`Bearer`) bypass for Torque Pro over HTTPS.
 - **Operational guards** — rate-limited upload endpoint, togglable open
