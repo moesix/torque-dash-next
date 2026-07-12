@@ -1,139 +1,116 @@
-# TorqueDashNext
+# torque-dash-next
 
-> Web dashboard + logging server for the [Torque Pro](https://play.google.com/store/apps/details?id=org.prowl.torque&hl=en) Android OBD2 app.
+A modern, self-hostable dashboard for [Torque Pro](https://torque-bhp.com/) vehicle telemetry.
 
-TorqueDashNext is a **Tier-2 modernization** of the archived OSS project
-[`torque-dash`](https://github.com/davekrejci/torque-dash). It keeps the
-original Express + Sequelize + PostgreSQL server and all of its features
-(auth, share-IDs, `forwardUrls`, session copy/join/filter/cut/rename/addLocation)
-while hardening the data layer with **TimescaleDB**, optimizing the ingestion
-path, paginating session endpoints, and replacing the old jQuery/Bootstrap
-frontend with a **React/Vite SPA**.
+> This project is a **modernisation of the original developer's work**,
+> [torque-dash](https://github.com/davekrejci/torque-dash) by **David Krejci**
+> (MIT licensed). The original project is **not** archived — this repository simply
+> carries the idea forward on a newer stack. All credit and attribution belong to
+> the original author; see [NOTICE](./NOTICE).
 
----
+[Torque Pro](https://torque-bhp.com/) (Android) streams live OBD-II data from your
+vehicle. `torque-dash-next` receives it over HTTPS, stores it in a time-series
+database (TimescaleDB), and renders it in a React dashboard: live gauges, a route
+map, session replays, and per-session summaries.
 
-## Modernized Stack
+## Features
 
-**Backend** (repository root)
-- Node.js + **Express 4** (server-rendered with Express-Handlebars for legacy views)
-- **Sequelize 5** ORM over **PostgreSQL**, upgraded to a **TimescaleDB** hypertable (`Logs`)
-- Auth: Passport + `passport-local`, `cookie-session`, `bcrypt`, `connect-flash`
-- Validation: **Joi**
-- Logging: Morgan
-- Tests: Jest · Lint: ESLint
+- **Docker-first deployment** — one `docker compose up` and you're running.
+- **Time-series storage** — TimescaleDB hypertable + continuous aggregate for fast
+  per-session queries over large log volumes.
+- **React dashboard** — live vehicle view, route map, replay, and a settings page.
+- **Controlled ingestion** — email-gated uploads with an optional API-token
+  (`Bearer`) bypass for Torque Pro over HTTPS.
+- **Operational guards** — rate-limited upload endpoint, togglable open
+  registration, and environment-driven configuration.
 
-**Frontend** (`apps/frontend/`)
-- **React 18 + TypeScript + Vite**
-- **Tailwind CSS** + **Tremor** (UI components)
-- **ECharts** (`echarts/core`) for synced time-series charts
-- **react-leaflet** for the GPS track map
-- **TanStack Query** for data fetching · **zustand** for the playback cursor store
+## Architecture
 
----
+| Layer     | Stack                                                        |
+|-----------|-------------------------------------------------------------|
+| Backend   | Node.js + Express 4, Sequelize 5, PostgreSQL / TimescaleDB |
+| Frontend  | React 18 + Vite + TypeScript, ECharts, Leaflet             |
+| Deploy    | Docker Compose: `db` (TimescaleDB) + `backend` + `frontend` (nginx) |
 
-## Quickstart
+## Quick start (Docker — recommended)
 
-### 1. Prerequisites
-- Node.js 18+ and npm
-- A **PostgreSQL** instance with the **TimescaleDB** extension installed
-- (Optional) the `torque-dash-next` frontend build in `apps/frontend/dist`
+```bash
+git clone https://github.com/<you>/torque-dash-next.git
+cd torque-dash-next
 
-### 2. Install
+# (optional) generate a strong session key + upload token
+export SESSION_KEYS="$(openssl rand -hex 24)"
+export UPLOAD_API_TOKEN="$(openssl rand -hex 24)"
 
-Backend (repository root):
-```sh
-npm install
+docker compose up -d --build
 ```
 
-Frontend (separate workspace):
-```sh
+Then open **http://localhost:8080**.
+
+- On first boot the backend creates the database tables, turns the `Logs` table
+  into a TimescaleDB hypertable, and seeds the `Settings` row. Data is persisted
+  in the `pgdata` volume.
+- Register the first account at the sign-up page, then sign in.
+- For Torque Pro uploads, set `UPLOAD_API_TOKEN` (below) and point the app at
+  `https://<host>/api/upload` with the matching bearer token.
+
+> **Production note:** change `SESSION_KEYS` and set `COOKIE_SECURE=true` behind
+> a TLS-terminating proxy. The compose defaults are for local/http use.
+
+## Manual setup (without Docker)
+
+**Backend**
+
+```bash
+npm install
+createdb torquedash
+export DATABASE_URL=postgres://user:pass@localhost:5432/torquedash
+node scripts/migrate.js      # creates tables + hypertable + Settings row
+npm start                    # or: node app.js
+```
+
+**Frontend**
+
+```bash
 cd apps/frontend
 npm install
+npm run dev                  # dev server with HMR, proxies /api -> http://localhost:3000
+# production build:
+npm run build                # outputs apps/frontend/dist
 ```
 
-### 3. Set environment variables
+For a production SPA, serve `apps/frontend/dist` behind a reverse proxy that
+forwards `/api` to the backend (the included `apps/frontend/nginx.conf` does this).
 
-Create a `.env` (or export) at the repo root. Minimum needed:
+## Configure Torque Pro
 
-| Variable        | Purpose                                                        |
-| --------------- | -------------------------------------------------------------- |
-| `DATABASE_URL`  | Postgres/TimescaleDB connection string                         |
-| `CORS_ORIGINS`  | Comma-separated SPA origins allowed to call `/api` (with cookies) |
-| `COOKIE_SECURE` | `true` in production (sets `sameSite:none; secure` on cookie)  |
-| `NODE_ENV`      | `production` disables `sequelize.sync()` (migrations are source of truth) |
-| `PORT`          | Backend port (default `3000`)                                  |
+In Torque Pro → *Settings → Web Preferences*:
 
-See [`docs/development.md`](docs/development.md) for the full env-var table.
+- **Server URL:** `https://<your-host>/api/upload`
+- **Email address:** the email you registered with (used to link uploads to your
+  account), or
+- **Broadcast as HTTP** with a header `Authorization: bearer <UPLOAD_API_TOKEN>`
+  (matches the `UPLOAD_API_TOKEN` env var) — lets you upload without exposing an
+  email and works through HTTPS tunnels.
 
-### 4. Run the database migration
+## Configuration (environment variables)
 
-`scripts/migrate.js` applies `infra/timescale/log_hypertable.sql` (creates the
-`Logs` hypertable, promoted columns, index, and the `log_1min` continuous
-aggregate). It must be run against a **TimescaleDB**-enabled database:
+| Variable                   | Default                                  | Description                                                                 |
+|----------------------------|------------------------------------------|-----------------------------------------------------------------------------|
+| `DATABASE_URL`            | `postgres://postgres:heslo@localhost:5432/torquedash` | PostgreSQL/TimescaleDB connection string.                       |
+| `PORT`                    | `3000`                                  | Backend HTTP port.                                                          |
+| `NODE_ENV`                | _(unset)_                               | Set to `production` to skip `sequelize.sync()` (use migrations instead).    |
+| `SESSION_KEYS`            | dev defaults                             | Comma-separated cookie-signing keys. **Set this in production.**            |
+| `COOKIE_SECURE`           | `false`                                 | `true` to set `Secure` on session cookies (requires HTTPS).                 |
+| `COOKIE_SAMESITE`         | `lax`                                   | `SameSite` policy for session cookies.                                      |
+| `CORS_ORIGINS`            | _(empty = same-origin only)_            | Comma-separated allowed origins for cross-origin API access.                 |
+| `UPLOAD_RATE_LIMIT_MAX`    | `600`                                   | Max uploads per `UPLOAD_RATE_LIMIT_WINDOW_MS` per IP.                       |
+| `UPLOAD_RATE_LIMIT_WINDOW_MS` | `60000`                             | Upload rate-limit window in milliseconds.                                   |
+| `UPLOAD_API_TOKEN`        | _(unset)_                               | If set, requests with `Authorization: bearer <token>` bypass the rate limit.|
+| `DISABLE_REGISTRATION`    | _(unset)_                               | If `true`, public sign-up is disabled (admin can still create accounts).    |
 
-```sh
-node scripts/migrate.js
-```
+## License
 
-### 5. Start the backend
-
-```sh
-node app.js
-# or: npm start
-```
-
-### 6. Start the frontend (dev)
-
-In `apps/frontend/`, Vite serves the SPA and proxies `/api` (including the
-native `/api/upload` ingestion endpoint) to the backend on `:3000`:
-
-```sh
-cd apps/frontend
-npm run dev
-```
-
-Open the Vite URL (default `http://localhost:5173`).
-
-### 7. Point Torque Pro at the ingest URL
-
-1. Register an account in TorqueDashNext (via the SPA).
-2. In **Torque Pro → Settings → User email**, set the same email as your account.
-3. In **Torque Pro → Settings → Webserver URL**, set:
-   ```
-   https://<your-host>/api/upload
-   ```
-   Torque Pro sends data as `GET /api/upload?eml=<email>&session=...&time=...&kff1005=...&kff1006=...&k4=...&k5=...`.
-   Uploads from an **unknown email are rejected with `403`** and are never
-   buffered or forwarded.
-
----
-
-## Fork & License
-
-TorqueDashNext is a fork of [`torque-dash`](https://github.com/davekrejci/torque-dash),
-originally created by **David Krejci** and distributed under the **MIT License**.
-
-- This project is distributed under the **MIT License** — see [`LICENSE`](LICENSE).
-- The upstream `LICENSE.txt` (David Krejci's original MIT notice) is preserved at the repo root.
-- Attribution to the original project is recorded in [`NOTICE`](NOTICE).
-
-> ⚠️ Note: `package.json` at the repo root currently declares `"license": "ISC"`
-> (a legacy manifest value). The **actual** license — per `LICENSE.txt` and the
-> new `LICENSE` — is **MIT**. This discrepancy should be corrected in `package.json`.
-
----
-
-## Documentation
-
-- [System architecture](docs/architecture.md) — components, data flow, ingestion & replay internals.
-- [Development & contributing](docs/development.md) — prerequisites, env vars, running, and the **Known Issues / Pre-MVP Fixes** list.
-
----
-
-## Status
-
-MVP implementation is complete **pending the blocker fixes listed in
-[`docs/development.md`](docs/development.md#known-issues--pre-mvp-fixes)** (the
-backend auth contract is currently broken for the SPA). The frontend is verified
-via `vite build` / `tsc`; the backend is syntax-checked via `node -c`. The system
-has **not yet been run end-to-end against a live TimescaleDB instance**.
+MIT — see [LICENSE](./LICENSE). This project is a modernization of, and is
+grateful for, the original [torque-dash](https://github.com/davekrejci/torque-dash)
+by David Krejci. Attribution is recorded in [NOTICE](./NOTICE).

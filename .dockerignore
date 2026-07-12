@@ -1,0 +1,11 @@
+node_modules
+.git
+.codegraph
+.claude
+CLAUDE.md
+dist
+apps/frontend/node_modules
+apps/frontend/dist
+npm-debug.log
+*.log
+.DS_Store
