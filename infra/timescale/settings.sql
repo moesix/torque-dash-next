@@ -10,5 +10,5 @@ CREATE TABLE IF NOT EXISTS "Settings" (
 );
 
 -- Seed the singleton row so GET /api/settings never 404s before first toggle.
-INSERT INTO "Settings" (id, "disableRegistration") VALUES (1, false)
+INSERT INTO "Settings" (id, "disableRegistration", "createdAt", "updatedAt") VALUES (1, false, NOW(), NOW())
     ON CONFLICT (id) DO NOTHING;
