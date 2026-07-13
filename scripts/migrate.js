@@ -24,8 +24,22 @@ function isBenignError(err) {
         /does not exist/i.test(msg) ||
         /duplicate.*constraint/i.test(msg) ||
         /multiple primary keys/i.test(msg) ||
-        /relation "log_1min" already exists/i.test(msg)
+        /relation "log_1min" already exists/i.test(msg) ||
+        /already a hypertable/i.test(msg)
     );
+}
+
+/**
+ * Strip SQL comments so that semicolons inside /* ... *​/ or -- comments
+ * don't fragment the naive ;-split below.  Block comments are stripped
+ * first to avoid stripping line-comment syntax that appears inside them.
+ */
+function stripComments(sql) {
+    // Strip /* ... */ block comments (non-greedy, handles multi-line)
+    sql = sql.replace(/\/\*[\s\S]*?\*\//g, '');
+    // Strip -- line comments to end of line
+    sql = sql.replace(/--[^\n]*/g, '');
+    return sql;
 }
 
 // Load every *.sql file in the migration directory, in lexicographic order so
@@ -38,7 +52,8 @@ function loadStatements() {
     const all = [];
     for (const file of files) {
         const sql = fs.readFileSync(path.join(SQL_DIR, file), 'utf8');
-        const stmts = sql
+        const clean = stripComments(sql);
+        const stmts = clean
             .split(';')
             .map((s) => s.trim())
             .filter((s) => s.length > 0)
