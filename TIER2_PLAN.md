@@ -17,7 +17,7 @@
 - `Log` has no explicit `id`, so Sequelize auto-creates `id SERIAL PRIMARY KEY`.
 - GPS arrives as `kff1005` (lon) / `kff1006` (lat); non-GPS uploads are currently dropped.
 - `forwardUrls` are server-fetched with **zero URL validation** (SSRF surface).
-- `app.js` uses `cors()` (wildcard, no credentials) and `cookie-session` with **no `sameSite`/`secure`**.
+- `app.js` uses `cors()` (wildcard, no credentials) and `express-session` (with connect-pg-simple store) with **no `sameSite`/`secure`**.
 - `app.js` calls `sequelize.sync()` on startup.
 
 ## 1. Blockers fixed (must hold during implementation)
@@ -87,7 +87,7 @@ Backfill script (one-off): `UPDATE "Logs" SET "engine_rpm" = NULLIF(values->>'k4
 ## 4. Phase C — API
 - **Disable `sequelize.sync()` in production** (`if (process.env.NODE_ENV !== 'production') await sequelize.sync();`); migrations are source of truth.
 - **CORS**: replace global `cors()` with an explicit allowlist + `credentials: true` scoped to `/api` (the Torque native app hitting `/api/upload` sends no Origin/cookie, so CORS is irrelevant to it).
-- **Cookie**: `cookieSession({ ..., cookie: { httpOnly: true, sameSite: process.env.COOKIE_SECURE === 'true' ? 'none' : 'lax', secure: process.env.COOKIE_SECURE === 'true' } })`.
+- **Cookie**: `express-session` with `connect-pg-simple` store (`session({ store: new PgSession({ pool }), secret: ..., cookie: { httpOnly: true, sameSite: process.env.COOKIE_SECURE === 'true' ? 'none' : 'lax', secure: process.env.COOKIE_SECURE === 'true' } })`).
 - **`GET /api/sessions/:id/telemetry?from&to&limit`** (`TelemetryController.range`): enforce `userId` ownership (mirror `SessionController.getOne`); support `?shareId=` for shared sessions; `Log.findAll` with `Op.between`, capped `limit` (≤10000), ordered ASC, limited attributes.
 - **`GET /health`** for probes.
 - Add `express-rate-limit` on `/api/upload` and `/api/users/*`.

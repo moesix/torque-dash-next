@@ -26,20 +26,25 @@
 // CORS allowlist.
 //
 // CodeQL's js/missing-csrf-protection query only recognizes dedicated CSRF
-// libraries, so the alert is suppressed at the cookie-session registration in
+// libraries, so the alert is suppressed at the express-session registration in
 // app.js with this justification.
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
-function csrfGuard(allowedOrigins) {
+function csrfGuard({ allowedOrigins = [], publicOrigin } = {}) {
     const allow = new Set(allowedOrigins || []);
 
     return function (req, res, next) {
         // Safe methods do not change state and are not CSRF-relevant.
         if (SAFE_METHODS.has(req.method)) return next();
 
-        // req.protocol reflects X-Forwarded-Proto (app.set('trust proxy', 1)).
-        const expected = `${req.protocol}://${req.headers.host}`;
+        // When publicOrigin is provided, use it as the expected origin instead of
+        // reconstructing from req.protocol + req.headers.host. This handles the
+        // case where nginx forwards X-Forwarded-Proto as http while the real
+        // browser-visible scheme is https (e.g. behind Cloudflare).
+        const expected = publicOrigin
+            ? new URL(publicOrigin.replace(/\/+$/, '')).origin
+            : `${req.protocol}://${req.headers.host}`;
         const deny = () =>
             res.status(403).json({ error: 'Cross-origin request forbidden.' });
 

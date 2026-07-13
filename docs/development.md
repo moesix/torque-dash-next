@@ -24,8 +24,8 @@ the React/Vite frontend (`apps/frontend/`).
 ```sh
 npm install
 ```
-Installs Express 4, Sequelize 5, `pg`, Passport, Joi, bcrypt, cookie-session,
-cors, connect-flash, lodash, moment, shortid, request, plus dev tooling
+Installs Express 4, Sequelize 6, `pg`, Passport, Joi, bcrypt, express-session,
+connect-pg-simple, cors, connect-flash, lodash, moment, shortid, request, plus dev tooling
 (eslint, morgan, nodemon).
 
 ### Frontend (`apps/frontend/`)
@@ -49,7 +49,8 @@ Set these at the backend repo root (`.env` or exported in the shell).
 | `COOKIE_SECURE` | prod | unset (`lax`) | Set `true` in production to set `sameSite:none; secure` on the session cookie (required for cross-origin SPA auth). Dev (same-origin) keeps `lax` and works without HTTPS. |
 | `NODE_ENV` | yes | unset | `production` **disables `sequelize.sync()`** so the TimescaleDB migration is the source of truth. Any other value runs `sequelize.sync()` on boot. |
 | `PORT` | no | `3000` | Backend listen port. |
-| `SESSION_KEYS` | no | hardcoded dev keys | Comma/array of cookie-session signing keys. **Override in production.** |
+| `SESSION_KEYS` | no | hardcoded dev keys | express-session secrets (array accepted via comma-separated string). **Override in production.** |
+| `PUBLIC_ORIGIN` | no | unset | Optional. Overrides the expected CSRF origin. Set to the browser-visible origin (e.g. `https://app.example.com`) when nginx terminates HTTPS but forwards HTTP to the backend, so `X-Forwarded-Proto` doesn't mislead the origin check. |
 | `DISABLE_SYNC` | planned | — | Intended as an explicit kill-switch for `sequelize.sync()`. **Not yet wired** — today the sync gate is solely `NODE_ENV !== 'production'`. (Listed for forward compatibility; do not rely on it yet.) |
 | `UPLOAD_RATE_LIMIT_MAX` | no | `600` | Max `/upload` requests per `UPLOAD_RATE_LIMIT_WINDOW_MS` window, per client IP. Raised from the original 60/min to absorb Torque reconnect bursts. |
 | `UPLOAD_RATE_LIMIT_WINDOW_MS` | no | `60000` | Window length (ms) for the `/upload` rate limiter. |
@@ -74,7 +75,8 @@ It:
 1. Loads the SQL and splits it into individual statements.
 2. Runs each statement via `pg`; benign "already exists" / "does not exist"
    errors are tolerated (idempotent re-runs).
-3. Creates the `Logs` hypertable, promoted columns, index, and the `log_1min`
+3. Creates the `Logs` hypertable, promoted columns, the unique index on id (with
+   the `timestamp` partition column — required by TimescaleDB), and the `log_1min`
    continuous aggregate.
 
 Run this against a **TimescaleDB-enabled** database (the `timescaledb` extension
@@ -151,6 +153,11 @@ blockers are resolved and re-reviewed as PASS:
   `aggregateSummaries()` (one `GROUP BY` per request) and return lightweight
   `startDate`/`endDate`/`duration`/`maxSpeed`/`maxRpm`. Paged telemetry stays
   on `GET /api/sessions/:id/telemetry`.
+- ✅ **CSRF protection added:** `middleware/csrfGuard.js` validates the `Origin`
+  header on all state-changing `/api` requests against the expected origin and
+  the `CORS_ORIGINS` allowlist (OWASP-recommended for JSON SPAs). The `publicOrigin`
+  option handles deployments where nginx terminates HTTPS but forwards HTTP to
+  the backend.
 
 ### 🟡 MEDIUM
 
@@ -167,11 +174,6 @@ blockers are resolved and re-reviewed as PASS:
   hard cap on live buffer growth between flushes.
   **Fix:** add a flush **mutex** and a max live-buffer cap (drop/backpressure
   beyond a threshold).
-- **No CSRF protection on cookie-auth mutating routes.** Production uses
-  `sameSite:none` cross-origin cookies, which are vulnerable to CSRF on
-  state-changing requests (`PATCH`/`POST`/`PUT`/`DELETE`).
-  **Fix:** add a double-submit CSRF token (or same-site custom header check)
-  validated server-side for authenticated mutating routes.
 - **Torque PID keys `k4`/`k5` are hardcoded.** `UploadController` promotes
   `values.k4` → `engine_rpm` and `values.k5` → `vehicle_speed`, but PIDs are
   user-configurable. A `torque-keys` mapping table should drive which PIDs map

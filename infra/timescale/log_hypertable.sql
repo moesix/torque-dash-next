@@ -2,8 +2,9 @@ CREATE EXTENSION IF NOT EXISTS timescaledb;
 
 -- 1. Restructure PK: time column must be in the PK.
 --    Keep `id` globally unique for id-based ops (filter/cut/join).
+--    NOTE: the unique index on id is created AFTER create_hypertable below
+--    because TimescaleDB requires the partition column in every unique index.
 ALTER TABLE "Logs" DROP CONSTRAINT "Logs_pkey";
-CREATE UNIQUE INDEX logs_id_uidx ON "Logs"(id);
 ALTER TABLE "Logs" ADD PRIMARY KEY ("sessionId", timestamp);
 
 -- 2. Explicit dedupe constraint (helps bulkCreate ON CONFLICT + clarity)
@@ -18,10 +19,15 @@ SELECT create_hypertable('"Logs"', 'timestamp',
        chunk_time_interval => INTERVAL '1 day',
        migrate_data => true);
 
--- 5. Index for the dominant access pattern
+-- 5. Partition-aware unique index on id (includes partition column timestamp)
+--    Moved AFTER create_hypertable per TimescaleDB requirement that every
+--    unique index must contain the partitioning column.
+CREATE UNIQUE INDEX IF NOT EXISTS logs_id_uidx ON "Logs"(id, timestamp);
+
+-- 6. Index for the dominant access pattern
 CREATE INDEX IF NOT EXISTS logs_session_time_idx ON "Logs" ("sessionId", timestamp DESC);
 
--- 6. Continuous aggregate over promoted columns (safe; backfilled)
+-- 7. Continuous aggregate over promoted columns (safe; backfilled)
 CREATE MATERIALIZED VIEW IF NOT EXISTS log_1min
 WITH (timescaledb.continuous) AS
 SELECT "sessionId",
