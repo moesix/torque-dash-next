@@ -20,6 +20,8 @@ const PgSession = require('connect-pg-simple')(session);
 const passport = require('passport');
 const csrfGuard = require('./middleware/csrfGuard');
 const User = require('./models').User;
+const runtime = require('./config/runtime');
+const models = require('./models');
 require('./config/passport')(passport);
 
 // CORS: explicit allowlist + credentials, scoped to /api only.
@@ -39,7 +41,7 @@ app.use(express.urlencoded({ extended: true }));
 // app.use(logger('combined'));
 // codeql[js/missing-csrf-protection] mitigated by same-origin Origin check in middleware/csrfGuard.js
 app.use(session({
-    store: new PgSession({ conString: config.db.uri }),
+    store: new PgSession({ conString: config.db.uri, createTableIfMissing: true }),
     secret: config.session.keys,
     resave: false,
     saveUninitialized: false,
@@ -84,6 +86,8 @@ async function bootstrap() {
         } else {
             console.log('Production: skipping sequelize.sync() (migrations are source of truth).');
         }
+        // Load upload API token from env or DB into the runtime holder
+        await runtime.initUploadApiToken(models);
         // Start server
         app.listen(config.port, () => console.log(`Listening on port ${config.port}`));
     } catch (err) {

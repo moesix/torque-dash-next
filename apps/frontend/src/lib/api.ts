@@ -1,4 +1,10 @@
-import type { Session, TelemetryFrame, RawTelemetryRow, Settings } from './types';
+import type {
+  Session,
+  TelemetryFrame,
+  RawTelemetryRow,
+  Settings,
+  GenerateUploadTokenResponse,
+} from './types';
 
 /**
  * Thin fetch wrapper. Every call uses `credentials: 'include'` so the
@@ -116,10 +122,18 @@ export async function getSettings(): Promise<Settings> {
 }
 
 export async function updateSettings(
-  disableRegistration: boolean,
+  body: { disableRegistration?: boolean; uploadApiToken?: string | null },
 ): Promise<Settings> {
   return request<Settings>('/api/settings', {
     method: 'PUT',
-    body: JSON.stringify({ disableRegistration }),
+    body: JSON.stringify(body),
+  });
+}
+
+/** Generate a new random upload API token (64 hex chars). The full token is
+ *  returned in the response and will NEVER be visible again via GET. */
+export async function generateUploadToken(): Promise<GenerateUploadTokenResponse> {
+  return request<GenerateUploadTokenResponse>('/api/settings/upload-token', {
+    method: 'POST',
   });
 }
