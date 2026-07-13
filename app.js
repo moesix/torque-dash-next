@@ -39,7 +39,7 @@ app.use(express.urlencoded({ extended: true }));
 // app.use(logger('combined'));
 // codeql[js/missing-csrf-protection] mitigated by same-origin Origin check in middleware/csrfGuard.js
 app.use(session({
-    store: new PgSession({ conString: config.db.uri }),
+    store: new PgSession({ conString: config.db.uri, createTableIfMissing: true }),
     secret: config.session.keys,
     resave: false,
     saveUninitialized: false,
