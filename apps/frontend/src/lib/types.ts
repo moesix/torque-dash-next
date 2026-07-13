@@ -56,4 +56,16 @@ export interface Session {
 export interface Settings {
   /** When true, public registration is closed. */
   disableRegistration: boolean;
+  /** True when an upload API token has been configured. The raw token is NEVER
+   *  returned via GET (security) — only at generation time via POST. */
+  hasUploadApiToken: boolean;
+  /** True when the upload token is sourced from the UPLOAD_API_TOKEN env var
+   *  (deploy-time override). When true, the UI generation/clear are disabled. */
+  tokenFromEnv: boolean;
+}
+
+/** Response from POST /api/settings/upload-token (token generation). The full
+ *  token is returned ONLY at generation time and will never be visible again. */
+export interface GenerateUploadTokenResponse {
+  uploadApiToken: string;
 }

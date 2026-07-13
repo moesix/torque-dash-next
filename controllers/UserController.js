@@ -2,6 +2,8 @@ const User = require('../models').User;
 const Settings = require('../models').Settings;
 const passport = require('passport');
 const { nanoid } = require('nanoid');
+const crypto = require('crypto');
+const runtime = require('../config/runtime');
 
 class UserController {
     static async login(req, res, next) {
@@ -137,7 +139,11 @@ class UserController {
         try {
             const settings = await Settings.getSingleton();
             const envDisabled = process.env.DISABLE_REGISTRATION === 'true';
-            res.json({ disableRegistration: settings.disableRegistration || envDisabled });
+            res.json({
+                disableRegistration: settings.disableRegistration || envDisabled,
+                hasUploadApiToken: Boolean(settings.uploadApiToken || runtime.isFromEnv()),
+                tokenFromEnv: runtime.isFromEnv(),
+            });
         } catch (err) {
             console.log(err);
             res.sendStatus(500);
@@ -148,15 +154,80 @@ class UserController {
     // The deploy-time DISABLE_REGISTRATION env var always wins over this toggle.
     static async updateSettings(req, res) {
         try {
-            const { disableRegistration } = req.body;
-            if (typeof disableRegistration !== 'boolean') {
-                return res.status(400).json({ error: 'disableRegistration must be a boolean.' });
+            const { disableRegistration, uploadApiToken } = req.body;
+            const envDisabled = process.env.DISABLE_REGISTRATION === 'true';
+
+            const updateData = { id: 1 };
+
+            // disableRegistration is optional — allows PUT with just uploadApiToken
+            if (disableRegistration !== undefined) {
+                if (typeof disableRegistration !== 'boolean') {
+                    return res.status(400).json({ error: 'disableRegistration must be a boolean.' });
+                }
+                if (envDisabled) {
+                    return res.status(403).json({ error: 'Registration is disabled by configuration.' });
+                }
+                updateData.disableRegistration = disableRegistration;
             }
-            if (process.env.DISABLE_REGISTRATION === 'true') {
-                return res.status(403).json({ error: 'Registration is disabled by configuration.' });
+
+            // Handle uploadApiToken if provided (string to set, null to clear)
+            if (uploadApiToken !== undefined) {
+                if (runtime.isFromEnv()) {
+                    return res.status(403).json({
+                        error: 'Upload API token is managed via the UPLOAD_API_TOKEN environment variable. Unset it to use the app UI.',
+                    });
+                }
+                if (uploadApiToken !== null && typeof uploadApiToken !== 'string') {
+                    return res.status(400).json({ error: 'uploadApiToken must be a string or null.' });
+                }
+                if (typeof uploadApiToken === 'string' && uploadApiToken.length === 0) {
+                    return res.status(400).json({ error: 'uploadApiToken must not be empty.' });
+                }
+                updateData.uploadApiToken = uploadApiToken;
             }
-            await Settings.upsert({ id: 1, disableRegistration });
-            res.json({ disableRegistration });
+
+            await Settings.upsert(updateData);
+
+            // Keep the runtime holder in sync
+            if (uploadApiToken !== undefined) {
+                runtime.setUploadApiToken(uploadApiToken);
+            }
+
+            // Determine state for the response, OR-ing with env overrides
+            const [currentSettings] = await Settings.findOrCreate({
+                where: { id: 1 },
+                defaults: { disableRegistration: false, uploadApiToken: null },
+            });
+            const finalDisabled = disableRegistration !== undefined
+                ? (disableRegistration || envDisabled)
+                : (currentSettings.disableRegistration || envDisabled);
+            const hasUploadApiToken = uploadApiToken !== undefined
+                ? Boolean(uploadApiToken)
+                : Boolean(currentSettings.uploadApiToken);
+
+            res.json({ disableRegistration: finalDisabled, hasUploadApiToken });
+        } catch (err) {
+            console.log(err);
+            res.sendStatus(500);
+        }
+    }
+    // Generate a new upload API token (64 hex chars). Returns the full token
+    // to the caller exactly once; subsequent reads via getSettings expose only
+    // a Boolean indicating presence. The token is persisted to the Settings row
+    // and also held in the runtime in-memory holder for fast rate-limiter checks.
+    static async generateUploadToken(req, res) {
+        try {
+            if (runtime.isFromEnv()) {
+                return res.status(403).json({
+                    error: 'Upload API token is managed via the UPLOAD_API_TOKEN environment variable. Unset it to use the app UI.',
+                });
+            }
+            const token = crypto.randomBytes(32).toString('hex');
+            const settings = await Settings.getSingleton();
+            settings.uploadApiToken = token;
+            await settings.save();
+            runtime.setUploadApiToken(token);
+            res.json({ uploadApiToken: token });
         } catch (err) {
             console.log(err);
             res.sendStatus(500);

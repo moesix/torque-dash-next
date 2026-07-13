@@ -18,13 +18,18 @@ module.exports = (sequelize, DataTypes) => {
             allowNull: false,
             defaultValue: false,
         },
+        uploadApiToken: {
+            type: DataTypes.TEXT,
+            allowNull: true,
+            defaultValue: null,
+        },
     });
 
     // Resolve the singleton row, creating it on first access.
     Settings.getSingleton = async function () {
         const [row] = await Settings.findOrCreate({
             where: { id: 1 },
-            defaults: { disableRegistration: false },
+            defaults: { disableRegistration: false, uploadApiToken: null },
         });
         return row;
     };

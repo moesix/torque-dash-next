@@ -7,6 +7,7 @@ const SessionController = require('../controllers/SessionController');
 const UploadController = require('../controllers/UploadController');
 const UserController = require('../controllers/UserController');
 const TelemetryController = require('../controllers/TelemetryController');
+const runtime = require('../config/runtime');
 
 // Shared limiter defaults: key on req.ip (real client IP via trust proxy),
 // emit RFC-standard RateLimit-* headers, and return a JSON 429 so SPA and
@@ -32,12 +33,13 @@ function makeLimiter({ windowMs, max, skip }) {
 // limiter entirely. This lets the known uploader flush backlog freely without
 // opening a spoofable hole: the token is a secret configured in the Torque app,
 // not a guessable query param, and cloudflared forwards the header intact.
-const uploadApiToken = process.env.UPLOAD_API_TOKEN;
 const uploadLimiter = makeLimiter({
     ...rateLimits.upload,
-    skip: (req) =>
-        Boolean(uploadApiToken) &&
-        (req.headers.authorization || '') === `Bearer ${uploadApiToken}`,
+    skip: (req) => {
+        const token = runtime.getUploadApiToken();
+        return Boolean(token) &&
+            (req.headers.authorization || '') === `Bearer ${token}`;
+    },
 });
 router.get('/upload', uploadLimiter, UploadController.processUpload);
 
@@ -45,19 +47,22 @@ router.get('/upload', uploadLimiter, UploadController.processUpload);
 const authLimiter = makeLimiter(rateLimits.auth);
 // Tighter limiter for authenticated mutations to bound write churn.
 const writeLimiter = makeLimiter(rateLimits.write);
+// Public read of site settings (register/login pages need this to decide whether
+// to show the signup form). Toggling requires an authenticated session.
+router.get('/settings', UserController.getSettings);
+// Settings mutation and token generation use writeLimiter only (no global limiter
+// redundancy). Must come before the global limiter below.
+router.put('/settings', writeLimiter, authenticate, UserController.updateSettings);
+router.post('/settings/upload-token', writeLimiter, authenticate, UserController.generateUploadToken);
 // Catch-all limiter for every remaining /api route (reads, session queries).
-// Registered here so it covers all routes declared below (but NOT /upload,
-// which has its own token-bypassing limiter above).
+// Registered here so it covers all routes declared below (but NOT /upload
+// or /settings, which have their own limiters above).
 router.use(makeLimiter(rateLimits.global));
 
 router.post('/users/register', authLimiter, UserController.register);
 router.post('/users/login', authLimiter, UserController.login);
 router.get('/users/logout', UserController.logout);
 router.get('/users/shareid', authenticate, UserController.getShareId);
-// Public read of site settings (register/login pages need this to decide whether
-// to show the signup form). Toggling requires an authenticated session.
-router.get('/settings', UserController.getSettings);
-router.put('/settings', writeLimiter, authenticate, UserController.updateSettings);
 router.get('/users/forwardurls', authenticate, UserController.getForwardUrls);
 router.put('/users/forwardurls', writeLimiter, authenticate, UserController.updateForwardUrls);
 router.patch('/users/shareid', authenticate, UserController.toggleShareId);
