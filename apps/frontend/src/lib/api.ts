@@ -2,7 +2,7 @@ import type { Session, TelemetryFrame, RawTelemetryRow, Settings } from './types
 
 /**
  * Thin fetch wrapper. Every call uses `credentials: 'include'` so the
- * cookie-session cookie travels with the request (required for cross-origin
+ * express-session cookie travels with the request (required for cross-origin
  * auth in production where the cookie is sameSite:none; secure). On a 401 from
  * a protected endpoint we bounce to /login — unless we are already on an auth
  * page (login/register), to avoid redirect loops.

@@ -5,47 +5,33 @@ const { nanoid } = require('nanoid');
 
 class UserController {
     static async login(req, res, next) {
-        // Routes are mounted under /api, so req.path is relative to the mount.
-        // Use originalUrl to detect API requests and answer with JSON.
-        const isApi = req.originalUrl.startsWith('/api');
         passport.authenticate('local', (err, user, info) => {
             if (err) return next(err);
             if (!user) {
-                if (isApi) {
-                    return res.status(401).json({ error: (info && info.message) || 'Invalid credentials' });
-                }
-                return res.redirect('/login');
+                return res.status(401).json({ error: (info && info.message) || 'Invalid credentials' });
             }
             req.logIn(user, (loginErr) => {
                 if (loginErr) return next(loginErr);
-                if (isApi) {
-                    return res.json({ ok: true });
-                }
-                return res.redirect('/');
+                return res.json({ ok: true });
             });
         })(req, res, next);
     }
     static logout(req, res) {
-        req.logout();
-        req.flash('success', 'You have been logged out.');
-        res.redirect('/login');
+        req.logout((err) => {
+            if (err) return res.status(500).json({ error: 'Logout failed' });
+            return res.json({ ok: true });
+        });
     }
     static async register(req, res) {
         try {
             // Hard-disable via env always wins (deploy-time kill switch).
             if (process.env.DISABLE_REGISTRATION === 'true') {
-                if (req.originalUrl.startsWith('/api')) {
-                    return res.status(403).json({ error: 'Registration is disabled.' });
-                }
-                return res.render('register', { error: 'Registration is disabled.' });
+                return res.status(403).json({ error: 'Registration is disabled.' });
             }
             // Runtime toggle stored in the singleton Settings row.
             const settings = await Settings.getSingleton();
             if (settings.disableRegistration) {
-                if (req.originalUrl.startsWith('/api')) {
-                    return res.status(403).json({ error: 'Registration is currently disabled.' });
-                }
-                return res.render('register', { error: 'Registration is currently disabled.' });
+                return res.status(403).json({ error: 'Registration is currently disabled.' });
             }
 
             // Get userdata from request
@@ -54,34 +40,24 @@ class UserController {
             // Validate if user data ok
             const { error } = User.validate(req.body);
             if (error) {
-                if (req.originalUrl.startsWith('/api')) {
-                    return res.status(400).json({ error: error.message });
-                }
-                return res.render('register', { error: error.message });
+                return res.status(400).json({ error: error.message });
             }
 
             // Check if user is already registered
             let user = await User.findOne({ where: { email: email } });
             if (user) {
-                if (req.originalUrl.startsWith('/api')) {
-                    return res.status(400).json({ error: 'This email is already registered' });
-                }
-                return res.render('register', { error: 'This email is already registered' });
+                return res.status(400).json({ error: 'This email is already registered' });
             }
 
             // Save new user to db
             user = await User.create({ email: email, password: password });
 
             // Send response
-            if (req.originalUrl.startsWith('/api')) {
-                return res.status(201).json({ ok: true });
-            }
-            req.flash('success', 'Account created. You may now log in.');
-            return res.redirect('/login');
+            return res.status(201).json({ ok: true });
 
         } catch (err) {
-            console.log('Error:', err.message);
-            res.sendStatus(500);
+            console.error('Error:', err.message);
+            res.status(500).json({ error: 'Internal server error' });
         }
     }
     static async getForwardUrls(req, res) {

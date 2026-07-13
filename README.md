@@ -38,7 +38,7 @@ map, session replays, and per-session summaries.
 git clone https://github.com/<you>/torque-dash-next.git
 cd torque-dash-next
 
-# (optional) generate a strong session key + upload token
+# (optional) generate a strong session secret + upload token
 export SESSION_KEYS="$(openssl rand -hex 24)"
 export UPLOAD_API_TOKEN="$(openssl rand -hex 24)"
 
@@ -49,7 +49,8 @@ Then open **http://localhost:8080**.
 
 - On first boot the backend creates the database tables, turns the `Logs` table
   into a TimescaleDB hypertable, and seeds the `Settings` row. Data is persisted
-  in the `pgdata` volume.
+  in the `pgdata` volume. Any unique indexes on the hypertable must include the
+  partition column (`timestamp`) — the migration creates these automatically.
 - Register the first account at the sign-up page, then sign in.
 - For Torque Pro uploads, set `UPLOAD_API_TOKEN` (below) and point the app at
   `https://<host>/api/upload` with the matching bearer token.
@@ -100,10 +101,11 @@ In Torque Pro → *Settings → Web Preferences*:
 | `DATABASE_URL`            | `postgres://postgres:heslo@localhost:5432/torquedash` | PostgreSQL/TimescaleDB connection string.                       |
 | `PORT`                    | `3000`                                  | Backend HTTP port.                                                          |
 | `NODE_ENV`                | _(unset)_                               | Set to `production` to skip `sequelize.sync()` (use migrations instead).    |
-| `SESSION_KEYS`            | dev defaults                             | Comma-separated cookie-signing keys. **Set this in production.**            |
+| `SESSION_KEYS`            | dev defaults                             | Comma-separated express-session secrets (array). **Set this in production.**|
 | `COOKIE_SECURE`           | `false`                                 | `true` to set `Secure` on session cookies (requires HTTPS).                 |
 | `COOKIE_SAMESITE`         | `lax`                                   | `SameSite` policy for session cookies.                                      |
 | `CORS_ORIGINS`           | _(empty = same-origin only)_            | Comma-separated allowed origins for cross-origin API access. Also serves as the CSRF trust list — state-changing requests from any other origin are rejected (see `middleware/csrfGuard.js`). Entries must exactly match the browser `Origin` (correct scheme, no trailing slash). For local dev, use a consistent hostname for the API and SPA (e.g. both `localhost`) to avoid spurious 403s. |
+| `PUBLIC_ORIGIN`           | _(unset)_                               | Overrides the expected CSRF origin. Set to the browser-visible origin (e.g. `https://app.example.com`) when nginx terminates HTTPS but forwards HTTP to the backend. |
 | `UPLOAD_RATE_LIMIT_MAX`    | `600`                                   | Max uploads per `UPLOAD_RATE_LIMIT_WINDOW_MS` per IP.                       |
 | `UPLOAD_RATE_LIMIT_WINDOW_MS` | `60000`                             | Upload rate-limit window in milliseconds.                                   |
 | `UPLOAD_API_TOKEN`        | _(unset)_                               | If set, requests with `Authorization: bearer <token>` bypass the rate limit.|

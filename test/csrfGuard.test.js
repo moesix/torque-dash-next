@@ -6,10 +6,10 @@ const http = require('node:http');
 const express = require('express');
 const csrfGuard = require('../middleware/csrfGuard');
 
-function startServer(allowed) {
+function startServer(allowed, publicOrigin) {
     const app = express();
     app.set('trust proxy', 1);
-    app.use(csrfGuard(allowed));
+    app.use(csrfGuard({ allowedOrigins: allowed, publicOrigin }));
     app.get('/x', (req, res) => res.json({ ok: true }));
     app.post('/x', (req, res) => res.json({ ok: true }));
     app.delete('/x', (req, res) => res.json({ ok: true }));

@@ -8,14 +8,15 @@ const app = express();
 // CSRF protection is provided by middleware/csrfGuard.js — a same-origin Origin
 // check on all state-changing /api requests (OWASP-recommended for JSON SPAs).
 // This avoids the unmaintained `csurf` dependency. The js/missing-csrf-protection
-// CodeQL alert is suppressed on the cookie-session registration below.
+// CodeQL alert is suppressed on the express-session registration below.
 app.set('trust proxy', 1);
 const cors = require('cors');
 // const logger = require('morgan');
 const { sequelize } = require('./models');
 const config = require('./config/config');
 const flash = require('connect-flash');
-const session = require('cookie-session');
+const session = require('express-session');
+const PgSession = require('connect-pg-simple')(session);
 const passport = require('passport');
 const csrfGuard = require('./middleware/csrfGuard');
 const User = require('./models').User;
@@ -33,14 +34,17 @@ const corsOpts = {
 app.use('/api', cors(corsOpts));
 // CSRF guard: same-origin Origin check on state-changing /api requests. See
 // middleware/csrfGuard.js. Reuses the CORS allowlist as the trusted-origin set.
-app.use('/api', csrfGuard(corsOpts.origin));
+app.use('/api', csrfGuard({ allowedOrigins: corsOpts.origin, publicOrigin: process.env.PUBLIC_ORIGIN }));
 app.use(express.urlencoded({ extended: true }));
 // app.use(logger('combined'));
 // codeql[js/missing-csrf-protection] mitigated by same-origin Origin check in middleware/csrfGuard.js
 app.use(session({
-    keys: config.session.keys,
-    maxAge: 24 * 60 * 60 * 1000,
+    store: new PgSession({ conString: config.db.uri }),
+    secret: config.session.keys,
+    resave: false,
+    saveUninitialized: false,
     cookie: {
+        maxAge: 24 * 60 * 60 * 1000,
         httpOnly: true,
         // Cross-origin SPA auth requires sameSite:'none' + secure. Gate by env so
         // local/dev (same-origin, Lax) keeps working without HTTPS.

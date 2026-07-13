@@ -14,12 +14,12 @@ Two clients talk to the same Express backend:
 1. **Torque Pro** (Android) — pushes OBD2 frames to an unauthenticated,
    *email-gated* ingestion endpoint.
 2. **Browser SPA** (React/Vite) — reads data over an authenticated, CORS +
-   cookie session API.
+    cookie-based session API (express-session + connect-pg-simple store).
 
 ```mermaid
 flowchart LR
     TP[Torque Pro Android app] -->|GET /api/upload?eml=...| ING[Express: UploadController]
-    BR[Browser SPA - React/Vite] -->|CORS + cookie-session /api/*| API[Express: /api router]
+    BR[Browser SPA - React/Vite] -->|CORS + express-session /api/*| API[Express: /api router]
 
     ING --> UC[lib/userCache - email->user]
     ING --> IB[services/ingestBuffer]
@@ -43,7 +43,7 @@ flowchart LR
     no auth)             │   │    ├─ services/ingestBuffer           │──▶  PostgreSQL
                           │   │    │     └─ Log.bulkCreate (batched)  │      + TimescaleDB
    Browser SPA  ──/api──▶ │   │    └─ lib/ssrfGuard (forwardUrls)     │      hypertable Logs
-   CORS + cookie-session  │   ├─ SessionController (list/metadata)    │
+    CORS + express-session  │   ├─ SessionController (list/metadata)    │
                           │   ├─ TelemetryController.range (paged)    │
                           │   └─ UserController (auth/forwardUrls)    │
                           └─────────────────────────────────────────┘
@@ -58,7 +58,7 @@ resolve user (cached) → `findOrCreate` session (resolved numeric FK) →
 `fetch` with a 3s `AbortController` timeout.
 
 ### Read path
-`Browser SPA` → `CORS` + `cookie-session` → `/api/*` → `authenticate`
+`Browser SPA` → `CORS` + `express-session` → `/api/*` → `authenticate`
 middleware → controller. Telemetry is served via
 `GET /api/sessions/:id/telemetry?from&to&limit` (`TelemetryController.range`),
 which enforces ownership (or `?shareId=` for shared sessions) and returns
@@ -242,6 +242,6 @@ Each service should expose a healthcheck (backend: `GET /health`).
 | `POST /api/upload` (`/upload` from Torque) | none (email-gated) | ingest |
 | `GET /health` | none | probe |
 
-> See `routes/api.js` for the authoritative route table. Note: the SPA auth
-> contract is currently **broken** (backend returns HTML/redirects and 302s
-> instead of JSON/401). See `docs/development.md → Known Issues`.
+> See `routes/api.js` for the authoritative route table. The SPA auth contract
+> is now **resolved** — all endpoints return JSON/401 over `/api`. See
+> `docs/development.md → Known Issues` for history.
