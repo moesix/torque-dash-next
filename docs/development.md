@@ -174,10 +174,18 @@ blockers are resolved and re-reviewed as PASS:
   hard cap on live buffer growth between flushes.
   **Fix:** add a flush **mutex** and a max live-buffer cap (drop/backpressure
   beyond a threshold).
-- **Torque PID keys `k4`/`k5` are hardcoded.** `UploadController` promotes
-  `values.k4` → `engine_rpm` and `values.k5` → `vehicle_speed`, but PIDs are
+- **Torque PID keys `kc`/`kd` are hardcoded.** `UploadController` promotes
+  `values.kc` → `engine_rpm` and `values.kd` → `vehicle_speed`, but PIDs are
   user-configurable. A `torque-keys` mapping table should drive which PIDs map
-  to the promoted columns instead of hardcoding `k4`/`k5`.
+  to the promoted columns instead of hardcoding `kc`/`kd`.
+  - ⚠️ **Key format:** Torque stores OBD‑II PIDs as hex keys **without leading
+    zeros** — PID 0x0C (RPM) → `kc`, PID 0x0D (Speed) → `kd`. This is the
+    native Torque key format; never use `k4`/`k5` (decimal OBD‑II PIDs) or
+    `k0c`/`k0d` (zero‑padded hex).
+  - ⚠️ **Zero‑safe extraction:** always use the pattern
+    `values.key != null ? Number(values.key) : null` instead of
+    `Number(values.key) || null`. The latter discards legitimate zero values
+    (idle RPM, stopped vehicle speed).
 
 ### 🟢 LOW
 

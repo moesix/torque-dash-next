@@ -12,12 +12,6 @@ import type { TelemetryFrame, PidMeta, ColumnMeta, SeriesSource } from './types'
 // ── Curated Torque OBD-II fallback map ───────────────────────────────────
 
 const FALLBACK_MAP: Record<string, { full: string; short: string; unit: string }> = {
-  k05:     { full: 'Engine Coolant Temperature',  short: 'Coolant',   unit: '°C' },
-  k0b:     { full: 'Intake Manifold Pressure',    short: 'MAP',       unit: 'psi' },
-  k0c:     { full: 'Engine RPM',                  short: 'RPM',       unit: 'rpm' },
-  k0d:     { full: 'Vehicle Speed (OBD)',         short: 'Speed',     unit: 'km/h' },
-  k0e:     { full: 'Timing Advance',              short: 'Timing',    unit: '°' },
-  k0f:     { full: 'Intake Air Temperature',      short: 'IAT',       unit: '°C' },
   k10:     { full: 'MAF Air Flow Rate',           short: 'MAF',       unit: 'g/s' },
   k11:     { full: 'Throttle Position',           short: 'Throttle',  unit: '%' },
   k2f:     { full: 'Fuel Level Input',            short: 'Fuel',      unit: '%' },
@@ -26,11 +20,12 @@ const FALLBACK_MAP: Record<string, { full: string; short: string; unit: string }
   k47:     { full: 'Absolute Throttle Pos B',     short: 'Throttle B',unit: '%' },
   k49:     { full: 'Accel Pedal Position D',      short: 'Pedal D',   unit: '%' },
   k4a:     { full: 'Accel Pedal Position E',      short: 'Pedal E',   unit: '%' },
-  k5:      { full: 'Speed (PCM/GPS)',             short: 'Speed OBD2',unit: 'km/h' },
-  kb:      { full: 'Unknown (kb)',                short: 'Fld B',     unit: '' },
-  kc:      { full: 'Unknown (kc)',                short: 'Fld C',     unit: '' },
-  kd:      { full: 'Unknown (kd)',                short: 'Fld D',     unit: '' },
-  ke:      { full: 'Unknown (ke)',                short: 'Fld E',     unit: '' },
+  k5:      { full: 'Engine Coolant Temperature',  short: 'Coolant',   unit: '°C' },
+  kb:      { full: 'Intake Manifold Pressure',    short: 'MAP',       unit: 'psi' },
+  kc:      { full: 'Engine RPM',                  short: 'RPM',       unit: 'rpm' },
+  kd:      { full: 'Vehicle Speed (OBD)',         short: 'Speed',     unit: 'km/h' },
+  ke:      { full: 'Timing Advance',              short: 'Timing',    unit: '°' },
+  kf:      { full: 'Intake Air Temperature',      short: 'IAT',       unit: '°C' },
   kff1001: { full: 'MAF-derived Speed Est',       short: 'MAF Speed', unit: 'km/h' },
   kff1005: { full: 'Fuel Trim (Long Term)',       short: 'LTFT',      unit: '%' },
   kff1006: { full: 'Fuel Trim (Short Term)',      short: 'STFT',      unit: '%' },
@@ -179,7 +174,12 @@ export function getAvailableSeries(frames: TelemetryFrame[]): SeriesSource[] {
   for (const valueKey of pidValueKeys) {
     // valueKey = "k0c" → pid = "0c"
     const pidSuffix = valueKey.slice(1);
-    const meta = metaMap.get(pidSuffix);
+    let meta = metaMap.get(pidSuffix);
+    // Metadata keys use leading zeros for single-char PID suffixes
+    // e.g. data key "k5" → pidSuffix="5" but metadata has "05"
+    if (!meta && pidSuffix.length === 1) {
+      meta = metaMap.get('0' + pidSuffix);
+    }
     const fallback = FALLBACK_MAP[valueKey];
 
     const full = meta?.full ?? fallback?.full ?? valueKey;

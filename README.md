@@ -19,7 +19,7 @@ map, session replays, and per-session summaries.
 - **Time-series storage** — TimescaleDB hypertable + continuous aggregate for fast
   per-session queries over large log volumes.
 - **React dashboard** — live vehicle view, route map (OpenStreetMap tiles, no API key), replay with a multi-series PID overlay chart (toggleable metric panel, collapsible stats table), and a settings page with upload API token management.
-- **PID decode engine** — auto-discovers all OBD-II parameters from Torque's JSONB `values` column using embedded metadata (`userFullName*`/`userUnit*`) and a curated fallback map; no schema changes needed for new PIDs.
+- **PID decode engine** — auto-discovers all OBD-II parameters from Torque's JSONB `values` column using embedded metadata (`userFullName*`/`userUnit*`) and a curated fallback map; no schema changes needed for new PIDs. Torque stores OBD‑II PIDs as hex keys without leading zeros (e.g. `kc` for RPM/PID 0x0C, `kd` for Speed/PID 0x0D).
 - **Controlled ingestion** — email-gated uploads with an optional API-token
   (`Bearer`) bypass for Torque Pro over HTTPS; token can be generated from
   the Settings UI or set via the `UPLOAD_API_TOKEN` environment variable.
@@ -84,6 +84,27 @@ npm run build                # outputs apps/frontend/dist
 
 For a production SPA, serve `apps/frontend/dist` behind a reverse proxy that
 forwards `/api` to the backend (the included `apps/frontend/nginx.conf` does this).
+
+### Existing data: PID column backfill
+
+> If you have existing sessions uploaded before July 2026, their
+> `engine_rpm` and `vehicle_speed` columns may contain **stale or incorrect**
+> values because Torque stores the PID keys as `kc` (RPM) and `kd` (Speed) — not
+> the legacy `k4`/`k5` that the previous code expected. Run the backfill
+> migration to repair existing data:
+>
+> ```sql
+> -- infra/timescale/migrations/002_backfill_pid_columns.sql
+> UPDATE "Logs"
+> SET engine_rpm = CASE WHEN (values->>'kc') ~ '^-?\d+(\.\d+)?$'
+>                       THEN (values->>'kc')::numeric ELSE NULL END,
+>     vehicle_speed = CASE WHEN (values->>'kd') ~ '^-?\d+(\.\d+)?$'
+>                          THEN (values->>'kd')::numeric ELSE NULL END
+> WHERE values ? 'kc' AND values ? 'kd';
+> ```
+>
+> Apply it via your database console or include it in your migration run. It is
+> **idempotent** — safe to re-run.
 
 ## Configure Torque Pro
 
