@@ -135,13 +135,31 @@ export default function OverlayChart({
       return;
     }
 
-    const yAxisCount = unitGroups.size;
+    // Cap displayed axes to prevent chart area from shrinking to nothing.
+    // Show at most 1 left + 3 right = 4 total. Rare unit groups are hidden
+    // from axes but still visible in the tooltip.
+    const MAX_AXES = 4;
+    const unitEntries = Array.from(unitGroups.entries());
 
-    // Build yAxis options — one per unit group
-    // TODO: type as echarts.YAxisOption once typed helpers are extracted
+    // Sort by frequency (most common first) so we keep the most useful axes
+    const unitFrequency = unitEntries.map(([unit, srcs]) => [unit, srcs.length] as const);
+    unitFrequency.sort((a, b) => b[1] - a[1]);
+
+    const visibleUnits = new Set(unitFrequency.slice(0, MAX_AXES).map(([u]) => u));
+    const visibleAxisCount = visibleUnits.size;
+
+    // Rebuild yAxisIndexMap only for visible units
+    const visibleYAxisIndexMap = new Map<string, number>();
+    let visibleIdx = 0;
+    for (const [unit] of unitFrequency.slice(0, MAX_AXES)) {
+      visibleYAxisIndexMap.set(unit, visibleIdx);
+      visibleIdx++;
+    }
+
+    // Build yAxis options — one per visible unit group
     const yAxisOptions: any[] = [];
     let axisIdx = 0;
-    for (const [unit] of unitGroups) {
+    for (const [unit] of unitFrequency.slice(0, MAX_AXES)) {
       const isFirst = axisIdx === 0;
       const opt: any = {
         type: 'value',
@@ -159,20 +177,23 @@ export default function OverlayChart({
         // Only show label on the last right axis to reduce clutter
         opt.axisLabel = {
           ...opt.axisLabel,
-          show: axisIdx === yAxisCount - 1,
+          show: axisIdx === visibleAxisCount - 1,
         };
       }
       yAxisOptions.push(opt);
       axisIdx++;
     }
 
-    // Grid — leave space for right-side offset axes
-    const rightMargin = 24 + Math.max(0, yAxisCount - 1) * 60;
+    // Grid — leave space for right-side offset axes, capped at 180px
+    const rightMargin = Math.min(
+      180,
+      24 + Math.max(0, visibleAxisCount - 1) * 60,
+    );
 
-    // Build series options
+    // Build series options — hidden units still render, they just lack an axis
     const seriesOptions = sources.map((src, i) => {
       const u = src.unit || '_';
-      const yi = yAxisIndexMap.get(u) ?? 0;
+      const yi = visibleYAxisIndexMap.get(u) ?? 0;
       const color = COLORS[i % COLORS.length];
       const data = getSeriesData(frames, src);
 
@@ -209,7 +230,7 @@ export default function OverlayChart({
     chart.setOption(
       {
         animation: false,
-        grid: { left: 56, right: rightMargin, top: 24, bottom: 28 },
+        grid: { left: 56, right: rightMargin, top: 24, bottom: 28, containLabel: true },
         tooltip: { trigger: 'axis' as const },
         xAxis: { type: 'time' as const },
         yAxis: yAxisOptions,

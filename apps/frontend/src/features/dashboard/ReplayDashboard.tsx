@@ -19,8 +19,7 @@ import { useParams } from 'react-router-dom';
 import { Card, Grid, Text, Title } from '@tremor/react';
 import { getSession, getTelemetry } from '@/lib/api';
 import { usePlaybackStore } from '@/app/playbackStore';
-import KpiCard from '@/components/charts/KpiCard';
-import GaugeTile from '@/components/charts/GaugeTile';
+import SessionSummaryCard from '@/components/charts/SessionSummaryCard';
 import GpsTrackMap from '@/components/map/GpsTrackMap';
 import PlaybackControls from './PlaybackControls';
 import OverlayChart from '@/components/charts/OverlayChart';
@@ -136,6 +135,16 @@ export default function ReplayDashboard() {
     () => safeMax(frames.map((f) => f.vehicleSpeed)),
     [frames],
   );
+  const maxCoolant = useMemo(
+    () =>
+      safeMax(
+        frames.map((f) => {
+          const raw = f.values?.k5;
+          return typeof raw === 'number' ? raw : null;
+        }),
+      ),
+    [frames],
+  );
 
   // ── Loading / error states ─────────────────────────────────────────
   if (sessionQuery.isLoading) {
@@ -170,13 +179,13 @@ export default function ReplayDashboard() {
       {/* Transport controls */}
       <PlaybackControls frames={frames} />
 
-      {/* KPI cards + gauges */}
-      <Grid numItemsLg={4} className="gap-4">
-        <KpiCard title="Max RPM" value={Math.round(maxRpm)} />
-        <KpiCard title="Max Speed" value={`${Math.round(maxSpeed)} km/h`} />
-        <GaugeTile title="Peak RPM" value={maxRpm} max={8000} unit=" rpm" />
-        <GaugeTile title="Peak Speed" value={maxSpeed} max={240} unit=" km/h" />
-      </Grid>
+      {/* Session summary card with live gauges */}
+      <SessionSummaryCard
+        frames={frames}
+        maxRpm={maxRpm}
+        maxSpeed={maxSpeed}
+        maxCoolant={maxCoolant}
+      />
 
       {/* Overlay chart + metric selector */}
       <Grid numItemsLg={3} className="gap-4">
