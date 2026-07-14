@@ -18,7 +18,9 @@ map, session replays, and per-session summaries.
 - **Docker-first deployment** — one `docker compose up` and you're running.
 - **Time-series storage** — TimescaleDB hypertable + continuous aggregate for fast
   per-session queries over large log volumes.
-- **React dashboard** — live vehicle view, route map (OpenStreetMap tiles, no API key), replay with a multi-series PID overlay chart (toggleable metric panel, collapsible stats table), and a settings page with upload API token management.
+- **React dashboard** — live vehicle view, route map (OpenStreetMap tiles, no API key), replay with a multi-series PID overlay chart (toggleable metric panel, collapsible stats table, y-axis capped at 4 axes total to prevent overcrowding), a session summary card with live SVG ring gauges (RPM, Coolant, Speed) that update as the playback cursor moves, and a settings page with upload API token management.
+- **Session auto-naming** — new sessions are automatically named `Trip DDMMYYYY HH:MM AM/PM` on first upload.
+- **Inline session rename** — rename sessions directly from the session table via an inline edit button (pencil icon, Enter/Escape/blur handling).
 - **PID decode engine** — auto-discovers all OBD-II parameters from Torque's JSONB `values` column using embedded metadata (`userFullName*`/`userUnit*`) and a curated fallback map; no schema changes needed for new PIDs. Torque stores OBD‑II PIDs as hex keys without leading zeros (e.g. `kc` for RPM/PID 0x0C, `kd` for Speed/PID 0x0D).
 - **Controlled ingestion** — email-gated uploads with an optional API-token
   (`Bearer`) bypass for Torque Pro over HTTPS; token can be generated from

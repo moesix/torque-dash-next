@@ -77,7 +77,8 @@ which enforces ownership (or `?shareId=` for shared sessions) and returns
   — never emails.
 - **GPS:** `kff1005` = lon, `kff1006` = lat. Non-GPS uploads are stored with
   null lat/lon (no longer dropped).
-- **Promoted columns:** `engineRpm` ← `values.kc` (PID 0x0C), `vehicleSpeed` ← `values.kd` (PID 0x0D). Torque stores hex keys **without leading zeros**, so the key is `kc`, not `k0c`. Values are extracted with a zero‑safe pattern: `values.kc != null ? Number(values.kc) : null` (preserves legitimate `0` values).
+- **Promoted columns:** `engineRpm` ← `values.kc` (PID 0x0C), `vehicleSpeed` ← `values.kd` (PID 0x0D). Torque stores hex keys **without leading zeros**, so the key is `kc`, not `k0c`. Values are extracted with a zero‑safe pattern: `values.kc != null ? Number(values.kc) : null` (preserves legitimate `0` values).
+- **Auto-naming:** new sessions are automatically named `Trip DDMMYYYY HH:MM AM/PM` using the upload timestamp on first upload.
 - **SSRF-guarded `forwardUrls`:** each URL is checked with `lib/ssrfGuard.isSafeUrl`
   before a fire-and-forget `fetch`.
 - Responds `200 OK` immediately; the DB flush is asynchronous.
@@ -132,7 +133,7 @@ src/
     queryClient.ts       # TanStack Query client
     router.tsx           # routes: /login /register /sessions /sessions/:id
   components/
-    charts/  OverlayChart.tsx, KpiCard.tsx, GaugeTile.tsx
+    charts/  OverlayChart.tsx, SessionSummaryCard.tsx, KpiCard.tsx, GaugeTile.tsx
     layout/  AppShell.tsx
     map/     GpsTrackMap.tsx
     tables/  SessionTable.tsx
@@ -179,14 +180,23 @@ The `getAvailableSeries()` function returns `SeriesSource[]` with resolved
 display names and units (metadata > fallback > raw key), and `getSeriesData()`
 extracts `[timestamp_ms, value]` pairs via the safe `coerceScalar()` helper.
 
-### 3.5 Multi-series Overlay Chart
+### 3.5 Session Summary Card (`SessionSummaryCard.tsx`)
+- A combined card that replaces the previous 4-card grid (2 KpiCards + 2 GaugeTiles) in `ReplayDashboard`.
+- Renders 3 live SVG ring gauges (RPM, Coolant, Speed) that update reactively as the playback cursor moves.
+- Subscribes to `playbackStore.cursorTime` via imperative zustand subscription, matching the same pattern used by `GpsTrackMap` and `OverlayChart` markLine updates.
+- Each gauge interpolates the nearest value from the session's telemetry frames based on the current cursor time.
+
+### 3.6 Multi-series Overlay Chart
 - `OverlayChart.tsx` renders an ECharts instance with dynamic series: each
   selected metric source becomes a `type: 'line'` series on a shared time (x)
   axis within a **single** chart — replaces the old dual TimeSeriesChart layout.
 - **Per-unit-group y-axes** — sources are grouped by their unit string (e.g.
   `rpm`, `km/h`, `°C`, `V`). Each unique unit gets a separate y-axis (left for
   the first group, right with offset for subsequent groups), letting you overlay
-  RPM, speed, coolant temp, and O2 voltage without scale distortion.
+  RPM, speed, coolant temp, and O2 voltage without scale distortion. The total
+  number of y-axes is capped at 4 (1 left + 3 right) sorted by frequency, and
+  `rightMargin` is capped at 180px to prevent axis labels from overflowing the
+  chart container.
 - **Two separate effects** — data rebuild uses `notMerge: true` (replaces all
   series + yAxis config); cursor markLine updates use `notMerge: false` (merge
   mode) so a hover never re-renders the full dataset.
@@ -205,7 +215,7 @@ extracts `[timestamp_ms, value]` pairs via the safe `coerceScalar()` helper.
   min/max/avg/last for every PID source, computed from pre-memoized series data
   (no frame re-scan on expand).
 
-### 3.6 react-leaflet GPS track (imperative marker)
+### 3.7 react-leaflet GPS track (imperative marker)
 - `GpsTrackMap.tsx` mounts `<MapContainer>` **once** and never re-renders it on
   cursor changes.
 - On `cursorTime` change, it finds the nearest frame via a **binary search**
@@ -287,6 +297,7 @@ Each service should expose a healthcheck (backend: `GET /health`).
 | `GET /api/sessions` | cookie | list sessions (summary) |
 | `GET /api/sessions/:id` | cookie + owner | session metadata (no full logs) |
 | `GET /api/sessions/:id/telemetry?from&to&limit` | cookie + owner | paged telemetry frames |
+| `PATCH /api/sessions/:id` | cookie + owner | rename session (body: `{ name }`) |
 | `GET /api/sessions/:id/shared/:shareId` | shareId | shared view |
 | `GET /api/settings` | none | public settings (disableRegistration, hasUploadApiToken) |
 | `PUT /api/settings` | cookie | update settings (disableRegistration, uploadApiToken) |
