@@ -58,7 +58,7 @@ return (
     <div className="hidden w-1/2 items-center justify-center bg-blue-600 p-12 lg:flex">
       <div className="max-w-md text-center">
         <div className="mx-auto mb-6 h-16 w-16 rounded-2xl bg-white/20 backdrop-blur" />
-        <h1 className="text-3xl font-bold text-white" style={{ fontFamily: 'var(--font-display)' }}>
+        <h1 className="text-3xl font-bold text-white" style={{ fontFamily: 'var(--font-mono)' }}>
           TorqueDash
         </h1>
         <p className="mt-3 text-lg text-blue-100">
@@ -73,7 +73,7 @@ return (
         {/* Mobile-only logo */}
         <div className="mb-8 text-center lg:hidden">
           <div className="mx-auto mb-4 h-12 w-12 rounded-xl bg-blue-600" />
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white" style={{ fontFamily: 'var(--font-display)' }}>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white" style={{ fontFamily: 'var(--font-mono)' }}>
             TorqueDash
           </h1>
         </div>

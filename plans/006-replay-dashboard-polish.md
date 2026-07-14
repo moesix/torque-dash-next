@@ -107,7 +107,7 @@ Restructure the vertical stack into a more intentional hierarchy:
 
 ### Step 3: Polish SessionSummaryCard
 
-- Use `var(--font-display)` for gauge numbers (monospace feel)
+- Use `var(--font-mono)` for gauge numbers (monospace feel)
 - Add subtle `bg-white dark:bg-gray-800` card background
 - Ensure gauge labels use `var(--text-secondary)` for hierarchy
 
@@ -116,7 +116,7 @@ Restructure the vertical stack into a more intentional hierarchy:
 ### Step 4: Polish PidTogglePanel
 
 - Add section dividers between PID categories
-- Use `var(--font-display)` for PID codes
+- Use `var(--font-mono)` for PID codes
 - Add subtle hover state on rows
 - Improve search input focus state
 

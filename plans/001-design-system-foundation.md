@@ -29,9 +29,9 @@ The entire UI uses generic system fonts (`ui-sans-serif, system-ui`) and hardcod
 ## Design decisions (from frontend-design skill)
 
 **Typography pairing:**
-- Display/headings: **JetBrains Mono** (monospace, technical feel, perfect for telemetry data)
-- Body/UI: **IBM Plex Sans** (clean, industrial, excellent legibility at small sizes)
-- Monospace data: **JetBrains Mono** (already the display font — consistent)
+- Display/headings: **Space Grotesk** (geometric sans, technical feel, distinctive character)
+- Body/UI: **Space Grotesk** (clean, modern, excellent legibility at small sizes)
+- Monospace data: **Martian Mono** (condensed, technical, perfect for telemetry codes and numbers)
 
 **Color palette — industrial dark-first:**
 - Background: `#0f1117` (dark base), `#1a1d27` (card), `#252830` (elevated)
@@ -75,7 +75,7 @@ Add Google Fonts `<link>` tags for JetBrains Mono (400, 500, 700) and IBM Plex S
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Martian+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
   <title>TorqueDash Next</title>
 </head>
 ```
@@ -96,8 +96,9 @@ Replace the current `index.css` body block with CSS variables for the full color
 
 :root {
   /* Typography */
-  --font-display: 'JetBrains Mono', ui-monospace, monospace;
-  --font-body: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
+  --font-display: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
+  --font-body: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'Martian Mono', ui-monospace, monospace;
 
   /* Backgrounds */
   --bg-base: #f9fafb;
@@ -143,7 +144,7 @@ body {
 
 /* Monospace data styling */
 .font-mono-data {
-  font-family: var(--font-display);
+  font-family: var(--font-mono);
 }
 ```
 
@@ -171,8 +172,9 @@ Add `darkMode: 'class'` (prep for plan 002) and extend the theme with CSS variab
 ```
 3. Add to `theme.extend.fontFamily`:
 ```ts
-display: ['var(--font-display)', 'monospace'],
+display: ['var(--font-display)', 'sans-serif'],
 body: ['var(--font-body)', 'sans-serif'],
+mono: ['var(--font-mono)', 'monospace'],
 ```
 4. Add to `theme.extend.boxShadow`:
 ```ts
@@ -187,7 +189,7 @@ body: ['var(--font-body)', 'sans-serif'],
 
 ## Test plan
 
-- Visual: open dev server, confirm fonts load (JetBrains Mono on headings, IBM Plex on body)
+- Visual: open dev server, confirm fonts load (Space Grotesk on headings/body, Martian Mono on code/data)
 - Visual: confirm no color regressions (all existing Tailwind classes still work)
 - Build: `npx vite build` succeeds
 - Type: `npx tsc --noEmit` passes
