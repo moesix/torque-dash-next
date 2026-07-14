@@ -83,13 +83,13 @@ export default function SettingsPage() {
     <div className="max-w-2xl space-y-4">
       <div>
         <Title>Settings</Title>
-        <Text className="mt-1">Global site configuration.</Text>
+        <Text className="mt-1 dark:text-[var(--text-secondary)]">Global site configuration.</Text>
       </div>
       <Card>
         <div className="flex items-center justify-between">
           <div>
             <Text className="font-medium">Disable registration</Text>
-            <Text className="mt-1 text-sm text-gray-500">
+            <Text className="mt-1 text-sm text-gray-500 dark:text-[var(--text-muted)]">
               Close public signups. The deploy-time env var DISABLE_REGISTRATION
               always wins if set to true.
             </Text>
@@ -101,10 +101,10 @@ export default function SettingsPage() {
           />
         </div>
         {error ? (
-          <Text className="mt-3 text-sm text-rose-600">{error}</Text>
+          <Text className="mt-3 text-sm text-rose-600 dark:text-rose-400">{error}</Text>
         ) : null}
         {saved ? (
-          <Text className="mt-3 text-sm text-emerald-600">Saved.</Text>
+          <Text className="mt-3 text-sm text-emerald-600 dark:text-emerald-400">Saved.</Text>
         ) : null}
       </Card>
 
@@ -112,7 +112,7 @@ export default function SettingsPage() {
         <div className="space-y-4">
           <div>
             <Text className="font-medium">Upload API Token</Text>
-            <Text className="mt-1 text-sm text-gray-500">
+            <Text className="mt-1 text-sm text-gray-500 dark:text-[var(--text-muted)]">
               A bearer token that lets a Torque app bypass the upload rate limit.
               Generate a token and paste it into your Torque app&rsquo;s
               configuration. The token is shown only once.
@@ -123,13 +123,13 @@ export default function SettingsPage() {
             <span
               className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ${
                 hasUploadApiToken
-                  ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-600/20'
-                  : 'bg-gray-50 text-gray-600 ring-1 ring-gray-500/10'
+                  ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-600/20 dark:bg-emerald-900/40 dark:text-emerald-300 dark:ring-emerald-600/40'
+                  : 'bg-gray-50 text-gray-600 ring-1 ring-gray-500/10 dark:bg-[var(--bg-surface)] dark:text-[var(--text-secondary)] dark:ring-[var(--border-strong)]'
               }`}
             >
               <span
                 className={`h-1.5 w-1.5 rounded-full ${
-                  hasUploadApiToken ? 'bg-emerald-500' : 'bg-gray-400'
+                  hasUploadApiToken ? 'bg-emerald-500 dark:bg-emerald-400' : 'bg-gray-400 dark:bg-gray-500'
                 }`}
               />
               {hasUploadApiToken ? 'Token set' : 'No token'}
@@ -137,8 +137,8 @@ export default function SettingsPage() {
           </div>
 
           {tokenFromEnv ? (
-            <Text className="text-sm text-amber-600">
-              Token is managed via the <code className="font-mono bg-amber-50 px-1 rounded">UPLOAD_API_TOKEN</code> environment
+            <Text className="text-sm text-amber-600 dark:text-amber-400">
+              Token is managed via the <code className="font-mono bg-amber-50 px-1 rounded dark:bg-amber-900/40 dark:text-amber-300">UPLOAD_API_TOKEN</code> environment
               variable. Unset it to manage the token through the app UI.
             </Text>
           ) : null}
@@ -146,18 +146,18 @@ export default function SettingsPage() {
           {tokenInput ? (
             <div className="space-y-2">
               <div className="flex items-center gap-2">
-                <code className="flex-1 break-all rounded border bg-gray-50 px-3 py-2 text-sm font-mono">
+                <code className="flex-1 break-all rounded border bg-gray-50 px-3 py-2 text-sm font-mono dark:border-[var(--border-default)] dark:bg-[var(--bg-surface)] dark:text-[var(--text-primary)]">
                   {tokenInput}
                 </code>
                 <button
                   type="button"
                   onClick={onCopyToken}
-                  className="rounded border bg-white px-3 py-2 text-sm font-medium hover:bg-gray-50 transition-colors"
+                  className="rounded border bg-white px-3 py-2 text-sm font-medium hover:bg-gray-50 transition-colors dark:border-[var(--border-default)] dark:bg-[var(--bg-card)] dark:text-[var(--text-primary)] dark:hover:bg-[var(--bg-surface)]"
                 >
                   {tokenCopied ? 'Copied!' : 'Copy'}
                 </button>
               </div>
-              <Text className="text-xs text-amber-600">
+              <Text className="text-xs text-amber-600 dark:text-amber-400">
                 Copy this token now. It won&rsquo;t be shown again.
               </Text>
             </div>
@@ -168,7 +168,7 @@ export default function SettingsPage() {
               type="button"
               onClick={onGenerateToken}
               disabled={tokenBusy || tokenFromEnv}
-              className="rounded bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+              className="rounded bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50 transition-colors dark:bg-indigo-500 dark:hover:bg-indigo-600"
             >
               {tokenBusy ? 'Generating...' : 'Generate New Token'}
             </button>
@@ -177,7 +177,7 @@ export default function SettingsPage() {
                 type="button"
                 onClick={onClearToken}
                 disabled={tokenBusy}
-                className="rounded border border-red-300 bg-white px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 transition-colors"
+                className="rounded border border-red-300 bg-white px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 transition-colors dark:border-red-800 dark:bg-transparent dark:text-red-400 dark:hover:bg-red-900/30"
               >
                 Clear Token
               </button>
@@ -185,7 +185,7 @@ export default function SettingsPage() {
           </div>
 
           {tokenError ? (
-            <Text className="text-sm text-rose-600">{tokenError}</Text>
+            <Text className="text-sm text-rose-600 dark:text-rose-400">{tokenError}</Text>
           ) : null}
         </div>
       </Card>

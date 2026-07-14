@@ -77,7 +77,8 @@ which enforces ownership (or `?shareId=` for shared sessions) and returns
   — never emails.
 - **GPS:** `kff1005` = lon, `kff1006` = lat. Non-GPS uploads are stored with
   null lat/lon (no longer dropped).
-- **Promoted columns:** `engineRpm` ← `values.kc` (PID 0x0C), `vehicleSpeed` ← `values.kd` (PID 0x0D). Torque stores hex keys **without leading zeros**, so the key is `kc`, not `k0c`. Values are extracted with a zero‑safe pattern: `values.kc != null ? Number(values.kc) : null` (preserves legitimate `0` values).
+- **Promoted columns:** `engineRpm` ← `values.kc` (PID 0x0C), `vehicleSpeed` ← `values.kd` (PID 0x0D). Torque stores hex keys **without leading zeros**, so the key is `kc`, not `k0c`. Values are extracted with a zero‑safe pattern: `values.kc != null ? Number(values.kc) : null` (preserves legitimate `0` values).
+- **Auto-naming:** new sessions are automatically named `Trip DDMMYYYY HH:MM AM/PM` using the upload timestamp on first upload.
 - **SSRF-guarded `forwardUrls`:** each URL is checked with `lib/ssrfGuard.isSafeUrl`
   before a fire-and-forget `fetch`.
 - Responds `200 OK` immediately; the DB flush is asynchronous.
@@ -121,7 +122,7 @@ which enforces ownership (or `?shareId=` for shared sessions) and returns
 
 ## 3. Frontend Internals (`apps/frontend/`)
 
-Stack: **React 18 + TypeScript + Vite + Tailwind + Tremor + ECharts +
+Stack: **React 18 + TypeScript + Vite + Tailwind v4 + Tremor + ECharts +
 react-leaflet + TanStack Query + zustand**.
 
 ### 3.1 App structure
@@ -132,11 +133,12 @@ src/
     queryClient.ts       # TanStack Query client
     router.tsx           # routes: /login /register /sessions /sessions/:id
   components/
-    charts/  OverlayChart.tsx, KpiCard.tsx, GaugeTile.tsx
-    layout/  AppShell.tsx
+    charts/  OverlayChart.tsx, SessionSummaryCard.tsx, KpiCard.tsx, GaugeTile.tsx
+    layout/  AppShell.tsx, MobileDrawer.tsx
     map/     GpsTrackMap.tsx
     tables/  SessionTable.tsx
     telemetry/ PidTogglePanel.tsx, DecodedMetricsTable.tsx
+    ui/      Skeleton.tsx, ErrorAlert.tsx
   features/
     auth/    Login.tsx, Register.tsx, useAuth.ts
     dashboard/ ReplayDashboard.tsx, PlaybackControls.tsx
@@ -146,6 +148,7 @@ src/
     api.ts    # fetch wrapper, credentials:'include'
     types.ts
     pidDecode.ts   # PID auto-decode engine (pdDecode.ts)
+    theme.ts   # dark/light mode detection, applyTheme, toggleTheme
 ```
 
 ### 3.2 Data fetching
@@ -179,14 +182,23 @@ The `getAvailableSeries()` function returns `SeriesSource[]` with resolved
 display names and units (metadata > fallback > raw key), and `getSeriesData()`
 extracts `[timestamp_ms, value]` pairs via the safe `coerceScalar()` helper.
 
-### 3.5 Multi-series Overlay Chart
+### 3.5 Session Summary Card (`SessionSummaryCard.tsx`)
+- A combined card that replaces the previous 4-card grid (2 KpiCards + 2 GaugeTiles) in `ReplayDashboard`.
+- Renders 3 live SVG ring gauges (RPM, Coolant, Speed) that update reactively as the playback cursor moves.
+- Subscribes to `playbackStore.cursorTime` via imperative zustand subscription, matching the same pattern used by `GpsTrackMap` and `OverlayChart` markLine updates.
+- Each gauge interpolates the nearest value from the session's telemetry frames based on the current cursor time.
+
+### 3.6 Multi-series Overlay Chart
 - `OverlayChart.tsx` renders an ECharts instance with dynamic series: each
   selected metric source becomes a `type: 'line'` series on a shared time (x)
   axis within a **single** chart — replaces the old dual TimeSeriesChart layout.
 - **Per-unit-group y-axes** — sources are grouped by their unit string (e.g.
   `rpm`, `km/h`, `°C`, `V`). Each unique unit gets a separate y-axis (left for
   the first group, right with offset for subsequent groups), letting you overlay
-  RPM, speed, coolant temp, and O2 voltage without scale distortion.
+  RPM, speed, coolant temp, and O2 voltage without scale distortion. The total
+  number of y-axes is capped at 4 (1 left + 3 right) sorted by frequency, and
+  `rightMargin` is capped at 180px to prevent axis labels from overflowing the
+  chart container.
 - **Two separate effects** — data rebuild uses `notMerge: true` (replaces all
   series + yAxis config); cursor markLine updates use `notMerge: false` (merge
   mode) so a hover never re-renders the full dataset.
@@ -205,13 +217,24 @@ extracts `[timestamp_ms, value]` pairs via the safe `coerceScalar()` helper.
   min/max/avg/last for every PID source, computed from pre-memoized series data
   (no frame re-scan on expand).
 
-### 3.6 react-leaflet GPS track (imperative marker)
+### 3.7 react-leaflet GPS track (imperative marker)
 - `GpsTrackMap.tsx` mounts `<MapContainer>` **once** and never re-renders it on
   cursor changes.
 - On `cursorTime` change, it finds the nearest frame via a **binary search**
   (`findNearestFrame`) over timestamps, then calls
   `marker.setLatLng([lat, lon])` **imperatively** — no React state, no map
   recreation.
+
+### 3.8 Design System and Theme
+
+- **CSS custom properties** — colors (bg-base, bg-card, text-primary, accent, etc.) defined as CSS variables in `index.css`, with `.dark` class overrides for dark mode. Tailwind v4 uses a CSS-first configuration approach: all design tokens are defined in the `@theme` block in `index.css`, referenced as `var()` tokens (`--color-surface-base`, `--color-fg`, `--color-brand-accent`). The `tailwind.config.ts` file is reduced to a minimal placeholder since the JS config is no longer the primary source of truth.
+- **PostCSS replaced** — the `postcss.config.js` file has been removed. Tailwind is loaded via the `@tailwindcss/vite` Vite plugin (in `vite.config.ts`), with `@import "tailwindcss"` in `index.css` replacing the old `@tailwind base/components/utilities` directives.
+- **Tremor v3 compatibility** — Tremor v3 uses class names like `bg-tremor-brand-emphasis` or `rounded-tremor-default` that Tailwind v4 does not detect by default from `node_modules`. These are safelisted via `@source inline()` pattern directives in `index.css`, which replace the v3 `safelist: [{pattern: /.../}]` JS config approach. The Tremor `node_modules` directory is also scanned with `@source "../node_modules/@tremor/react/dist/**/*.{js,ts,jsx,tsx}"` so any Tremor classes found in source are picked up automatically.
+- **Typography** — Google Fonts: Space Grotesk for display/body text, Martian Mono for monospace data. Font stacks are exposed as `--font-display`, `--font-body`, `--font-mono` CSS variables and mapped to Tailwind theme values (`--font-display`, `--font-body`, `--font-mono`) in the `@theme` block.
+- **Dark mode** — managed by `lib/theme.ts`: detects `prefers-color-scheme`, persists choice to localStorage, provides `getTheme()` / `setTheme()` / `toggleTheme()`. The theme toggle button (sun/moon icons) lives in `AppShell` and applies the `.dark` class on `<html>`. The custom variant `@custom-variant dark (&:where(.dark, .dark *));` in `index.css` enables `dark:` class-based Tailwind variants.
+- **Mobile drawer** — `MobileDrawer.tsx` renders a slide-out navigation panel with backdrop overlay, Escape-to-close, focus-on-open, and dark mode support. Triggered by a hamburger button visible below the `md` breakpoint.
+- **Loading skeletons** — `Skeleton.tsx` provides a shimmer-animated placeholder for async content; `ErrorAlert.tsx` renders a dismissible error banner. Both replace raw text placeholders in `SessionBrowser` and `ReplayDashboard`.
+- **Micro-interactions** — fadeIn/slideUp CSS animations with staggered delays (4 tiers) on dashboard sections; page transitions via `<Outlet key={location.pathname}>`; card-hover effects on table rows. All animations opt out when `prefers-reduced-motion: reduce` is set.
 
 ---
 
@@ -287,6 +310,7 @@ Each service should expose a healthcheck (backend: `GET /health`).
 | `GET /api/sessions` | cookie | list sessions (summary) |
 | `GET /api/sessions/:id` | cookie + owner | session metadata (no full logs) |
 | `GET /api/sessions/:id/telemetry?from&to&limit` | cookie + owner | paged telemetry frames |
+| `PATCH /api/sessions/:id` | cookie + owner | rename session (body: `{ name }`) |
 | `GET /api/sessions/:id/shared/:shareId` | shareId | shared view |
 | `GET /api/settings` | none | public settings (disableRegistration, hasUploadApiToken) |
 | `PUT /api/settings` | cookie | update settings (disableRegistration, uploadApiToken) |

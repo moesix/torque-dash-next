@@ -137,3 +137,14 @@ export async function generateUploadToken(): Promise<GenerateUploadTokenResponse
     method: 'POST',
   });
 }
+
+/** Rename a session. */
+export async function renameSession(
+  sessionId: string,
+  name: string,
+): Promise<void> {
+  await request(`/api/sessions/rename/${sessionId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ name }),
+  });
+}

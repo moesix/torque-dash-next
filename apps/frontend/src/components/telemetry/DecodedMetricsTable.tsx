@@ -55,7 +55,7 @@ export default function DecodedMetricsTable({ sources, seriesData }: Props) {
         aria-controls="decoded-table-body"
       >
         <Title>Decoded Metrics</Title>
-        <span className="flex items-center gap-2 text-sm text-gray-400">
+        <span className="flex items-center gap-2 text-sm text-gray-400 dark:text-[var(--text-muted)]">
           <span className="text-xs">{summary}</span>
           <span className="text-xs">{expanded ? '▲' : '▼'}</span>
         </span>
@@ -65,7 +65,7 @@ export default function DecodedMetricsTable({ sources, seriesData }: Props) {
         <div id="decoded-table-body" className="mt-3 overflow-x-auto">
           <table className="w-full text-left text-xs">
             <thead>
-              <tr className="border-b border-gray-200 text-gray-500">
+              <tr className="border-b border-gray-200 text-gray-500 dark:border-[var(--border-default)] dark:text-[var(--text-muted)]">
                 <th className="pb-1 pr-2 font-medium">Name</th>
                 <th className="pb-1 pr-2 font-mono font-medium">PID</th>
                 <th className="pb-1 pr-2 font-medium">Unit</th>
@@ -80,13 +80,13 @@ export default function DecodedMetricsTable({ sources, seriesData }: Props) {
               {columnRows.map(({ src, stats }) => (
                 <tr
                   key={src.pid}
-                  className="border-b border-gray-100 text-gray-700"
+                  className="border-b border-gray-100 text-gray-700 dark:border-[var(--border-default)] dark:text-[var(--text-primary)]"
                 >
                   <td className="py-1 pr-2 font-medium">{src.short}</td>
-                  <td className="py-1 pr-2 font-mono text-gray-400">
+                  <td className="py-1 pr-2 font-mono text-gray-400 dark:text-[var(--text-muted)]">
                     {src.pid}
                   </td>
-                  <td className="py-1 pr-2 text-gray-400">{src.unit}</td>
+                  <td className="py-1 pr-2 text-gray-400 dark:text-[var(--text-muted)]">{src.unit}</td>
                   <td className="py-1 pr-2 text-right tabular-nums">
                     {stats ? fmtNum(stats.min) : '—'}
                   </td>
@@ -104,7 +104,7 @@ export default function DecodedMetricsTable({ sources, seriesData }: Props) {
 
               {/* Visual separator */}
               {pidRows.length > 0 && columnRows.length > 0 && (
-                <tr className="text-[10px] text-gray-300">
+                <tr className="text-[10px] text-gray-300 dark:text-[var(--text-muted)]">
                   <td colSpan={7} className="py-1 italic">
                     — OBD-II PIDs —
                   </td>
@@ -115,13 +115,13 @@ export default function DecodedMetricsTable({ sources, seriesData }: Props) {
               {pidRows.map(({ src, stats }) => (
                 <tr
                   key={src.pid}
-                  className="border-b border-gray-100 text-gray-700"
+                  className="border-b border-gray-100 text-gray-700 dark:border-[var(--border-default)] dark:text-[var(--text-primary)]"
                 >
                   <td className="py-1 pr-2 font-medium">{src.short}</td>
-                  <td className="py-1 pr-2 font-mono text-gray-400">
+                  <td className="py-1 pr-2 font-mono text-gray-400 dark:text-[var(--text-muted)]">
                     {src.pid}
                   </td>
-                  <td className="py-1 pr-2 text-gray-400">{src.unit}</td>
+                  <td className="py-1 pr-2 text-gray-400 dark:text-[var(--text-muted)]">{src.unit}</td>
                   <td className="py-1 pr-2 text-right tabular-nums">
                     {stats ? fmtNum(stats.min) : '—'}
                   </td>
@@ -139,7 +139,7 @@ export default function DecodedMetricsTable({ sources, seriesData }: Props) {
 
               {pidRows.length === 0 && columnRows.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="py-4 text-center text-gray-400">
+                  <td colSpan={7} className="py-4 text-center text-gray-400 dark:text-[var(--text-muted)]">
                     No telemetry frames available.
                   </td>
                 </tr>

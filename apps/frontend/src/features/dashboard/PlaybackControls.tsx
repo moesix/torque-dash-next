@@ -63,7 +63,10 @@ export default function PlaybackControls({ frames }: Props) {
   return (
     <Card>
       <div className="flex flex-wrap items-center gap-3">
-        <Button onClick={() => (isPlaying ? pause() : play())}>
+        <Button
+          onClick={() => (isPlaying ? pause() : play())}
+          className="min-w-[44px] min-h-[44px] flex items-center justify-center"
+        >
           {isPlaying ? 'Pause' : 'Play'}
         </Button>
         <input
@@ -73,16 +76,16 @@ export default function PlaybackControls({ frames }: Props) {
           step={1}
           value={cursorTime ?? start}
           onChange={onScrub}
-          className="min-w-[200px] flex-1"
+          className="min-w-[200px] flex-1 h-10 accent-blue-600 dark:accent-blue-400"
           aria-label="Playback scrubber"
         />
-        <span className="w-24 text-right text-sm tabular-nums text-gray-600">
+        <span className="w-24 text-right text-sm tabular-nums text-gray-600 dark:text-[var(--text-muted)]" aria-live="polite">
           {cursorLabel}
         </span>
         <select
           value={speed}
           onChange={(e) => setSpeed(Number(e.target.value))}
-          className="rounded-md border border-gray-300 px-2 py-1 text-sm"
+          className="rounded-md border border-gray-300 px-2 py-1 text-sm min-h-[44px] dark:border-[var(--border-default)] dark:bg-[var(--bg-surface)] dark:text-[var(--text-primary)]"
           aria-label="Playback speed"
         >
           <option value={1}>1×</option>
@@ -91,7 +94,7 @@ export default function PlaybackControls({ frames }: Props) {
           <option value={8}>8×</option>
         </select>
       </div>
-      <Text className="mt-2 text-xs text-gray-500">
+      <Text className="mt-2 text-xs text-gray-500 dark:text-[var(--text-muted)]">
         {pct.toFixed(1)}% through session
       </Text>
     </Card>

@@ -3,6 +3,7 @@ const Session = require('../models').Session;
 const _ = require('lodash');
 const userCache = require('../lib/userCache');
 const ssrfGuard = require('../lib/ssrfGuard');
+const moment = require('moment');
 const ingestBuffer = require('../services/ingestBuffer');
 
 // Resolve an email to a User, using the positive + negative TTL cache.
@@ -41,6 +42,13 @@ class UploadController {
                 defaults: { userId: user.id }
             });
             let sess = currentSession[0];
+
+            // After findOrCreate, if this is a new session, give it a default name
+            if (currentSession[1] && time) {
+                const ts = moment(Number(time));
+                const name = `Trip ${ts.format('DDMMYYYY hh:mm A')}`;
+                await sess.update({ name });
+            }
 
             // Buffer the row (resolved numeric FKs only) and let it flush async.
             ingestBuffer.ingest({
