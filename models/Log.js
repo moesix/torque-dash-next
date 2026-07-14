@@ -1,6 +1,3 @@
-const pidNames = require('../torquekeys');
-const util = require('../util/util');
-
 module.exports = (sequelize, DataTypes) => {
     // define Log
     const Log = sequelize.define('Log', {
@@ -15,12 +12,11 @@ module.exports = (sequelize, DataTypes) => {
         },
         values: {
             type: DataTypes.JSONB,
-            // convert keys to names when pulling out of db
-            get: function()  {
-                var values = this.getDataValue('values'); 
-                values = util.renameKeys(pidNames, values);
-                return values;
-              },
+            // NOTE: The raw Torque hex keys (k5, kc, kd, kff1007, etc.) are
+            // returned as-is to the frontend. The pidDecode engine handles
+            // key→name resolution via FALLBACK_MAP + Torque metadata enrichment.
+            // The legacy renameKeys getter was removed because it transformed
+            // k* keys into full names, breaking the frontend PID discovery.
         },
         // Promoted hot columns (Tier-2 TimescaleDB optimization).
         // `paranoid` is intentionally NOT added — Log keeps no deletedAt column.
