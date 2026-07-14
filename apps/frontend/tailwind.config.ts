@@ -4,6 +4,7 @@ import type { Config } from 'tailwindcss';
 // present in the Tailwind theme, and the content glob must cover the library's
 // prebuilt components so their utility classes are generated.
 const config: Config = {
+  darkMode: 'class',
   content: [
     './index.html',
     './src/**/*.{js,ts,jsx,tsx}',
@@ -15,6 +16,17 @@ const config: Config = {
     current: 'currentColor',
     extend: {
       colors: {
+        'brand-accent': 'var(--accent)',
+        surface: {
+          base: 'var(--bg-base)',
+          card: 'var(--bg-card)',
+          elevated: 'var(--bg-elevated)',
+        },
+        fg: {
+          DEFAULT: 'var(--text-primary)',
+          secondary: 'var(--text-secondary)',
+          muted: 'var(--text-muted)',
+        },
         tremor: {
           brand: {
             faint: '#eff6ff',
@@ -77,11 +89,17 @@ const config: Config = {
           '0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1)',
         'dark-tremor-dropdown':
           '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)',
+        'focus-ring': '0 0 0 2px var(--bg-base), 0 0 0 4px var(--accent)',
       },
       borderRadius: {
         'tremor-small': '0.375rem',
         'tremor-default': '0.5rem',
         'tremor-full': '9999px',
+      },
+      fontFamily: {
+        display: ['var(--font-display)', 'sans-serif'],
+        body: ['var(--font-body)', 'sans-serif'],
+        mono: ['var(--font-mono)', 'monospace'],
       },
       fontSize: {
         'tremor-label': ['0.75rem', { lineHeight: '1rem' }],

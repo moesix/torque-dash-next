@@ -96,8 +96,17 @@ export default function SessionTable({ sessions }: Props) {
             return (
               <TableRow
                 key={s.id}
+                tabIndex={isEditing ? -1 : 0}
+                role="button"
+                aria-label={`Session: ${s.name || 'Unnamed session'}`}
                 onClick={() => !isEditing && navigate(`/session/${s.id}`)}
-                className="cursor-pointer hover:bg-gray-50"
+                onKeyDown={(e) => {
+                  if (!isEditing && (e.key === 'Enter' || e.key === ' ')) {
+                    e.preventDefault();
+                    navigate(`/session/${s.id}`);
+                  }
+                }}
+                className="card-hover cursor-pointer hover:bg-gray-50 dark:hover:bg-[var(--bg-surface)]"
               >
                 <TableCell>
                   {isEditing ? (
@@ -116,7 +125,7 @@ export default function SessionTable({ sessions }: Props) {
                       {s.name || 'Unnamed session'}
                       <button
                         onClick={(e) => startEditing(s, e)}
-                        className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 hover:text-gray-600 ml-1"
+                        className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 hover:text-gray-600 dark:text-[var(--text-muted)] dark:hover:text-[var(--text-secondary)] ml-1"
                         title="Rename session"
                       >
                         <svg

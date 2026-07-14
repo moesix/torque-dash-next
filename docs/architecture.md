@@ -134,10 +134,11 @@ src/
     router.tsx           # routes: /login /register /sessions /sessions/:id
   components/
     charts/  OverlayChart.tsx, SessionSummaryCard.tsx, KpiCard.tsx, GaugeTile.tsx
-    layout/  AppShell.tsx
+    layout/  AppShell.tsx, MobileDrawer.tsx
     map/     GpsTrackMap.tsx
     tables/  SessionTable.tsx
     telemetry/ PidTogglePanel.tsx, DecodedMetricsTable.tsx
+    ui/      Skeleton.tsx, ErrorAlert.tsx
   features/
     auth/    Login.tsx, Register.tsx, useAuth.ts
     dashboard/ ReplayDashboard.tsx, PlaybackControls.tsx
@@ -147,6 +148,7 @@ src/
     api.ts    # fetch wrapper, credentials:'include'
     types.ts
     pidDecode.ts   # PID auto-decode engine (pdDecode.ts)
+    theme.ts   # dark/light mode detection, applyTheme, toggleTheme
 ```
 
 ### 3.2 Data fetching
@@ -222,6 +224,15 @@ extracts `[timestamp_ms, value]` pairs via the safe `coerceScalar()` helper.
   (`findNearestFrame`) over timestamps, then calls
   `marker.setLatLng([lat, lon])` **imperatively** — no React state, no map
   recreation.
+
+### 3.8 Design System and Theme
+
+- **CSS custom properties** — colors (bg-base, bg-card, text-primary, accent, etc.) defined as CSS variables in `index.css`, with `.dark` class overrides for dark mode. The Tailwind config references these via `var()` tokens (`surface`, `fg`, `brand-accent`).
+- **Typography** — Google Fonts: Space Grotesk for display/body text, Martian Mono for monospace data. Font stacks are exposed as `--font-display`, `--font-body`, `--font-mono` CSS variables and mapped to Tailwind `fontFamily` aliases (`display`, `body`, `mono`).
+- **Dark mode** — managed by `lib/theme.ts`: detects `prefers-color-scheme`, persists choice to localStorage, provides `getTheme()` / `setTheme()` / `toggleTheme()`. The theme toggle button (sun/moon icons) lives in `AppShell` and applies the `.dark` class on `<html>`.
+- **Mobile drawer** — `MobileDrawer.tsx` renders a slide-out navigation panel with backdrop overlay, Escape-to-close, focus-on-open, and dark mode support. Triggered by a hamburger button visible below the `md` breakpoint.
+- **Loading skeletons** — `Skeleton.tsx` provides a shimmer-animated placeholder for async content; `ErrorAlert.tsx` renders a dismissible error banner. Both replace raw text placeholders in `SessionBrowser` and `ReplayDashboard`.
+- **Micro-interactions** — fadeIn/slideUp CSS animations with staggered delays (4 tiers) on dashboard sections; page transitions via `<Outlet key={location.pathname}>`; card-hover effects on table rows. All animations opt out when `prefers-reduced-motion: reduce` is set.
 
 ---
 

@@ -190,7 +190,7 @@ export default function SessionSummaryCard({
       <Title>Session Summary</Title>
 
       {/* Top: 3 SVG ring gauges */}
-      <div className="flex items-center justify-around py-4 flex-wrap gap-2">
+      <div className="flex items-center justify-around py-4 flex-wrap gap-2" aria-live="polite">
         <RingGauge
           label="RPM"
           value={currentValues.rpm}
