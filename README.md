@@ -18,9 +18,11 @@ map, session replays, and per-session summaries.
 - **Docker-first deployment** — one `docker compose up` and you're running.
 - **Time-series storage** — TimescaleDB hypertable + continuous aggregate for fast
   per-session queries over large log volumes.
-- **React dashboard** — live vehicle view, route map (OpenStreetMap tiles, no API key), replay, and a settings page.
+- **React dashboard** — live vehicle view, route map (OpenStreetMap tiles, no API key), replay with a multi-series PID overlay chart (toggleable metric panel, collapsible stats table), and a settings page with upload API token management.
+- **PID decode engine** — auto-discovers all OBD-II parameters from Torque's JSONB `values` column using embedded metadata (`userFullName*`/`userUnit*`) and a curated fallback map; no schema changes needed for new PIDs.
 - **Controlled ingestion** — email-gated uploads with an optional API-token
-  (`Bearer`) bypass for Torque Pro over HTTPS.
+  (`Bearer`) bypass for Torque Pro over HTTPS; token can be generated from
+  the Settings UI or set via the `UPLOAD_API_TOKEN` environment variable.
 - **Operational guards** — rate-limited upload endpoint, togglable open
   registration, and environment-driven configuration.
 
@@ -29,7 +31,7 @@ map, session replays, and per-session summaries.
 | Layer     | Stack                                                        |
 |-----------|-------------------------------------------------------------|
 | Backend   | Node.js + Express 4, Sequelize 5, PostgreSQL / TimescaleDB |
-| Frontend  | React 18 + Vite + TypeScript, ECharts, Leaflet             |
+| Frontend  | React 18 + Vite + TypeScript, ECharts, Leaflet, pidDecode  |
 | Deploy    | Docker Compose: `db` (TimescaleDB) + `backend` + `frontend` (nginx) |
 
 ## Quick start (Docker — recommended)
