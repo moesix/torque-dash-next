@@ -27,8 +27,8 @@ map, session replays, and per-session summaries.
   the Settings UI or set via the `UPLOAD_API_TOKEN` environment variable.
 - **Operational guards** — rate-limited upload endpoint, togglable open
   registration, and environment-driven configuration.
-- **Design system** — CSS custom properties for colors, typography, and borders; Google Fonts (Space Grotesk + Martian Mono); Tailwind extended with custom font-family stacks (display, body, mono) and semantic color tokens (brand-accent, surface, fg).
-- **Dark mode** — system preference detection with manual override, persisted to localStorage, toggled via a sun/moon button in the app header. All components carry `dark:` Tailwind variants.
+- **Design system** — CSS custom properties for colors, typography, and borders; Google Fonts (Space Grotesk + Martian Mono); Tailwind v4 configured via CSS-first `@theme` block (custom font-family stacks, semantic color tokens, and Tremor design tokens all in `index.css`); PostCSS replaced by the `@tailwindcss/vite` plugin.
+- **Dark mode** — system preference detection with manual override, persisted to localStorage, toggled via a sun/moon button in the app header. All components carry `dark:` Tailwind variants (class-based toggling via `@custom-variant dark` in `index.css`).
 - **Mobile responsive** — responsive layout with a hamburger-triggered slide-out drawer (MobileDrawer), touch-friendly 44px minimum tap targets, and fluid chart sizing that adapts to viewport width.
 - **Accessibility** — focus-visible indicators, skip-to-content link, form validation with aria-invalid/aria-describedby, keyboard navigation on interactive elements, and aria-live regions for dynamic content.
 - **Micro-interactions** — fade-in/slide-up page transitions keyed on the active route, staggered reveal with animation-delay on dashboard sections, card-hover effects on table rows. Respects `prefers-reduced-motion`.

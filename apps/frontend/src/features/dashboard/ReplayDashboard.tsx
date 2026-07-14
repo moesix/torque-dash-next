@@ -153,7 +153,7 @@ export default function ReplayDashboard() {
     return (
       <div className="space-y-4">
         {/* Slim banner skeleton */}
-        <div className="rounded-lg bg-white px-4 py-3 shadow-sm dark:bg-[var(--bg-card)]">
+        <div className="rounded-lg bg-white px-4 py-3 shadow-xs dark:bg-[var(--bg-card)]">
           <Skeleton className="h-5 w-48 mb-1" />
           <Skeleton className="h-3 w-64" />
         </div>
@@ -206,7 +206,7 @@ export default function ReplayDashboard() {
   return (
     <div className="space-y-4">
       {/* Slim session banner — not a full Card */}
-      <div className="animate-slide-up rounded-lg bg-white px-4 py-3 shadow-sm dark:bg-[var(--bg-card)]">
+      <div className="animate-slide-up rounded-lg bg-white px-4 py-3 shadow-xs dark:bg-[var(--bg-card)]">
         <h1 className="text-lg font-semibold text-gray-900 dark:text-white font-display">
           {sessionQuery.data.name || 'Session Replay'}
         </h1>
