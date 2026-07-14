@@ -1,48 +1,133 @@
 @import 'leaflet/dist/leaflet.css';
+@import "tailwindcss";
+@config "../tailwind.config.ts";
 
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@source "../node_modules/@tremor/react/dist/**/*.{js,ts,jsx,tsx}";
+@source "../node_modules/react-leaflet/**/*.{js,ts,jsx,tsx}";
+
+/* ── Tremor v3 opacity backports ── */
+@utility bg-opacity-10 { opacity: 0.1; }
+@utility bg-opacity-20 { opacity: 0.2; }
+@utility bg-opacity-40 { opacity: 0.4; }
+@utility ring-opacity-20 { opacity: 0.2; }
+
+/* ── Tremor v3 safelist shim ── */
+@source inline('{hover:,ui-selected:,}bg-{tremor,dark-tremor}-{brand,background,border,ring,content}-{faint,muted,subtle,emphasis,inverted}');
+@source inline('{hover:,ui-selected:,}text-{tremor,dark-tremor}-{brand,background,border,ring,content}-{faint,muted,subtle,emphasis,inverted}');
+@source inline('{hover:,ui-selected:,}ring-{tremor,dark-tremor}-{brand,background,border,ring,content}-{faint,muted,subtle,emphasis,inverted}');
+@source inline('{hover:,ui-selected:,}stroke-{tremor,dark-tremor}-{brand,background,border,ring,content}-{faint,muted,subtle,emphasis,inverted}');
+@source inline('{hover:,ui-selected:,}border-{tremor,dark-tremor}-{brand,background,border,ring,content}-{faint,muted,subtle,emphasis,inverted}');
+@source inline('{hover:,ui-selected:,}fill-{tremor,dark-tremor}-{brand,background,border,ring,content}-{faint,muted,subtle,emphasis,inverted}');
+@source inline('{hover:,ui-selected:,}bg-{tremor,dark-tremor}-{brand,background,border,ring,content}');
+@source inline('{hover:,ui-selected:,}text-{tremor,dark-tremor}-{brand,background,border,ring,content}');
+@source inline('{hover:,ui-selected:,}ring-{tremor,dark-tremor}-{brand,background,border,ring,content}');
+@source inline('{hover:,ui-selected:,}border-{tremor,dark-tremor}-{brand,background,border,ring,content}');
+@source inline('{hover:,ui-selected:,}stroke-{tremor,dark-tremor}-{brand,background,border,ring,content}');
+@source inline('{hover:,ui-selected:,}fill-{tremor,dark-tremor}-{brand,background,border,ring,content}');
+@source inline('shadow-{tremor,dark-tremor}-{input,card,dropdown}');
+@source inline('rounded-tremor-{small,default,full}');
+@source inline('text-tremor-{label,default,title,metric}');
+
+@theme {
+  --color-brand-accent: var(--accent);
+  --color-surface-base: var(--bg-base);
+  --color-surface-card: var(--bg-card);
+  --color-surface-elevated: var(--bg-elevated);
+  --color-fg: var(--text-primary);
+  --color-fg-secondary: var(--text-secondary);
+  --color-fg-muted: var(--text-muted);
+
+  /* Tremor tokens */
+  --color-tremor-brand-faint: #eff6ff;
+  --color-tremor-brand-muted: #bfdbfe;
+  --color-tremor-brand-subtle: #60a5fa;
+  --color-tremor-brand: #3b82f6;
+  --color-tremor-brand-emphasis: #1d4ed8;
+  --color-tremor-brand-inverted: #ffffff;
+  --color-tremor-background-muted: #f9fafb;
+  --color-tremor-background-subtle: #f3f4f6;
+  --color-tremor-background: #ffffff;
+  --color-tremor-background-emphasis: #374151;
+  --color-tremor-border: #e5e7eb;
+  --color-tremor-ring: #e5e7eb;
+  --color-tremor-content-subtle: #9ca3af;
+  --color-tremor-content: #6b7280;
+  --color-tremor-content-emphasis: #374151;
+  --color-tremor-content-strong: #111827;
+  --color-tremor-content-inverted: #ffffff;
+
+  --color-dark-tremor-brand-faint: #0B1229;
+  --color-dark-tremor-brand-muted: #172554;
+  --color-dark-tremor-brand-subtle: #1e40af;
+  --color-dark-tremor-brand: #3b82f6;
+  --color-dark-tremor-brand-emphasis: #60a5fa;
+  --color-dark-tremor-brand-inverted: #030712;
+  --color-dark-tremor-background-muted: #131A2B;
+  --color-dark-tremor-background-subtle: #1f2937;
+  --color-dark-tremor-background: #111827;
+  --color-dark-tremor-background-emphasis: #d1d5db;
+  --color-dark-tremor-border: #1f2937;
+  --color-dark-tremor-ring: #1f2937;
+  --color-dark-tremor-content-subtle: #4b5563;
+  --color-dark-tremor-content: #6b7280;
+  --color-dark-tremor-content-emphasis: #e5e7eb;
+  --color-dark-tremor-content-strong: #f9fafb;
+  --color-dark-tremor-content-inverted: #000000;
+
+  /* Shadows */
+  --shadow-tremor-input: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --shadow-tremor-card: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+  --shadow-tremor-dropdown: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+  --shadow-dark-tremor-input: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --shadow-dark-tremor-card: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+  --shadow-dark-tremor-dropdown: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+  --shadow-focus-ring: 0 0 0 2px var(--bg-base), 0 0 0 4px var(--accent);
+
+  /* Border radius */
+  --radius-tremor-small: 0.375rem;
+  --radius-tremor-default: 0.5rem;
+  --radius-tremor-full: 9999px;
+
+  /* Font sizes */
+  --text-tremor-label: 0.75rem;
+  --text-tremor-default: 0.875rem;
+  --text-tremor-title: 1.125rem;
+  --text-tremor-metric: 1.875rem;
+  --leading-tremor-label: 1rem;
+  --leading-tremor-default: 1.25rem;
+  --leading-tremor-title: 1.75rem;
+  --leading-tremor-metric: 2.25rem;
+
+  /* Font families */
+  --font-display: var(--font-display);
+  --font-body: var(--font-body);
+  --font-mono: var(--font-mono);
+}
 
 /* ── Design-token CSS variables ── */
 :root {
-  /* Fonts */
   --font-display: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
   --font-body: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
   --font-mono: 'Martian Mono', ui-monospace, monospace;
-
-  /* Backgrounds (light gray scale) */
   --bg-base: #f9fafb;
   --bg-card: #ffffff;
   --bg-elevated: #ffffff;
   --bg-surface: #f3f4f6;
-
-  /* Text */
   --text-primary: #111827;
   --text-secondary: #4b5563;
   --text-muted: #9ca3af;
-
-  /* Borders */
   --border-default: #e5e7eb;
   --border-strong: #d1d5db;
-
-  /* Accent (amber) */
   --accent: #f59e0b;
   --accent-hover: #d97706;
-
-  /* Semantic colors */
   --color-success: #22c55e;
   --color-danger: #ef4444;
   --color-warning: #f59e0b;
   --color-info: #3b82f6;
-
-  /* Focus ring */
   --focus-ring: 0 0 0 2px var(--bg-base), 0 0 0 4px var(--accent);
 }
 
-html,
-body,
-#root {
+html, body, #root {
   height: 100%;
 }
 
@@ -55,28 +140,12 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Monospace data class */
 .font-mono-data {
   font-family: var(--font-mono);
 }
 
-/* ── Skeleton / shimmer animation ── */
-@keyframes shimmer {
-  0% { background-position: -200% 0; }
-  100% { background-position: 200% 0; }
-}
-
-.skeleton {
-  background: linear-gradient(
-    90deg,
-    var(--bg-elevated, #f3f4f6) 25%,
-    var(--bg-surface, #e5e7eb) 50%,
-    var(--bg-elevated, #f3f4f6) 75%
-  );
-  background-size: 200% 100%;
-  animation: shimmer 1.5s ease-in-out infinite;
-  border-radius: 0.375rem;
-}
+/* ── Custom variant for dark mode ── */
+@custom-variant dark (&:where(.dark, .dark *));
 
 /* ── Dark theme overrides ── */
 .dark {
@@ -104,9 +173,26 @@ body {
   outline-offset: 2px;
 }
 
-/* Remove default outline for mouse users */
 :focus:not(:focus-visible) {
   outline: none;
+}
+
+/* ── Skeleton / shimmer animation ── */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--bg-elevated, #f3f4f6) 25%,
+    var(--bg-surface, #e5e7eb) 50%,
+    var(--bg-elevated, #f3f4f6) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+  border-radius: 0.375rem;
 }
 
 /* ── Page transitions ── */
@@ -125,25 +211,11 @@ body {
   to { opacity: 1; transform: translateY(0); }
 }
 
-.animate-slide-up {
-  animation: slideUp 0.4s ease-out both;
-}
-
-.animate-slide-up-delay-1 {
-  animation: slideUp 0.4s ease-out 0.1s both;
-}
-
-.animate-slide-up-delay-2 {
-  animation: slideUp 0.4s ease-out 0.2s both;
-}
-
-.animate-slide-up-delay-3 {
-  animation: slideUp 0.4s ease-out 0.3s both;
-}
-
-.animate-slide-up-delay-4 {
-  animation: slideUp 0.4s ease-out 0.4s both;
-}
+.animate-slide-up { animation: slideUp 0.4s ease-out both; }
+.animate-slide-up-delay-1 { animation: slideUp 0.4s ease-out 0.1s both; }
+.animate-slide-up-delay-2 { animation: slideUp 0.4s ease-out 0.2s both; }
+.animate-slide-up-delay-3 { animation: slideUp 0.4s ease-out 0.3s both; }
+.animate-slide-up-delay-4 { animation: slideUp 0.4s ease-out 0.4s both; }
 
 /* ── Card hover ── */
 .card-hover {

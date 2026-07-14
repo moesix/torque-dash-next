@@ -122,7 +122,7 @@ which enforces ownership (or `?shareId=` for shared sessions) and returns
 
 ## 3. Frontend Internals (`apps/frontend/`)
 
-Stack: **React 18 + TypeScript + Vite + Tailwind + Tremor + ECharts +
+Stack: **React 18 + TypeScript + Vite + Tailwind v4 + Tremor + ECharts +
 react-leaflet + TanStack Query + zustand**.
 
 ### 3.1 App structure
@@ -227,9 +227,11 @@ extracts `[timestamp_ms, value]` pairs via the safe `coerceScalar()` helper.
 
 ### 3.8 Design System and Theme
 
-- **CSS custom properties** — colors (bg-base, bg-card, text-primary, accent, etc.) defined as CSS variables in `index.css`, with `.dark` class overrides for dark mode. The Tailwind config references these via `var()` tokens (`surface`, `fg`, `brand-accent`).
-- **Typography** — Google Fonts: Space Grotesk for display/body text, Martian Mono for monospace data. Font stacks are exposed as `--font-display`, `--font-body`, `--font-mono` CSS variables and mapped to Tailwind `fontFamily` aliases (`display`, `body`, `mono`).
-- **Dark mode** — managed by `lib/theme.ts`: detects `prefers-color-scheme`, persists choice to localStorage, provides `getTheme()` / `setTheme()` / `toggleTheme()`. The theme toggle button (sun/moon icons) lives in `AppShell` and applies the `.dark` class on `<html>`.
+- **CSS custom properties** — colors (bg-base, bg-card, text-primary, accent, etc.) defined as CSS variables in `index.css`, with `.dark` class overrides for dark mode. Tailwind v4 uses a CSS-first configuration approach: all design tokens are defined in the `@theme` block in `index.css`, referenced as `var()` tokens (`--color-surface-base`, `--color-fg`, `--color-brand-accent`). The `tailwind.config.ts` file is reduced to a minimal placeholder since the JS config is no longer the primary source of truth.
+- **PostCSS replaced** — the `postcss.config.js` file has been removed. Tailwind is loaded via the `@tailwindcss/vite` Vite plugin (in `vite.config.ts`), with `@import "tailwindcss"` in `index.css` replacing the old `@tailwind base/components/utilities` directives.
+- **Tremor v3 compatibility** — Tremor v3 uses class names like `bg-tremor-brand-emphasis` or `rounded-tremor-default` that Tailwind v4 does not detect by default from `node_modules`. These are safelisted via `@source inline()` pattern directives in `index.css`, which replace the v3 `safelist: [{pattern: /.../}]` JS config approach. The Tremor `node_modules` directory is also scanned with `@source "../node_modules/@tremor/react/dist/**/*.{js,ts,jsx,tsx}"` so any Tremor classes found in source are picked up automatically.
+- **Typography** — Google Fonts: Space Grotesk for display/body text, Martian Mono for monospace data. Font stacks are exposed as `--font-display`, `--font-body`, `--font-mono` CSS variables and mapped to Tailwind theme values (`--font-display`, `--font-body`, `--font-mono`) in the `@theme` block.
+- **Dark mode** — managed by `lib/theme.ts`: detects `prefers-color-scheme`, persists choice to localStorage, provides `getTheme()` / `setTheme()` / `toggleTheme()`. The theme toggle button (sun/moon icons) lives in `AppShell` and applies the `.dark` class on `<html>`. The custom variant `@custom-variant dark (&:where(.dark, .dark *));` in `index.css` enables `dark:` class-based Tailwind variants.
 - **Mobile drawer** — `MobileDrawer.tsx` renders a slide-out navigation panel with backdrop overlay, Escape-to-close, focus-on-open, and dark mode support. Triggered by a hamburger button visible below the `md` breakpoint.
 - **Loading skeletons** — `Skeleton.tsx` provides a shimmer-animated placeholder for async content; `ErrorAlert.tsx` renders a dismissible error banner. Both replace raw text placeholders in `SessionBrowser` and `ReplayDashboard`.
 - **Micro-interactions** — fadeIn/slideUp CSS animations with staggered delays (4 tiers) on dashboard sections; page transitions via `<Outlet key={location.pathname}>`; card-hover effects on table rows. All animations opt out when `prefers-reduced-motion: reduce` is set.
