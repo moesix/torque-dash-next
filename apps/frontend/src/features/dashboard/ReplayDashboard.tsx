@@ -16,8 +16,10 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
-import { Card, Grid, Text, Title } from '@tremor/react';
+import { Card, Grid, Title } from '@tremor/react';
 import { getSession, getTelemetry } from '@/lib/api';
+import Skeleton from '@/components/ui/Skeleton';
+import ErrorAlert from '@/components/ui/ErrorAlert';
 import { usePlaybackStore } from '@/app/playbackStore';
 import SessionSummaryCard from '@/components/charts/SessionSummaryCard';
 import GpsTrackMap from '@/components/map/GpsTrackMap';
@@ -149,15 +151,53 @@ export default function ReplayDashboard() {
   // ── Loading / error states ─────────────────────────────────────────
   if (sessionQuery.isLoading) {
     return (
-      <Card>
-        <Text>Loading session…</Text>
-      </Card>
+      <div className="space-y-4">
+        {/* Slim banner skeleton */}
+        <div className="rounded-lg bg-white px-4 py-3 shadow-sm dark:bg-[var(--bg-card)]">
+          <Skeleton className="h-5 w-48 mb-1" />
+          <Skeleton className="h-3 w-64" />
+        </div>
+
+        {/* Controls + Gauges skeleton */}
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+          <div className="lg:col-span-2">
+            <Card>
+              <Skeleton className="h-12 w-full" />
+            </Card>
+          </div>
+          <Card>
+            <div className="flex justify-around">
+              <Skeleton className="h-20 w-20" />
+              <Skeleton className="h-20 w-20" />
+              <Skeleton className="h-20 w-20" />
+            </div>
+          </Card>
+        </div>
+
+        {/* Chart area skeleton */}
+        <Card>
+          <Skeleton className="h-4 w-24 mb-4" />
+          <Skeleton className="h-64 w-full" />
+        </Card>
+
+        {/* Map + Metrics skeleton */}
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+          <Card className="lg:col-span-2">
+            <Skeleton className="h-4 w-24 mb-4" />
+            <Skeleton className="h-48 w-full" />
+          </Card>
+          <Card>
+            <Skeleton className="h-4 w-24 mb-4" />
+            <Skeleton className="h-32 w-full" />
+          </Card>
+        </div>
+      </div>
     );
   }
   if (sessionQuery.isError || !sessionQuery.data) {
     return (
       <Card>
-        <Text className="text-rose-600">Session not found.</Text>
+        <ErrorAlert message="Session not found." />
       </Card>
     );
   }
@@ -165,30 +205,34 @@ export default function ReplayDashboard() {
   // ── Render ─────────────────────────────────────────────────────────
   return (
     <div className="space-y-4">
-      {/* Session header */}
-      <Card>
-        <Title>{sessionQuery.data.name || 'Session Replay'}</Title>
-        <Text>
+      {/* Slim session banner — not a full Card */}
+      <div className="animate-slide-up rounded-lg bg-white px-4 py-3 shadow-sm dark:bg-[var(--bg-card)]">
+        <h1 className="text-lg font-semibold text-gray-900 dark:text-white font-display">
+          {sessionQuery.data.name || 'Session Replay'}
+        </h1>
+        <p className="text-sm text-gray-500 dark:text-[var(--text-secondary)]">
           {sessionQuery.data.startDate
             ? new Date(sessionQuery.data.startDate).toLocaleString()
             : ''}
           {sessionQuery.data.duration ? ` · ${sessionQuery.data.duration}` : ''}
-        </Text>
-      </Card>
+        </p>
+      </div>
 
-      {/* Transport controls */}
-      <PlaybackControls frames={frames} />
-
-      {/* Session summary card with live gauges */}
-      <SessionSummaryCard
-        frames={frames}
-        maxRpm={maxRpm}
-        maxSpeed={maxSpeed}
-        maxCoolant={maxCoolant}
-      />
+      {/* Controls + Gauges row — side by side on lg */}
+      <div className="animate-slide-up-delay-1 grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <div className="lg:col-span-2">
+          <PlaybackControls frames={frames} />
+        </div>
+        <SessionSummaryCard
+          frames={frames}
+          maxRpm={maxRpm}
+          maxSpeed={maxSpeed}
+          maxCoolant={maxCoolant}
+        />
+      </div>
 
       {/* Overlay chart + metric selector */}
-      <Grid numItemsLg={3} className="gap-4">
+      <Grid numItemsLg={3} className="animate-slide-up-delay-2 gap-4">
         <Card className="lg:col-span-2">
           <Title>Time Series</Title>
           <OverlayChart
@@ -211,20 +255,20 @@ export default function ReplayDashboard() {
         </Card>
       </Grid>
 
-      {/* GPS track map */}
-      <Card>
-        <Title>GPS Track</Title>
-        {telemetryQuery.isLoading ? (
-          <Text className="mt-2">Loading telemetry…</Text>
-        ) : (
-          <div className="mt-2">
-            <GpsTrackMap frames={frames} />
-          </div>
-        )}
-      </Card>
-
-      {/* Decoded metrics table */}
-      <DecodedMetricsTable sources={available} seriesData={allSeriesData} />
+      {/* Map + Metrics row — side by side on lg */}
+      <div className="animate-slide-up-delay-3 grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <Card className="lg:col-span-2">
+          <Title>GPS Track</Title>
+          {telemetryQuery.isLoading ? (
+            <Skeleton className="mt-2 h-48 w-full" />
+          ) : (
+            <div className="mt-2">
+              <GpsTrackMap frames={frames} />
+            </div>
+          )}
+        </Card>
+        <DecodedMetricsTable sources={available} seriesData={allSeriesData} />
+      </div>
     </div>
   );
 }

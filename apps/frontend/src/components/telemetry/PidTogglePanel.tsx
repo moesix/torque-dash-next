@@ -163,25 +163,25 @@ export default function PidTogglePanel({
         <button
           type="button"
           onClick={onSelectAll}
-          className="rounded bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700 hover:bg-blue-100"
+          className="rounded bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700 hover:bg-blue-100 dark:bg-blue-900/40 dark:text-blue-300 dark:hover:bg-blue-900/60"
         >
           Select All
         </button>
         <button
           type="button"
           onClick={onClear}
-          className="rounded bg-gray-50 px-2 py-0.5 text-xs font-medium text-gray-600 hover:bg-gray-100"
+          className="rounded bg-gray-50 px-2 py-0.5 text-xs font-medium text-gray-600 hover:bg-gray-100 dark:bg-[var(--bg-surface)] dark:text-[var(--text-secondary)] dark:hover:bg-[var(--bg-elevated)]"
         >
           Clear
         </button>
         <button
           type="button"
           onClick={onReset}
-          className="rounded bg-gray-50 px-2 py-0.5 text-xs font-medium text-gray-600 hover:bg-gray-100"
+          className="rounded bg-gray-50 px-2 py-0.5 text-xs font-medium text-gray-600 hover:bg-gray-100 dark:bg-[var(--bg-surface)] dark:text-[var(--text-secondary)] dark:hover:bg-[var(--bg-elevated)]"
         >
           Reset
         </button>
-        <span className="ml-auto text-xs text-gray-400">
+        <span className="ml-auto text-xs text-gray-400 dark:text-[var(--text-muted)]">
           {count} of {total} selected
         </span>
       </div>
@@ -192,7 +192,7 @@ export default function PidTogglePanel({
         value={search}
         onChange={onSearchChange}
         placeholder="Search metrics…"
-        className="w-full rounded-md border border-gray-300 px-2 py-1 text-sm placeholder-gray-400 focus:border-blue-400 focus:outline-none"
+        className="w-full rounded-md border border-gray-300 px-2 py-1 text-sm placeholder-gray-400 focus:border-blue-400 focus:outline-none dark:border-[var(--border-default)] dark:bg-[var(--bg-surface)] dark:text-[var(--text-primary)] dark:placeholder-[var(--text-muted)]"
         aria-label="Filter metrics"
       />
 
@@ -209,20 +209,22 @@ export default function PidTogglePanel({
               <button
                 type="button"
                 onClick={() => toggleCategory(cat)}
-                className="flex w-full items-center gap-1 rounded px-1 py-0.5 text-left text-xs font-semibold text-gray-500 hover:bg-gray-50"
+                aria-expanded={isExpanded}
+                aria-controls={`pid-category-${cat}`}
+                className="flex w-full items-center gap-1 rounded px-1 py-0.5 text-left text-xs font-semibold text-gray-500 hover:bg-gray-50 dark:text-[var(--text-muted)] dark:hover:bg-[var(--bg-surface)]"
               >
                 <span className="w-3 text-center text-[10px]">
                   {isExpanded ? '▼' : '▶'}
                 </span>
                 <span>{CATEGORY_LABELS[cat] ?? cat}</span>
-                <span className="ml-auto text-[10px] text-gray-400">
+                <span className="ml-auto text-[10px] text-gray-400 dark:text-[var(--text-muted)]">
                   {items.length}
                 </span>
               </button>
 
               {/* Items */}
               {isExpanded && (
-                <div className="ml-2 space-y-0.5">
+                <div id={`pid-category-${cat}`} className="ml-2 space-y-0.5">
                   {items.map((src) => {
                     const idx = colorIndex.get(src.pid) ?? 0;
                     const color = COLORS[idx % COLORS.length];
@@ -231,20 +233,20 @@ export default function PidTogglePanel({
                     return (
                       <label
                         key={src.pid}
-                        className="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 text-xs hover:bg-gray-50"
+                        className="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 text-xs hover:bg-gray-50 dark:text-[var(--text-primary)] dark:hover:bg-[var(--bg-surface)]"
                       >
                         <input
                           type="checkbox"
                           checked={isChecked}
                           onChange={() => onToggle(src.pid)}
-                          className="h-3 w-3 accent-blue-600"
+                          className="h-3 w-3 accent-blue-600 dark:accent-blue-400"
                         />
                         <span
                           className="inline-block h-2.5 w-2.5 rounded-full shrink-0"
                           style={{ backgroundColor: color }}
                         />
                         <span className="truncate flex-1">{src.short}</span>
-                        <span className="text-[10px] text-gray-400 shrink-0">
+                        <span className="text-[10px] text-gray-400 shrink-0 dark:text-[var(--text-muted)]">
                           {src.unit}
                         </span>
                       </label>
@@ -257,7 +259,7 @@ export default function PidTogglePanel({
         })}
 
         {filtered.length === 0 && (
-          <p className="py-4 text-center text-xs text-gray-400">
+          <p className="py-4 text-center text-xs text-gray-400 dark:text-[var(--text-muted)]">
             No metrics match your search.
           </p>
         )}

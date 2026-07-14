@@ -110,7 +110,7 @@ export default function OverlayChart({
       chart.dispose();
       chartRef.current = null;
     };
-  }, [onCursorMove]);
+  }, [onCursorMove, sources.length]);
 
   // ── Data rebuild effect (non-merge: replaces everything) ───────────
   useEffect(() => {
@@ -285,13 +285,12 @@ export default function OverlayChart({
     return (
       <div
         ref={containerRef}
-        style={{ width: '100%', height: 280 }}
-        className="flex items-center justify-center text-sm text-gray-400"
+        className="flex h-56 w-full items-center justify-center text-sm text-gray-400 lg:h-72"
       >
         <span>Select metrics to display</span>
       </div>
     );
   }
 
-  return <div ref={containerRef} style={{ width: '100%', height: 280 }} />;
+  return <div ref={containerRef} className="h-56 w-full lg:h-72" />;
 }
