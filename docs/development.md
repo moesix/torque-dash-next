@@ -215,6 +215,22 @@ blockers are resolved and re-reviewed as PASS:
   `/settings` page exposes the toggle. **Operator model:** the app is
   single-operator, so ANY authenticated account may flip the toggle (there is no
   RBAC). Documented as intended, not a bug.
+- **Upload API Token UI.** The `/settings` page additionally lets users generate,
+  view (one-time), copy, and clear the upload Bearer token. The token is stored
+  in the `Settings` DB row; when the `UPLOAD_API_TOKEN` env var is set, the UI
+  reports the token as env-managed and disables the generate/clear buttons.
+  `GET /api/settings` returns `hasUploadApiToken` / `tokenFromEnv` booleans, and
+  `POST /api/settings/upload-token` generates a new random hex token.
+- **PID Decode + Multi-series Overlay Chart.** The ReplayDashboard now features
+  a single `OverlayChart.tsx` (replaces the old dual `TimeSeriesChart.tsx`) that
+  renders all selected telemetry sources on a shared time axis with
+  per-unit-group y-axes. A `PidTogglePanel` lets users search, filter by
+  category, and toggle metrics on/off. A collapsible `DecodedMetricsTable` shows
+  min/max/avg/last for every PID. The `pidDecode.ts` engine auto-discovers PID
+  sources from the `values` JSONB column using embedded Torque metadata
+  (`userFullName*`/`userUnit*`/`defaultUnit*`) with a curated fallback map for
+  standard OBD-II PIDs. A pre-existing `RangeError` from spread-into-`Math.max`
+  at ~10k frames has also been fixed. The old `TimeSeriesChart.tsx` was deleted.
 
 ---
 
@@ -222,16 +238,26 @@ blockers are resolved and re-reviewed as PASS:
 
 - **MVP implementation is complete.** The backend ingestion, TimescaleDB
   migration, paged telemetry endpoint, and the full React replay dashboard
-  (synced ECharts + imperative Leaflet marker) are implemented, and the
+  (overlay chart + imperative Leaflet marker) are implemented, and the
   auth-contract BLOCKERs + HIGH items are **resolved and re-reviewed PASS**.
 - **Verification done:** frontend via `npm run build` (`tsc --noEmit && vite build`)
   and `tsc`; backend via `node -c` syntax checks on the relevant files.
-- **Follow-up features added:** env-tunable upload rate limit with trusted-email
-  burst exemption, and runtime/disableable registration (`Settings` singleton +
-  `DISABLE_REGISTRATION` env kill-switch + SPA `/settings` toggle).
+- **Additional features implemented:**
+  - Env-tunable upload rate limit with trusted-email burst exemption.
+  - Runtime-toogleable registration (`Settings` singleton +
+    `DISABLE_REGISTRATION` env kill-switch + SPA `/settings` toggle).
+  - **Upload API Token UI** on the `/settings` page (generate, view once, copy,
+    clear; env override respected).
+  - **PID Decode + Multi-series Overlay Chart**: `pidDecode.ts` auto-discovers
+    all OBD-II PIDs from the `values` JSONB; `OverlayChart.tsx` renders multiple
+    series with per-unit-group y-axes; `PidTogglePanel` provides search,
+    category filtering, and selection management; `DecodedMetricsTable` shows
+    per-PID aggregates. Replaces the old dual `TimeSeriesChart.tsx` layout.
+  - `RangeError` on large datasets fixed (`safeMax` reduce replaces
+    spread-into-`Math.max`).
 - **Not yet done:** the system has **not** been run end-to-end against a live
   TimescaleDB instance; remaining open issues are the MEDIUM (SSRF TOCTOU,
   ingestBuffer race, CSRF) and LOW items listed above.
 - **Recommended gate before marking MVP "done":** run a live smoke test
-  (register → login → Torque Pro upload → replay dashboard renders synced
-  charts + moving map marker), then address the MEDIUM items.
+  (register → login → upload telemetry → replay dashboard renders overlay chart
+  with PID metrics + moving map marker), then address the MEDIUM items.

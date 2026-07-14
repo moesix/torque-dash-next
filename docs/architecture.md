@@ -132,17 +132,20 @@ src/
     queryClient.ts       # TanStack Query client
     router.tsx           # routes: /login /register /sessions /sessions/:id
   components/
-    charts/  TimeSeriesChart.tsx, KpiCard.tsx, GaugeTile.tsx
+    charts/  OverlayChart.tsx, KpiCard.tsx, GaugeTile.tsx
     layout/  AppShell.tsx
     map/     GpsTrackMap.tsx
     tables/  SessionTable.tsx
+    telemetry/ PidTogglePanel.tsx, DecodedMetricsTable.tsx
   features/
     auth/    Login.tsx, Register.tsx, useAuth.ts
     dashboard/ ReplayDashboard.tsx, PlaybackControls.tsx
     sessions/  SessionBrowser.tsx
+    settings/  SettingsPage.tsx
   lib/
     api.ts    # fetch wrapper, credentials:'include'
     types.ts
+    pidDecode.ts   # PID auto-decode engine (pdDecode.ts)
 ```
 
 ### 3.2 Data fetching
@@ -158,12 +161,31 @@ src/
   the cursor does **not** re-render the React tree — critical because the
   **`<MapContainer>` must stay mounted**.
 
-### 3.4 ECharts synced time-series
-- `TimeSeriesChart.tsx` inits an ECharts instance, joins the shared group
-  `echarts.connect('torqueGroup')`, so axis pointers stay in sync across the
-  RPM and Speed charts when the user hovers either one.
-- On `updateAxisPointer`, the hovered axis value is pushed into the store via
-  `setCursorTime(axisValue)`.
+### 3.4 Multi-series Overlay Chart
+- `OverlayChart.tsx` renders an ECharts instance with dynamic series: each
+  selected metric source becomes a `type: 'line'` series on a shared time (x)
+  axis within a **single** chart — replaces the old dual TimeSeriesChart layout.
+- **Per-unit-group y-axes** — sources are grouped by their unit string (e.g.
+  `rpm`, `km/h`, `°C`, `V`). Each unique unit gets a separate y-axis (left for
+  the first group, right with offset for subsequent groups), letting you overlay
+  RPM, speed, coolant temp, and O2 voltage without scale distortion.
+- **Two separate effects** — data rebuild uses `notMerge: true` (replaces all
+  series + yAxis config); cursor markLine updates use `notMerge: false` (merge
+  mode) so a hover never re-renders the full dataset.
+- **No `torqueGroup` / `echarts.connect`** — the GPS map uses an imperative
+  zustand subscription, so ECharts group sync is unnecessary. Hovering the chart
+  fires `onCursorMove(tsMs)` on `updateAxisPointer`, which pushes the value into
+  `playbackStore.setCursorTime`.
+- **Large dataset handling** — `large: true` + LTTB sampling on each series.
+  Data build uses pre-allocated arrays; a `safeMax` reduce loop replaces the old
+  spread-into-`Math.max` pattern that threw `RangeError` at ~10k frames.
+- **Metric selection** — `PidTogglePanel` renders available series grouped by
+  heuristic category (Engine, Fuel & Air, Temperature, Electrical, Drivetrain,
+  Other) with search filtering, color swatches matching the chart palette, and
+  Select All / Clear / Reset buttons.
+- **Decoded metrics table** — `DecodedMetricsTable` (collapsible) shows
+  min/max/avg/last for every PID source, computed from pre-memoized series data
+  (no frame re-scan on expand).
 
 ### 3.5 react-leaflet GPS track (imperative marker)
 - `GpsTrackMap.tsx` mounts `<MapContainer>` **once** and never re-renders it on
@@ -178,22 +200,31 @@ src/
 ## 4. Synchronized Replay Data Flow
 
 ```
-User hovers RPM chart
-   │  (ECharts updateAxisPointer)
+User hovers overlay chart
+   │  (ECharts updateAxisPointer → onCursorMove(tsMs))
    ▼
-TimeSeriesChart → setCursorTime(axisValue)        [zustand playbackStore]
+OverlayChart → setCursorTime(tsMs)               [zustand playbackStore]
    │
-   ├──────────────▶ TimeSeriesChart (Speed)       [echarts.connect('torqueGroup') shows synced axis pointer]
+   ├── react-leaflet GpsTrackMap (subscribe)      [imperative, outside React render]
+   │        │  findNearestFrame(frames, cursorTime)  (binary search)
+   │        ▼
+   │   marker.setLatLng([lat, lon])
    │
-   └──────────────▶ GpsTrackMap (subscribe)        [imperative, outside React render]
-                         │  findNearestFrame(frames, cursorTime)  (binary search)
-                         ▼
-                    marker.setLatLng([lat, lon])
+   └── OverlayChart (markLine merge effect)       [merge mode, no re-render]
+            │  updates cursor vertical line position
+            ▼
+       cursorTime applied without full data rebuild
 ```
 
-The single source of truth is `cursorTime` in the zustand store. Both the
-second chart (via ECharts group connect) and the map marker (via imperative
-subscription) react to it without re-rendering the component tree.
+The single source of truth is `cursorTime` in the zustand store. The overlay
+chart's cursor markLine (updated via ECharts merge mode, `notMerge: false`) and
+the map marker (set imperatively outside React render) react to it without
+re-rendering the component tree.
+
+Unlike the previous dual-chart layout — which used `echarts.connect('torqueGroup')`
+to sync axis pointers across separate RPM and Speed charts — the current overlay
+chart renders all selected series in a single ECharts instance. Cross-chart sync
+is unnecessary.
 
 ---
 
@@ -239,6 +270,9 @@ Each service should expose a healthcheck (backend: `GET /health`).
 | `GET /api/sessions/:id` | cookie + owner | session metadata (no full logs) |
 | `GET /api/sessions/:id/telemetry?from&to&limit` | cookie + owner | paged telemetry frames |
 | `GET /api/sessions/:id/shared/:shareId` | shareId | shared view |
+| `GET /api/settings` | none | public settings (disableRegistration, hasUploadApiToken) |
+| `PUT /api/settings` | cookie | update settings (disableRegistration, uploadApiToken) |
+| `POST /api/settings/upload-token` | cookie | generate a new upload API token (shown once) |
 | `POST /api/upload` (`/upload` from Torque) | none (email-gated) | ingest |
 | `GET /health` | none | probe |
 

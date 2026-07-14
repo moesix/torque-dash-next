@@ -69,3 +69,27 @@ export interface Settings {
 export interface GenerateUploadTokenResponse {
   uploadApiToken: string;
 }
+
+// ── PID Decode / Multi-Series Overlay types ──────────────────────────────
+
+/** A metric sourced from the `values` JSONB bag (a decoded OBD-II PID). */
+export interface PidMeta {
+  pid: string;
+  full: string;
+  short: string;
+  unit: string;
+  source: 'pid';
+}
+
+/** A metric sourced from a dedicated `TelemetryFrame` column. */
+export interface ColumnMeta {
+  pid: string;
+  full: string;
+  short: string;
+  unit: string;
+  source: 'column';
+  field: keyof TelemetryFrame;
+}
+
+/** Union of every discoverable metric source. */
+export type SeriesSource = PidMeta | ColumnMeta;
