@@ -77,7 +77,7 @@ which enforces ownership (or `?shareId=` for shared sessions) and returns
   — never emails.
 - **GPS:** `kff1005` = lon, `kff1006` = lat. Non-GPS uploads are stored with
   null lat/lon (no longer dropped).
-- **Promoted columns:** `engineRpm` ← `values.k4`, `vehicleSpeed` ← `values.k5`.
+- **Promoted columns:** `engineRpm` ← `values.kc` (PID 0x0C), `vehicleSpeed` ← `values.kd` (PID 0x0D). Torque stores hex keys **without leading zeros**, so the key is `kc`, not `k0c`. Values are extracted with a zero‑safe pattern: `values.kc != null ? Number(values.kc) : null` (preserves legitimate `0` values).
 - **SSRF-guarded `forwardUrls`:** each URL is checked with `lib/ssrfGuard.isSafeUrl`
   before a fire-and-forget `fetch`.
 - Responds `200 OK` immediately; the DB flush is asynchronous.
@@ -161,7 +161,25 @@ src/
   the cursor does **not** re-render the React tree — critical because the
   **`<MapContainer>` must stay mounted**.
 
-### 3.4 Multi-series Overlay Chart
+### 3.4 PID Decode Engine (`pidDecode.ts`)
+
+The auto-discovery engine (`lib/pidDecode.ts`) extracts time-series data from
+every frame's `values` JSONB bag using two sources of metadata:
+
+- **Torque metadata keys** (`userFullName*`, `userShortName*`, `userUnit*`,
+  `defaultUnit*`) — scanned from the frames themselves. Metadata keys use
+  **two‑character PID suffixes** (e.g. `userFullName05`), so when a metadata
+  lookup for a single‑character PID key like `k5` → suffix `"5"` fails, the
+  engine retries with a leading‑zero padded suffix `"05"`.
+- **Curated `FALLBACK_MAP`** — keys are in Torque's native format (hex **without**
+  leading zeros, e.g. `k5`, `kc`, `kd`, `kf`, `kff1007`). No entries use
+  `k05`/`k0c` etc.
+
+The `getAvailableSeries()` function returns `SeriesSource[]` with resolved
+display names and units (metadata > fallback > raw key), and `getSeriesData()`
+extracts `[timestamp_ms, value]` pairs via the safe `coerceScalar()` helper.
+
+### 3.5 Multi-series Overlay Chart
 - `OverlayChart.tsx` renders an ECharts instance with dynamic series: each
   selected metric source becomes a `type: 'line'` series on a shared time (x)
   axis within a **single** chart — replaces the old dual TimeSeriesChart layout.
@@ -187,7 +205,7 @@ src/
   min/max/avg/last for every PID source, computed from pre-memoized series data
   (no frame re-scan on expand).
 
-### 3.5 react-leaflet GPS track (imperative marker)
+### 3.6 react-leaflet GPS track (imperative marker)
 - `GpsTrackMap.tsx` mounts `<MapContainer>` **once** and never re-renders it on
   cursor changes.
 - On `cursorTime` change, it finds the nearest frame via a **binary search**

@@ -50,8 +50,8 @@ class UploadController {
                 lon: lon != null ? Number(lon) : null,
                 lat: lat != null ? Number(lat) : null,
                 values: values,
-                engineRpm: Number(values.k4) || null,
-                vehicleSpeed: Number(values.k5) || null
+                engineRpm: values.kc != null ? Number(values.kc) : null,
+                vehicleSpeed: values.kd != null ? Number(values.kd) : null
             });
 
             // Respond immediately — do NOT await the DB flush.
