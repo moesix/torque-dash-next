@@ -156,19 +156,21 @@ export default function ReplayDashboard() {
         </div>
 
         {/* Controls + Gauges skeleton */}
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3 items-start">
-          <div className="lg:col-span-2">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
+          <div className="lg:w-2/3">
             <Card>
               <Skeleton className="h-12 w-full" />
             </Card>
           </div>
-          <Card>
-            <div className="flex justify-around">
-              <Skeleton className="h-20 w-20" />
-              <Skeleton className="h-20 w-20" />
-              <Skeleton className="h-20 w-20" />
-            </div>
-          </Card>
+          <div className="lg:w-1/3">
+            <Card>
+              <div className="flex justify-around">
+                <Skeleton className="h-20 w-20" />
+                <Skeleton className="h-20 w-20" />
+                <Skeleton className="h-20 w-20" />
+              </div>
+            </Card>
+          </div>
         </div>
 
         {/* Chart area skeleton */}
@@ -216,16 +218,18 @@ export default function ReplayDashboard() {
       </div>
 
       {/* Controls + Gauges row — side by side on lg */}
-      <div className="animate-slide-up-delay-1 grid grid-cols-1 gap-4 lg:grid-cols-3 items-start">
-        <div className="lg:col-span-2 h-fit">
+      <div className="animate-slide-up-delay-1 flex flex-col gap-4 lg:flex-row lg:items-start">
+        <div className="lg:w-2/3">
           <PlaybackControls frames={frames} />
         </div>
+        <div className="lg:w-1/3">
         <SessionSummaryCard
           frames={frames}
           maxRpm={maxRpm}
           maxSpeed={maxSpeed}
           maxCoolant={maxCoolant}
         />
+        </div>
       </div>
 
       {/* Overlay chart + metric selector */}
