@@ -180,7 +180,7 @@ export default function OverlayChart({
       axisIdx++;
     }
 
-    // Grid — leave space for right-side offset axes, capped at 180px
+    // Grid — leave space for right-side offset axes, capped at 150px
     const rightMargin = Math.min(
       150,
       24 + Math.max(0, visibleAxisCount - 1) * 45,
