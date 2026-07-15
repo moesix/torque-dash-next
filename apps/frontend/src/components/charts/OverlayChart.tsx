@@ -180,7 +180,7 @@ export default function OverlayChart({
       axisIdx++;
     }
 
-    // Grid — leave space for right-side offset axes, capped at 180px
+    // Grid — leave space for right-side offset axes, capped at 150px
     const rightMargin = Math.min(
       150,
       24 + Math.max(0, visibleAxisCount - 1) * 45,
@@ -277,13 +277,16 @@ export default function OverlayChart({
   }, [cursorTime, sources.length]);
 
   // ── Render ─────────────────────────────────────────────────────────
-  return (
-    <div ref={containerRef} className="h-56 w-full lg:h-72">
-      {sources.length === 0 && (
-        <span className="flex h-full items-center justify-center text-sm text-gray-400">
-          Select metrics to display
-        </span>
-      )}
-    </div>
-  );
+  if (sources.length === 0) {
+    return (
+      <div
+        ref={containerRef}
+        className="flex h-56 w-full items-center justify-center text-sm text-gray-400 lg:h-72"
+      >
+        <span>Select metrics to display</span>
+      </div>
+    );
+  }
+
+  return <div ref={containerRef} className="h-56 w-full lg:h-72" />;
 }

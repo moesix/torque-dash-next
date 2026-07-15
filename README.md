@@ -53,13 +53,23 @@ After creating all user accounts, disable public registration via the Settings U
 ## Features
 
 - **Docker-first deployment** — one `docker compose up` and you're running.
-- **Time-series storage** — TimescaleDB hypertable with continuous aggregates for fast session queries over large log volumes.
-- **React dashboard** — live vehicle view, route map (OpenStreetMap tiles, no API key), session replay with a multi-series PID overlay chart, and per-session summary cards with live SVG ring gauges.
-- **PID decode engine** — auto-discovers all OBD-II parameters from Torque's JSONB data using embedded metadata and a curated fallback map; no schema changes needed for new PIDs.
-- **Session management** — auto-naming (`Trip DDMMYYYY HH:MM`), inline rename, and per-session summaries with duration, max speed, and max RPM.
-- **Upload authentication** — email-gated uploads with optional API-token (`Bearer`) bypass for Torque Pro; token manageable from the Settings UI or environment variable.
-- **Dark mode & mobile** — system preference detection with manual override, responsive layout with slide-out navigation drawer, and loading skeletons throughout.
-- **Operational guards** — rate-limited endpoints, togglable registration, CSRF protection, and environment-driven configuration.
+- **Time-series storage** — TimescaleDB hypertable + continuous aggregate for fast
+  per-session queries over large log volumes.
+- **React dashboard** — live vehicle view, route map (OpenStreetMap tiles, no API key), replay with a multi-series PID overlay chart (toggleable metric panel, collapsible stats table, y-axis capped at 4 axes total to prevent overcrowding), a session summary card with live SVG ring gauges (RPM, Coolant, Speed) that update as the playback cursor moves, and a settings page with upload API token management. Full dark mode support, mobile-responsive layout with a slide-out navigation drawer, and loading skeletons throughout.
+- **Session auto-naming** — new sessions are automatically named `Trip DDMMYYYY HH:MM AM/PM` on first upload.
+- **Inline session rename** — rename sessions directly from the session table via an inline edit button (pencil icon, Enter/Escape/blur handling).
+- **PID decode engine** — auto-discovers all OBD-II parameters from Torque's JSONB `values` column using embedded metadata (`userFullName*`/`userUnit*`) and a curated fallback map; no schema changes needed for new PIDs. Torque stores OBD‑II PIDs as hex keys without leading zeros (e.g. `kc` for RPM/PID 0x0C, `kd` for Speed/PID 0x0D).
+- **Controlled ingestion** — email-gated uploads with an optional API-token
+  (`Bearer`) authentication for Torque Pro over HTTPS; token can be generated from
+  the Settings UI or set via the `UPLOAD_API_TOKEN` environment variable. When set,
+  uploads require both a valid email address AND the bearer token for authentication.
+- **Operational guards** — rate-limited upload endpoint, togglable open
+  registration, and environment-driven configuration.
+- **Design system** — CSS custom properties for colors, typography, and borders; Google Fonts (Space Grotesk + Martian Mono); Tailwind v4 configured via CSS-first `@theme` block (custom font-family stacks, semantic color tokens, and Tremor design tokens all in `index.css`); PostCSS replaced by the `@tailwindcss/vite` plugin.
+- **Dark mode** — system preference detection with manual override, persisted to localStorage, toggled via a sun/moon button in the app header. All components carry `dark:` Tailwind variants (class-based toggling via `@custom-variant dark` in `index.css`).
+- **Mobile responsive** — responsive layout with a hamburger-triggered slide-out drawer (MobileDrawer), touch-friendly 44px minimum tap targets, and fluid chart sizing that adapts to viewport width.
+- **Accessibility** — focus-visible indicators, skip-to-content link, form validation with aria-invalid/aria-describedby, keyboard navigation on interactive elements, and aria-live regions for dynamic content.
+- **Micro-interactions** — fade-in/slide-up page transitions keyed on the active route, staggered reveal with animation-delay on dashboard sections, card-hover effects on table rows. Respects `prefers-reduced-motion`.
 
 ## Architecture
 
