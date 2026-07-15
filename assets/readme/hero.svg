@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg"
      width="1200" height="320" viewBox="0 0 1200 320"
      role="img" aria-labelledby="hero-title hero-desc">
-  <title id="hero-title">torqueDASH — Self-Hosted OBD-II Vehicle Telemetry Dashboard</title>
+  <title id="hero-title">torqueDASH-Next — Self-Hosted OBD-II Vehicle Telemetry Dashboard</title>
   <desc id="hero-desc">A dark-themed hero banner for the torqueDASH project showing the project name, tagline, quick-start command, and a panel of live OBD-II PID data values including RPM, speed, coolant temperature, intake air temperature, and mass air flow.</desc>
 
   <defs>
@@ -55,6 +55,9 @@
     <text x="232" y="54"
           font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
           font-size="56" font-weight="800" fill="#1abc9c">DASH</text>
+    <text x="380" y="54"
+          font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+          font-size="28" font-weight="600" fill="#8b949e">-Next</text>
 
     <!-- Tagline -->
     <text x="0" y="92"

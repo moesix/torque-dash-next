@@ -1,16 +1,16 @@
-# torqueDASH
+# torqueDASH-Next
 
 <p align="center">
-  <img src="./assets/readme/hero.svg" width="100%" alt="torqueDASH — Self-hosted OBD-II telemetry dashboard">
+  <img src="./assets/readme/hero.svg" width="100%" alt="torqueDASH-Next — Self-hosted OBD-II telemetry dashboard">
 </p>
 
 <p align="center">
   <img src="./imgs/mapview.png" width="100%" alt="Dashboard showing route map with color-coded speed and telemetry chart">
 </p>
 
-## What is torqueDASH?
+## What is torqueDASH-Next?
 
-A self-hosted dashboard for [Torque Pro](https://torque-bhp.com/) vehicle telemetry. Torque Pro streams live OBD-II data from your car over HTTPS; torqueDASH stores it in a time-series database and renders it in a React dashboard — live gauges, a route map, session replays, and per-session summaries. All data stays on your own server.
+A self-hosted dashboard for [Torque Pro](https://torque-bhp.com/) vehicle telemetry. Torque Pro streams live OBD-II data from your car over HTTPS; torqueDASH-Next stores it in a time-series database and renders it in a React dashboard — live gauges, a route map, session replays, and per-session summaries. All data stays on your own server.
 
 ## Quick start
 
