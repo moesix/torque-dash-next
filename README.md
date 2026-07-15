@@ -43,15 +43,16 @@ map, session replays, and per-session summaries.
 
 ## Quick start (Pre-built images — easiest)
 
-No clone needed! Just download the production compose file and run:
+No clone needed! Just download the files and configure:
 
 ```bash
-# Download the production compose file
+# Download the production files
 curl -O https://raw.githubusercontent.com/moesix/torque-dash-next/master/docker-compose.prod.yml
+curl -O https://raw.githubusercontent.com/moesix/torque-dash-next/master/.env.example
 
-# (optional) generate a strong session secret + upload token
-export SESSION_KEYS="$(openssl rand -hex 24)"
-export UPLOAD_API_TOKEN="$(openssl rand -hex 24)"
+# Create your .env file and edit with your settings
+cp .env.example .env
+nano .env  # or your preferred editor
 
 # Start the stack
 docker compose -f docker-compose.prod.yml up -d
@@ -59,9 +60,24 @@ docker compose -f docker-compose.prod.yml up -d
 
 Then open **http://localhost:8080**.
 
-- Images are published to [GitHub Container Registry](https://ghcr.io/moesix/torque-dash-next) on every merge to master.
-- Data is persisted in the `pgdata` volume.
-- Register the first account at the sign-up page, then sign in.
+### Required configuration
+
+Edit your `.env` file with these essential settings:
+
+| Variable | Description | How to generate |
+|----------|-------------|-----------------|
+| `SESSION_KEYS` | Express session secrets | `openssl rand -hex 24` |
+| `UPLOAD_API_TOKEN` | Bearer token for Torque Pro | `openssl rand -hex 24` |
+| `COOKIE_SECURE` | Set to `true` behind HTTPS | — |
+
+### Configure Torque Pro
+
+In Torque Pro → *Settings → Web Preferences*:
+- **Server URL:** `https://<your-host>/api/upload`
+- **Email address:** the email you registered with
+- **Broadcast as HTTP** with header: `Authorization: bearer <UPLOAD_API_TOKEN>`
+
+Images are published to [GitHub Container Registry](https://ghcr.io/moesix/torque-dash-next) on every merge to master. Data is persisted in the `pgdata` volume.
 
 ## Quick start (Build from source)
 

@@ -2,9 +2,9 @@
 # Uses pre-built images from GitHub Container Registry (GHCR)
 #
 # Usage:
-#   1. Copy this file to your server
-#   2. Set environment variables (SESSION_KEYS, UPLOAD_API_TOKEN, etc.)
-#   3. Run: docker compose up -d
+#   1. Copy this file and .env.example to your server
+#   2. Rename .env.example to .env and configure your settings
+#   3. Run: docker compose -f docker-compose.prod.yml up -d
 #
 # No repo clone needed!
 
@@ -30,22 +30,11 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    env_file:
+      - .env
     environment:
       DATABASE_URL: postgres://torquedash:torquedash@db:5432/torquedash
       PORT: "3000"
-      SESSION_KEYS: "${SESSION_KEYS:-please-change-this-in-production}"
-      COOKIE_SECURE: "${COOKIE_SECURE:-false}"
-      COOKIE_SAMESITE: "${COOKIE_SAMESITE:-lax}"
-      UPLOAD_RATE_LIMIT_MAX: "${UPLOAD_RATE_LIMIT_MAX:-600}"
-      UPLOAD_RATE_LIMIT_WINDOW_MS: "${UPLOAD_RATE_LIMIT_WINDOW_MS:-60000}"
-      UPLOAD_API_TOKEN: "${UPLOAD_API_TOKEN:-}"
-      AUTH_RATE_LIMIT_MAX: "${AUTH_RATE_LIMIT_MAX:-10}"
-      AUTH_RATE_LIMIT_WINDOW_MS: "${AUTH_RATE_LIMIT_WINDOW_MS:-60000}"
-      WRITE_RATE_LIMIT_MAX: "${WRITE_RATE_LIMIT_MAX:-30}"
-      WRITE_RATE_LIMIT_WINDOW_MS: "${WRITE_RATE_LIMIT_WINDOW_MS:-60000}"
-      READ_RATE_LIMIT_MAX: "${READ_RATE_LIMIT_MAX:-600}"
-      READ_RATE_LIMIT_WINDOW_MS: "${READ_RATE_LIMIT_WINDOW_MS:-60000}"
-      DISABLE_REGISTRATION: "${DISABLE_REGISTRATION:-}"
     ports:
       - "3000:3000"
 
