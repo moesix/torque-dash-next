@@ -219,10 +219,10 @@ export default function ReplayDashboard() {
 
       {/* Controls + Gauges row — side by side on lg */}
       <div className="animate-slide-up-delay-1 flex flex-col gap-4 lg:flex-row lg:items-start">
-        <div className="lg:w-2/3">
+        <div className="lg:w-2/3 self-start">
           <PlaybackControls frames={frames} />
         </div>
-        <div className="lg:w-1/3">
+        <div className="lg:w-1/3 self-start">
         <SessionSummaryCard
           frames={frames}
           maxRpm={maxRpm}
