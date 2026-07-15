@@ -217,7 +217,7 @@ export default function ReplayDashboard() {
 
       {/* Controls + Gauges row — side by side on lg */}
       <div className="animate-slide-up-delay-1 grid grid-cols-1 gap-4 lg:grid-cols-3 items-start">
-        <div className="lg:col-span-2">
+        <div className="lg:col-span-2 h-fit">
           <PlaybackControls frames={frames} />
         </div>
         <SessionSummaryCard
