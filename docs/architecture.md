@@ -182,11 +182,20 @@ The `getAvailableSeries()` function returns `SeriesSource[]` with resolved
 display names and units (metadata > fallback > raw key), and `getSeriesData()`
 extracts `[timestamp_ms, value]` pairs via the safe `coerceScalar()` helper.
 
+> **Fix:** The `kff1007` fallback entry was relabelled from `"Coolant 2"` / `°C`
+> to `"Coolant (F)"` / `°F` to match Torque Pro's actual output for this PID.
+> The short name and units now display correctly in the chart legend and
+> decoded metrics table.
+
 ### 3.5 Session Summary Card (`SessionSummaryCard.tsx`)
 - A combined card that replaces the previous 4-card grid (2 KpiCards + 2 GaugeTiles) in `ReplayDashboard`.
 - Renders 3 live SVG ring gauges (RPM, Coolant, Speed) that update reactively as the playback cursor moves.
 - Subscribes to `playbackStore.cursorTime` via imperative zustand subscription, matching the same pattern used by `GpsTrackMap` and `OverlayChart` markLine updates.
 - Each gauge interpolates the nearest value from the session's telemetry frames based on the current cursor time.
+> **Fix:** Hardcoded SVG stroke and fill colours were replaced with Tailwind
+> `dark:` class variants (`dark:stroke-gray-700`, `dark:fill-gray-100`,
+> `dark:fill-gray-400`) so gauge text, unit labels, and track rings remain
+> visible when dark mode is active.
 
 ### 3.6 Multi-series Overlay Chart
 - `OverlayChart.tsx` renders an ECharts instance with dynamic series: each
@@ -197,11 +206,16 @@ extracts `[timestamp_ms, value]` pairs via the safe `coerceScalar()` helper.
   the first group, right with offset for subsequent groups), letting you overlay
   RPM, speed, coolant temp, and O2 voltage without scale distortion. The total
   number of y-axes is capped at 4 (1 left + 3 right) sorted by frequency, and
-  `rightMargin` is capped at 180px to prevent axis labels from overflowing the
-  chart container.
+  `rightMargin` is capped at 150px (reduced from 180px) to prevent axis labels
+  from overflowing the chart container on displays with many selected metrics.
+  The per-axis offset is 45px (down from 60px) to keep the chart area from
+  squashing when 3+ right-side axes are visible.
 - **Two separate effects** — data rebuild uses `notMerge: true` (replaces all
-  series + yAxis config); cursor markLine updates use `notMerge: false` (merge
-  mode) so a hover never re-renders the full dataset.
+  series + yAxis config). Cursor markLine updates also use `notMerge: true`
+  to prevent a React `removeChild` crash caused by ECharts modifying the DOM
+  between renders. A single stable container div is always mounted (even when
+  no metrics are selected) so the ECharts instance is never torn down and
+  re-created.
 - **No `torqueGroup` / `echarts.connect`** — the GPS map uses an imperative
   zustand subscription, so ECharts group sync is unnecessary. Hovering the chart
   fires `onCursorMove(tsMs)` on `updateAxisPointer`, which pushes the value into
@@ -209,6 +223,10 @@ extracts `[timestamp_ms, value]` pairs via the safe `coerceScalar()` helper.
 - **Large dataset handling** — `large: true` + LTTB sampling on each series.
   Data build uses pre-allocated arrays; a `safeMax` reduce loop replaces the old
   spread-into-`Math.max` pattern that threw `RangeError` at ~10k frames.
+  The same `safeMax` + `coerceScalar` pattern is applied in `ReplayDashboard`
+  for the KPI max-value calculations, fixing a bug where `maxRpm`/`maxSpeed`/
+  `maxCoolant` could display as `0` when frame fields contained numeric strings
+  or `null` values.
 - **Metric selection** — `PidTogglePanel` renders available series grouped by
   heuristic category (Engine, Fuel & Air, Temperature, Electrical, Drivetrain,
   Other) with search filtering, color swatches matching the chart palette, and

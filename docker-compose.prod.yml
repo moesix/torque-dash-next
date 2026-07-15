@@ -1,0 +1,49 @@
+# Production docker-compose.yml for torque-dash-next
+# Uses pre-built images from GitHub Container Registry (GHCR)
+#
+# Usage:
+#   1. Copy this file and .env.example to your server
+#   2. Rename .env.example to .env and configure your settings
+#   3. Run: docker compose -f docker-compose.prod.yml up -d
+#
+# No repo clone needed!
+
+services:
+  db:
+    image: timescale/timescaledb:2.15.3-pg16
+    environment:
+      POSTGRES_DB: torquedash
+      POSTGRES_USER: torquedash
+      POSTGRES_PASSWORD: torquedash
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U torquedash -d torquedash"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    ports:
+      - "5432:5432"
+
+  backend:
+    image: ghcr.io/moesix/torque-dash-next-backend:latest
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgres://torquedash:torquedash@db:5432/torquedash
+      PORT: "3000"
+    ports:
+      - "3000:3000"
+
+  frontend:
+    image: ghcr.io/moesix/torque-dash-next-frontend:latest
+    depends_on:
+      - backend
+    ports:
+      - "8080:80"
+
+volumes:
+  pgdata:

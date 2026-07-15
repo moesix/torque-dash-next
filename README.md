@@ -41,13 +41,59 @@ map, session replays, and per-session summaries.
 | Frontend  | React 18 + Vite + TypeScript, ECharts, Leaflet, pidDecode  |
 | Deploy    | Docker Compose: `db` (TimescaleDB) + `backend` + `frontend` (nginx) |
 
-## Quick start (Docker — recommended)
+## Quick start (Pre-built images — easiest)
+
+No clone needed! Just download the files and configure:
 
 ```bash
-git clone https://github.com/<you>/torque-dash-next.git
+# Download the production files
+curl -O https://raw.githubusercontent.com/moesix/torque-dash-next/master/docker-compose.prod.yml
+curl -O https://raw.githubusercontent.com/moesix/torque-dash-next/master/.env.example
+
+# Create your .env file and edit with your settings
+cp .env.example .env
+nano .env  # or your preferred editor
+
+# Start the stack
+docker compose -f docker-compose.prod.yml up -d
+```
+
+Then open **http://localhost:8080**.
+
+### Required configuration
+
+Edit your `.env` file with these essential settings:
+
+| Variable | Description | How to generate |
+|----------|-------------|-----------------|
+| `SESSION_KEYS` | Express session secrets | `openssl rand -hex 24` |
+| `UPLOAD_API_TOKEN` | Bearer token for Torque Pro | `openssl rand -hex 24` or generate in Settings UI |
+| `COOKIE_SECURE` | Set to `true` behind HTTPS | — |
+
+### Security tip
+
+After creating all user accounts, disable public registration to prevent unauthorized sign-ups:
+
+- **Via Settings UI:** Toggle "Disable registration" in the Settings page
+- **Via environment variable:** Set `DISABLE_REGISTRATION=true` in your `.env` file
+
+### Configure Torque Pro
+
+In Torque Pro → *Settings → Web Preferences*:
+- **Server URL:** `https://<your-host>/api/upload`
+- **Email address:** the email you registered with
+- **Broadcast as HTTP** with header: `Authorization: bearer <UPLOAD_API_TOKEN>`
+
+Images are published to [GitHub Container Registry](https://ghcr.io/moesix/torque-dash-next) on every merge to master. Data is persisted in the `pgdata` volume.
+
+## Quick start (Build from source)
+
+```bash
+git clone https://github.com/moesix/torque-dash-next.git
 cd torque-dash-next
 
 # (optional) generate a strong session secret + upload token
+# The upload token can also be generated from the Settings UI after first login
 export SESSION_KEYS="$(openssl rand -hex 24)"
 export UPLOAD_API_TOKEN="$(openssl rand -hex 24)"
 
@@ -63,6 +109,8 @@ Then open **http://localhost:8080**.
 - Register the first account at the sign-up page, then sign in.
 - For Torque Pro uploads, set `UPLOAD_API_TOKEN` (below) and point the app at
   `https://<host>/api/upload` with the matching bearer token.
+- After adding all user accounts, disable public registration via the Settings
+  UI or set `DISABLE_REGISTRATION=true` to prevent unauthorized sign-ups.
 
 > **Production note:** change `SESSION_KEYS` and set `COOKIE_SECURE=true` behind
 > a TLS-terminating proxy. The compose defaults are for local/http use.
@@ -118,11 +166,11 @@ forwards `/api` to the backend (the included `apps/frontend/nginx.conf` does thi
 In Torque Pro → *Settings → Web Preferences*:
 
 - **Server URL:** `https://<your-host>/api/upload`
-- **Email address:** the email you registered with (used to link uploads to your
-  account), or
-- **Broadcast as HTTP** with a header `Authorization: bearer <UPLOAD_API_TOKEN>`
-  (matches the `UPLOAD_API_TOKEN` env var) — lets you upload without exposing an
-  email and works through HTTPS tunnels.
+- **Email address:** the email you registered with (used to link uploads to your account)
+- **Broadcast as HTTP** with header `Authorization: bearer <UPLOAD_API_TOKEN>` —
+  required for authentication when the token is configured. You can generate the
+  token from the Settings page in the web UI, or set it via the `UPLOAD_API_TOKEN`
+  environment variable.
 
 ## Configuration (environment variables)
 
@@ -138,7 +186,7 @@ In Torque Pro → *Settings → Web Preferences*:
 | `PUBLIC_ORIGIN`           | _(unset)_                               | Overrides the expected CSRF origin. Set to the browser-visible origin (e.g. `https://app.example.com`) when nginx terminates HTTPS but forwards HTTP to the backend. |
 | `UPLOAD_RATE_LIMIT_MAX`    | `600`                                   | Max uploads per `UPLOAD_RATE_LIMIT_WINDOW_MS` per IP.                       |
 | `UPLOAD_RATE_LIMIT_WINDOW_MS` | `60000`                             | Upload rate-limit window in milliseconds.                                   |
-| `UPLOAD_API_TOKEN`        | _(unset)_                               | If set, requests with `Authorization: bearer <token>` bypass the rate limit.|
+| `UPLOAD_API_TOKEN`        | _(unset)_                               | If set, uploads require `Authorization: bearer <token>` for authentication. Also skips rate limit when valid. Can also be generated from the Settings UI.|
 | `AUTH_RATE_LIMIT_MAX`     | `10`                                    | Max login/register requests per window per IP.                              |
 | `AUTH_RATE_LIMIT_WINDOW_MS` | `60000`                               | Auth rate-limit window in milliseconds.                                     |
 | `WRITE_RATE_LIMIT_MAX`    | `30`                                    | Max authenticated mutations (PUT settings/forwardurls) per window per IP.   |
