@@ -52,10 +52,10 @@
     <text x="0" y="54"
           font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
           font-size="56" font-weight="700" fill="#e6edf3">torque</text>
-    <text x="232" y="54"
+    <text x="214" y="54"
           font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
           font-size="56" font-weight="800" fill="#1abc9c">DASH</text>
-    <text x="380" y="54"
+    <text x="352" y="54"
           font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
           font-size="28" font-weight="600" fill="#8b949e">-Next</text>
 

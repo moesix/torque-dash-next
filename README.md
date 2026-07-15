@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <img src="./imgs/mapview.png" width="100%" alt="Dashboard showing route map with color-coded speed and telemetry chart">
+  <img src="./imgs/screenshot-dashboard.png" width="100%" alt="torqueDASH-Next dashboard showing route map with color-coded speed and telemetry chart">
 </p>
 
 ## What is torqueDASH-Next?
