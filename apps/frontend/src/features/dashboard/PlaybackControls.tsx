@@ -61,7 +61,7 @@ export default function PlaybackControls({ frames }: Props) {
     cursorTime != null ? new Date(cursorTime).toLocaleTimeString() : '—';
 
   return (
-    <Card>
+    <Card className="h-fit">
       <div className="flex flex-wrap items-center gap-3">
         <Button
           onClick={() => (isPlaying ? pause() : play())}

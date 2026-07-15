@@ -157,7 +157,7 @@ export default function ReplayDashboard() {
 
         {/* Controls + Gauges skeleton */}
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
-          <div className="lg:w-2/3">
+        <div className="lg:w-2/3 self-start">
             <Card>
               <Skeleton className="h-12 w-full" />
             </Card>
