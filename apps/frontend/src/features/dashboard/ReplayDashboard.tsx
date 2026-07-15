@@ -156,8 +156,8 @@ export default function ReplayDashboard() {
         </div>
 
         {/* Controls + Gauges skeleton */}
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <div className="lg:col-span-2 self-start">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3 items-start">
+          <div className="lg:col-span-2">
             <Card>
               <Skeleton className="h-12 w-full" />
             </Card>
@@ -216,7 +216,7 @@ export default function ReplayDashboard() {
       </div>
 
       {/* Controls + Gauges row — side by side on lg */}
-      <div className="animate-slide-up-delay-1 grid grid-cols-1 gap-4 lg:grid-cols-3">
+      <div className="animate-slide-up-delay-1 grid grid-cols-1 gap-4 lg:grid-cols-3 items-start">
         <div className="lg:col-span-2">
           <PlaybackControls frames={frames} />
         </div>
