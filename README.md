@@ -62,12 +62,14 @@ Then open **http://localhost:8080**.
 
 ### Required configuration
 
-Edit your `.env` file with these essential settings:
+Edit your `.env` file with these essential settings. The app **will not start** without `DATABASE_URL` and `SESSION_KEYS`.
 
 | Variable | Description | How to generate |
 |----------|-------------|-----------------|
-| `SESSION_KEYS` | Express session secrets | `openssl rand -hex 24` |
-| `UPLOAD_API_TOKEN` | Bearer token for Torque Pro | `openssl rand -hex 24` or generate in Settings UI |
+| `DATABASE_URL` | PostgreSQL/TimescaleDB connection string (REQUIRED) | `postgres://user:password@host:5432/torquedash` |
+| `POSTGRES_PASSWORD` | Database password for Docker deployments (REQUIRED) | `openssl rand -base64 24` |
+| `SESSION_KEYS` | Express session secrets (REQUIRED) | `openssl rand -hex 24` |
+| `UPLOAD_API_TOKEN` | Bearer token for Torque Pro — **required when configured** | `openssl rand -hex 24` or generate in Settings UI |
 | `COOKIE_SECURE` | Set to `true` behind HTTPS | — |
 
 ### Security tip
@@ -92,9 +94,10 @@ Images are published to [GitHub Container Registry](https://ghcr.io/moesix/torqu
 git clone https://github.com/moesix/torque-dash-next.git
 cd torque-dash-next
 
-# (optional) generate a strong session secret + upload token
-# The upload token can also be generated from the Settings UI after first login
+# **Required:** generate session keys (app crashes on startup if missing)
 export SESSION_KEYS="$(openssl rand -hex 24)"
+# Strongly recommended: upload token for Torque Pro authentication
+# Can also be generated from the Settings UI after first login
 export UPLOAD_API_TOKEN="$(openssl rand -hex 24)"
 
 docker compose up -d --build
@@ -112,8 +115,9 @@ Then open **http://localhost:8080**.
 - After adding all user accounts, disable public registration via the Settings
   UI or set `DISABLE_REGISTRATION=true` to prevent unauthorized sign-ups.
 
-> **Production note:** change `SESSION_KEYS` and set `COOKIE_SECURE=true` behind
-> a TLS-terminating proxy. The compose defaults are for local/http use.
+> **Production note:** `SESSION_KEYS` and `DATABASE_URL` are **required** (the
+> app crashes on startup if missing). Set `COOKIE_SECURE=true` behind a
+> TLS-terminating proxy. The compose defaults are for local/http use.
 
 ## Manual setup (without Docker)
 
@@ -123,6 +127,7 @@ Then open **http://localhost:8080**.
 npm install
 createdb torquedash
 export DATABASE_URL=postgres://user:pass@localhost:5432/torquedash
+export SESSION_KEYS="$(openssl rand -hex 24)"   # Required — app crashes without it
 node scripts/migrate.js      # creates tables + hypertable + Settings row
 npm start                    # or: node app.js
 ```
@@ -172,21 +177,49 @@ In Torque Pro → *Settings → Web Preferences*:
   token from the Settings page in the web UI, or set it via the `UPLOAD_API_TOKEN`
   environment variable.
 
+## Breaking Change: Upload Authentication
+
+As of the July 2026 security update, when `UPLOAD_API_TOKEN` is configured, **all uploads must include the bearer token** in the `Authorization` header. Email alone is no longer sufficient authentication — this closes a security gap where a valid email could be used to inject data.
+
+**If you are upgrading from an older version and already have `UPLOAD_API_TOKEN` set:**
+
+1. In Torque Pro → *Settings → Advanced → HTTP Auth Token*, enter your upload token
+2. Torque Pro will automatically add `Authorization: Bearer <token>` to every upload
+3. Uploads that lack the token will receive **401 Unauthorized**
+
+**If you do NOT have `UPLOAD_API_TOKEN` set:** there is no change — the email-gated flow still works (though configuring a token is strongly recommended).
+
+> **Quick test:** set `UPLOAD_API_TOKEN` in `.env`, restart the stack, then try an upload without the header → you should get a 401 response.
+
+## Password Change Endpoint
+
+Authenticated users can change their password via:
+
+```
+POST /api/users/change-password
+```
+
+**Body:** `{ "currentPassword": "...", "newPassword": "..." }`
+
+**Response:** `{ "ok": true, "message": "Password changed. Other sessions have been invalidated." }`
+
+The endpoint validates the current password, enforces a minimum length of 8 characters, and **regenerates the session** — all other sessions for this user are invalidated on change. The password salt factor has been increased to 10 (OWASP-recommended minimum).
+
 ## Configuration (environment variables)
 
 | Variable                   | Default                                  | Description                                                                 |
 |----------------------------|------------------------------------------|-----------------------------------------------------------------------------|
-| `DATABASE_URL`            | `postgres://postgres:heslo@localhost:5432/torquedash` | PostgreSQL/TimescaleDB connection string.                       |
+| `DATABASE_URL`            | **REQUIRED** — no default                | PostgreSQL/TimescaleDB connection string. App crashes on startup if missing. |
 | `PORT`                    | `3000`                                  | Backend HTTP port.                                                          |
 | `NODE_ENV`                | _(unset)_                               | Set to `production` to skip `sequelize.sync()` (use migrations instead).    |
-| `SESSION_KEYS`            | dev defaults                             | Comma-separated express-session secrets (array). **Set this in production.**|
+| `SESSION_KEYS`            | **REQUIRED** — no default                | Comma-separated express-session secrets (array). App crashes on startup if missing. Generate with `openssl rand -hex 24`. |
 | `COOKIE_SECURE`           | `false`                                 | `true` to set `Secure` on session cookies (requires HTTPS).                 |
 | `COOKIE_SAMESITE`         | `lax`                                   | `SameSite` policy for session cookies.                                      |
 | `CORS_ORIGINS`           | _(empty = same-origin only)_            | Comma-separated allowed origins for cross-origin API access. Also serves as the CSRF trust list — state-changing requests from any other origin are rejected (see `middleware/csrfGuard.js`). Entries must exactly match the browser `Origin` (correct scheme, no trailing slash). For local dev, use a consistent hostname for the API and SPA (e.g. both `localhost`) to avoid spurious 403s. |
 | `PUBLIC_ORIGIN`           | _(unset)_                               | Overrides the expected CSRF origin. Set to the browser-visible origin (e.g. `https://app.example.com`) when nginx terminates HTTPS but forwards HTTP to the backend. |
 | `UPLOAD_RATE_LIMIT_MAX`    | `600`                                   | Max uploads per `UPLOAD_RATE_LIMIT_WINDOW_MS` per IP.                       |
 | `UPLOAD_RATE_LIMIT_WINDOW_MS` | `60000`                             | Upload rate-limit window in milliseconds.                                   |
-| `UPLOAD_API_TOKEN`        | _(unset)_                               | If set, uploads require `Authorization: bearer <token>` for authentication. Also skips rate limit when valid. Can also be generated from the Settings UI.|
+| `UPLOAD_API_TOKEN`        | _(unset)_                               | If set, uploads **REQUIRE** `Authorization: Bearer <token>` — without it, uploads return 401. This is a security gate: email alone is no longer sufficient. Can also be generated from the Settings UI (UI token takes precedence). |
 | `AUTH_RATE_LIMIT_MAX`     | `10`                                    | Max login/register requests per window per IP.                              |
 | `AUTH_RATE_LIMIT_WINDOW_MS` | `60000`                               | Auth rate-limit window in milliseconds.                                     |
 | `WRITE_RATE_LIMIT_MAX`    | `30`                                    | Max authenticated mutations (PUT settings/forwardurls) per window per IP.   |

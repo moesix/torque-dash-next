@@ -14,6 +14,8 @@ const cors = require('cors');
 // const logger = require('morgan');
 const { sequelize } = require('./models');
 const config = require('./config/config');
+// Note: config.js will throw if DATABASE_URL or SESSION_KEYS are missing.
+// This is intentional — the app must not start with default/placeholder secrets.
 const flash = require('connect-flash');
 const session = require('express-session');
 const PgSession = require('connect-pg-simple')(session);
@@ -37,7 +39,7 @@ app.use('/api', cors(corsOpts));
 // CSRF guard: same-origin Origin check on state-changing /api requests. See
 // middleware/csrfGuard.js. Reuses the CORS allowlist as the trusted-origin set.
 app.use('/api', csrfGuard({ allowedOrigins: corsOpts.origin, publicOrigin: process.env.PUBLIC_ORIGIN }));
-app.use(express.urlencoded({ extended: true }));
+app.use(express.urlencoded({ extended: false }));
 // app.use(logger('combined'));
 // codeql[js/missing-csrf-protection] mitigated by same-origin Origin check in middleware/csrfGuard.js
 app.use(session({
@@ -91,7 +93,10 @@ async function bootstrap() {
         // Start server
         app.listen(config.port, () => console.log(`Listening on port ${config.port}`));
     } catch (err) {
-        console.log('Error connecting to the database:', err.message);
+        console.error('\n=== STARTUP ERROR ===');
+        console.error(err.message);
+        console.error('=====================\n');
+        process.exit(1);
     }
 }
 

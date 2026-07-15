@@ -23,6 +23,7 @@ module.exports = (sequelize, DataTypes) => {
     }, {
         hooks: {
             beforeCreate: hashPassword,
+            beforeUpdate: hashPassword,
         }
     }
     );
@@ -54,9 +55,11 @@ module.exports = (sequelize, DataTypes) => {
 }
     
 async function hashPassword (user) {
-     // Hash password before saving to db
-     const SALT_FACTOR = 8;
-     const salt = await bcrypt.genSalt(SALT_FACTOR);
-     let hash = await bcrypt.hash(user.password, salt);
-     await user.setDataValue('password', hash);
+    // Only hash if password was actually changed (avoids re-hashing on other updates)
+    if (!user.changed('password')) return;
+
+    const SALT_FACTOR = 10;  // OWASP recommends minimum 10
+    const salt = await bcrypt.genSalt(SALT_FACTOR);
+    let hash = await bcrypt.hash(user.password, salt);
+    await user.setDataValue('password', hash);
 }

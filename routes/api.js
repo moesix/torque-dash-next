@@ -23,6 +23,13 @@ function makeLimiter({ windowMs, max, skip }) {
     });
 }
 
+// Dedicated rate limiter for unauthenticated shared session endpoints.
+// Stricter than global to prevent shareId enumeration.
+const sharedLimiter = makeLimiter({
+    windowMs: 60000,  // 1 minute
+    max: 30,          // 30 requests per minute per IP
+});
+
 // Torque sends data through a GET request rather than POST. Ingestion is
 // unauthenticated (email-gated) so we throttle per client IP. The cap is env-
 // tunable because a single Torque device can burst well above 60/min when it
@@ -33,14 +40,7 @@ function makeLimiter({ windowMs, max, skip }) {
 // limiter entirely. This lets the known uploader flush backlog freely without
 // opening a spoofable hole: the token is a secret configured in the Torque app,
 // not a guessable query param, and cloudflared forwards the header intact.
-const uploadLimiter = makeLimiter({
-    ...rateLimits.upload,
-    skip: (req) => {
-        const token = runtime.getUploadApiToken();
-        return Boolean(token) &&
-            (req.headers.authorization || '') === `Bearer ${token}`;
-    },
-});
+const uploadLimiter = makeLimiter(rateLimits.upload);
 router.get('/upload', uploadLimiter, UploadController.processUpload);
 
 // Stricter limiter for auth endpoints to slow brute-force / credential spray.
@@ -65,11 +65,12 @@ router.get('/users/logout', UserController.logout);
 router.get('/users/shareid', authenticate, UserController.getShareId);
 router.get('/users/forwardurls', authenticate, UserController.getForwardUrls);
 router.put('/users/forwardurls', writeLimiter, authenticate, UserController.updateForwardUrls);
+router.post('/users/change-password', writeLimiter, authenticate, UserController.changePassword);
 router.patch('/users/shareid', authenticate, UserController.toggleShareId);
 
 router.get('/sessions', authenticate, SessionController.getAll);
-router.get('/sessions/shared/:shareId', SessionController.getAllShared);
-router.get('/sessions/shared/:shareId/:sessionId', SessionController.getOneShared);
+router.get('/sessions/shared/:shareId', sharedLimiter, SessionController.getAllShared);
+router.get('/sessions/shared/:shareId/:sessionId', sharedLimiter, SessionController.getOneShared);
 router.get('/sessions/:sessionId', authenticate, SessionController.getOne);
 router.delete('/sessions/:sessionId', authenticate, SessionController.delete);
 

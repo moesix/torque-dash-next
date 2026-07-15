@@ -1,18 +1,41 @@
 let config = {
     port: process.env.PORT || 3000,
     db: {
-        uri: process.env.DATABASE_URL || 'postgres://postgres:heslo@localhost:5432/torquedash',
+        uri: (() => {
+            if (!process.env.DATABASE_URL) {
+                throw new Error(
+                    'DATABASE_URL environment variable is required.\n' +
+                    'Example: postgres://user:password@localhost:5432/torquedash'
+                );
+            }
+            return process.env.DATABASE_URL;
+        })(),
         options: {
             logging: false
         }
     },
     session: {
-        // SESSION_KEYS may be a comma-separated string (e.g. in Docker env) or
-        // left unset to use the dev defaults. express-session accepts an array
-        // of secret strings.
-        keys: process.env.SESSION_KEYS
-            ? process.env.SESSION_KEYS.split(',').map((k) => k.trim()).filter(Boolean)
-            : ['6a5w4d65a4wd', 'a65w4d6aw4d89a4', '65f4b8b4szd8']
+        keys: (() => {
+            if (!process.env.SESSION_KEYS) {
+                throw new Error(
+                    'SESSION_KEYS environment variable is required.\n' +
+                    'Generate with: openssl rand -hex 24\n' +
+                    'For multiple keys (rotation): openssl rand -hex 24,openssl rand -hex 24'
+                );
+            }
+            const keys = process.env.SESSION_KEYS.split(',').map(k => k.trim()).filter(Boolean);
+            if (keys.length === 0) {
+                throw new Error('SESSION_KEYS must contain at least one key');
+            }
+            const placeholders = ['please-change-this-in-production', 'change-me', 'secret', 'changeme'];
+            if (keys.some(k => placeholders.includes(k.toLowerCase()))) {
+                throw new Error(
+                    'SESSION_KEYS contains a placeholder value.\n' +
+                    'Generate real keys with: openssl rand -hex 24'
+                );
+            }
+            return keys;
+        })()
     },
     // Tiered rate limits (express-rate-limit). All windows/caps are env-tunable.
     // Keyed on req.ip (app.set('trust proxy', 1) makes this the real client IP
