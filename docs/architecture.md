@@ -39,8 +39,8 @@ flowchart LR
                           ┌─────────────────────────────────────────┐
    Torque Pro  ──GET────▶ │  Express (app.js)                        │
    /api/upload            │   ├─ UploadController.processUpload       │
-   (email-gated,         │   │    ├─ lib/userCache (positive+neg)    │
-    no auth)             │   │    ├─ services/ingestBuffer           │──▶  PostgreSQL
+   (email-gated +        │   │    ├─ lib/userCache (positive+neg)     │
+    Bearer token req'd)  │   │    ├─ services/ingestBuffer           │──▶  PostgreSQL
                           │   │    │     └─ Log.bulkCreate (batched)  │      + TimescaleDB
    Browser SPA  ──/api──▶ │   │    └─ lib/ssrfGuard (forwardUrls)     │      hypertable Logs
     CORS + express-session  │   ├─ SessionController (list/metadata)    │
@@ -324,6 +324,7 @@ Each service should expose a healthcheck (backend: `GET /health`).
 | --- | --- | --- |
 | `POST /api/users/register` | none | register |
 | `POST /api/users/login` | none | login (sets cookie) |
+| `POST /api/users/change-password` | cookie | change password (requires currentPassword + newPassword; regenerates session) |
 | `GET /api/users/logout` | cookie | logout |
 | `GET /api/sessions` | cookie | list sessions (summary) |
 | `GET /api/sessions/:id` | cookie + owner | session metadata (no full logs) |
@@ -333,7 +334,7 @@ Each service should expose a healthcheck (backend: `GET /health`).
 | `GET /api/settings` | none | public settings (disableRegistration, hasUploadApiToken) |
 | `PUT /api/settings` | cookie | update settings (disableRegistration, uploadApiToken) |
 | `POST /api/settings/upload-token` | cookie | generate a new upload API token (shown once) |
-| `POST /api/upload` (`/upload` from Torque) | none (email-gated) | ingest |
+| `POST /api/upload` (`/upload` from Torque) | email-gated + **Bearer token required when `UPLOAD_API_TOKEN` is set** | ingest (401 without token) |
 | `GET /health` | none | probe |
 
 > See `routes/api.js` for the authoritative route table. The SPA auth contract

@@ -44,17 +44,17 @@ Set these at the backend repo root (`.env` or exported in the shell).
 
 | Variable | Required | Default | Description |
 | --- | --- | --- | --- |
-| `DATABASE_URL` | yes | `postgres://postgres:heslo@localhost:5432/torquedash` | Postgres/TimescaleDB connection string. Also used by `scripts/migrate.js`. |
+| `DATABASE_URL` | **yes** | **REQUIRED** — no default | Postgres/TimescaleDB connection string. App **crashes on startup** if missing. Also used by `scripts/migrate.js`. |
 | `CORS_ORIGINS` | prod | `''` (empty) | Comma-separated list of SPA origins allowed to call `/api` **with cookies** (e.g. `https://app.example.com`). An empty value blocks all cross-origin SPA calls (see Known Issues, LOW). |
 | `COOKIE_SECURE` | prod | unset (`lax`) | Set `true` in production to set `sameSite:none; secure` on the session cookie (required for cross-origin SPA auth). Dev (same-origin) keeps `lax` and works without HTTPS. |
 | `NODE_ENV` | yes | unset | `production` **disables `sequelize.sync()`** so the TimescaleDB migration is the source of truth. Any other value runs `sequelize.sync()` on boot. |
 | `PORT` | no | `3000` | Backend listen port. |
-| `SESSION_KEYS` | no | hardcoded dev keys | express-session secrets (array accepted via comma-separated string). **Override in production.** |
+| `SESSION_KEYS` | **yes** | **REQUIRED** — no default | express-session secrets (array accepted via comma-separated string). App **crashes on startup** if missing or if a placeholder value is used. Generate with `openssl rand -hex 24`. |
 | `PUBLIC_ORIGIN` | no | unset | Optional. Overrides the expected CSRF origin. Set to the browser-visible origin (e.g. `https://app.example.com`) when nginx terminates HTTPS but forwards HTTP to the backend, so `X-Forwarded-Proto` doesn't mislead the origin check. |
 | `DISABLE_SYNC` | planned | — | Intended as an explicit kill-switch for `sequelize.sync()`. **Not yet wired** — today the sync gate is solely `NODE_ENV !== 'production'`. (Listed for forward compatibility; do not rely on it yet.) |
 | `UPLOAD_RATE_LIMIT_MAX` | no | `600` | Max `/upload` requests per `UPLOAD_RATE_LIMIT_WINDOW_MS` window, per client IP. Raised from the original 60/min to absorb Torque reconnect bursts. |
 | `UPLOAD_RATE_LIMIT_WINDOW_MS` | no | `60000` | Window length (ms) for the `/upload` rate limiter. |
-| `UPLOAD_API_TOKEN` | no | unset | When set, `/upload` requests presenting `Authorization: Bearer <token>` bypass the rate limiter. Use this (not a query param) for the known uploader's backlog flushes — the token is a secret configured in the Torque app's "Send https: Bearer Token" setting, so it can't be spoofed. |
+| `UPLOAD_API_TOKEN` | no | unset | If set, uploads **REQUIRE** `Authorization: Bearer <token>` — without it, uploads return 401. This is a security gate: email alone is no longer sufficient. Can also be generated from the Settings UI (UI token takes precedence). |
 | `DISABLE_REGISTRATION` | no | unset | Hard kill-switch: when `'true'`, `UserController.register` returns `403` and `GET /api/settings` reports `disableRegistration: true` regardless of the runtime `Settings` toggle. |
 
 > The migration script (`scripts/migrate.js`) reads `DATABASE_URL`, falling back
@@ -269,3 +269,88 @@ blockers are resolved and re-reviewed as PASS:
 - **Recommended gate before marking MVP "done":** run a live smoke test
   (register → login → upload telemetry → replay dashboard renders overlay chart
   with PID metrics + moving map marker), then address the MEDIUM items.
+
+---
+
+## 9. Alternative Setup Methods
+
+The sections below cover building from source and manual (non-Docker) setup. For
+most users, the Docker quick start in the README is sufficient.
+
+### Build from source
+
+```bash
+git clone https://github.com/moesix/torque-dash-next.git
+cd torque-dash-next
+
+# **Required:** generate session keys (app crashes on startup if missing)
+export SESSION_KEYS="$(openssl rand -hex 24)"
+# Strongly recommended: upload token for Torque Pro authentication
+# Can also be generated from the Settings UI after first login
+export UPLOAD_API_TOKEN="$(openssl rand -hex 24)"
+
+docker compose up -d --build
+```
+
+Then open **http://localhost:8080**.
+
+- On first boot the backend creates the database tables, turns the `Logs` table
+  into a TimescaleDB hypertable, and seeds the `Settings` row. Data is persisted
+  in the `pgdata` volume. Any unique indexes on the hypertable must include the
+  partition column (`timestamp`) — the migration creates these automatically.
+- Register the first account at the sign-up page, then sign in.
+- For Torque Pro uploads, set `UPLOAD_API_TOKEN` (below) and point the app at
+  `https://<host>/api/upload` with the matching bearer token.
+- After adding all user accounts, disable public registration via the Settings
+  UI or set `DISABLE_REGISTRATION=true` to prevent unauthorized sign-ups.
+
+> **Production note:** `SESSION_KEYS` and `DATABASE_URL` are **required** (the
+> app crashes on startup if missing). Set `COOKIE_SECURE=true` behind a
+> TLS-terminating proxy. The compose defaults are for local/http use.
+
+### Manual setup (without Docker)
+
+**Backend**
+
+```bash
+npm install
+createdb torquedash
+export DATABASE_URL=postgres://user:pass@localhost:5432/torquedash
+export SESSION_KEYS="$(openssl rand -hex 24)"   # Required — app crashes without it
+node scripts/migrate.js      # creates tables + hypertable + Settings row
+npm start                    # or: node app.js
+```
+
+**Frontend**
+
+```bash
+cd apps/frontend
+npm install
+npm run dev                  # dev server with HMR, proxies /api -> http://localhost:3000
+# production build:
+npm run build                # outputs apps/frontend/dist
+```
+
+For a production SPA, serve `apps/frontend/dist` behind a reverse proxy that
+forwards `/api` to the backend (the included `apps/frontend/nginx.conf` does this).
+
+### Existing data: PID column backfill
+
+> If you have existing sessions uploaded before July 2026, their
+> `engine_rpm` and `vehicle_speed` columns may contain **stale or incorrect**
+> values because Torque stores the PID keys as `kc` (RPM) and `kd` (Speed) — not
+> the legacy `k4`/`k5` that the previous code expected. Run the backfill
+> migration to repair existing data:
+>
+> ```sql
+> -- infra/timescale/migrations/002_backfill_pid_columns.sql
+> UPDATE "Logs"
+> SET engine_rpm = CASE WHEN (values->>'kc') ~ '^-?\d+(\.\d+)?$'
+>                       THEN (values->>'kc')::numeric ELSE NULL END,
+>     vehicle_speed = CASE WHEN (values->>'kd') ~ '^-?\d+(\.\d+)?$'
+>                          THEN (values->>'kd')::numeric ELSE NULL END
+> WHERE values ? 'kc' AND values ? 'kd';
+> ```
+>
+> Apply it via your database console or include it in your migration run. It is
+> **idempotent** — safe to re-run.

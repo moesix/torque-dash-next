@@ -6,3 +6,5 @@ AGENTS.md
 .codegraph/
 .claude/
 CLAUDE.md
+plans/
+.env

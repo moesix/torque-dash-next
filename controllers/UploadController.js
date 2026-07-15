@@ -5,6 +5,7 @@ const userCache = require('../lib/userCache');
 const ssrfGuard = require('../lib/ssrfGuard');
 const moment = require('moment');
 const ingestBuffer = require('../services/ingestBuffer');
+const runtime = require('../config/runtime');
 
 // Resolve an email to a User, using the positive + negative TTL cache.
 // Returns the user, or null if unknown (unknown emails are cached as negatives).
@@ -20,6 +21,25 @@ async function resolveUser(eml) {
 class UploadController {
     static async processUpload(req, res) {
         try {
+            // ── AUTHENTICATION ──────────────────────────────────────────────
+            // When UPLOAD_API_TOKEN is configured, bearer token is REQUIRED.
+            // This is a security gate — email alone is not sufficient auth.
+            const configuredToken = runtime.getUploadApiToken();
+            if (configuredToken) {
+                const authHeader = req.headers.authorization || '';
+                if (!authHeader.startsWith('Bearer ')) {
+                    return res.status(401).json({
+                        error: 'Authorization header required',
+                        hint: 'Set Authorization: Bearer <your-token> in Torque Pro'
+                    });
+                }
+                const token = authHeader.slice(7);
+                if (token !== configuredToken) {
+                    return res.status(401).json({ error: 'Invalid upload token' });
+                }
+            }
+            // ── END AUTHENTICATION ─────────────────────────────────────────
+
             let { eml, session, time } = req.query;
             let lon = req.query.kff1005;
             let lat = req.query.kff1006;
@@ -86,7 +106,7 @@ class UploadController {
             }
         } catch (err) {
             res.sendStatus(500);
-            console.log(err);
+            console.error(err.message || err);
         }
     }
 }
