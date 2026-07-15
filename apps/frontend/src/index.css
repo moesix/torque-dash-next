@@ -113,21 +113,33 @@
   --bg-card: #ffffff;
   --bg-elevated: #ffffff;
   --bg-surface: #f3f4f6;
+
+  /* Text */
   --text-primary: #111827;
   --text-secondary: #4b5563;
   --text-muted: #9ca3af;
+
+  /* Borders */
   --border-default: #e5e7eb;
   --border-strong: #d1d5db;
+
+  /* Accent (amber) */
   --accent: #f59e0b;
   --accent-hover: #d97706;
+
+  /* Semantic colors */
   --color-success: #22c55e;
   --color-danger: #ef4444;
   --color-warning: #f59e0b;
   --color-info: #3b82f6;
+
+  /* Focus ring */
   --focus-ring: 0 0 0 2px var(--bg-base), 0 0 0 4px var(--accent);
 }
 
-html, body, #root {
+html,
+body,
+#root {
   height: 100%;
 }
 
@@ -140,12 +152,31 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* Monospace data class */
 .font-mono-data {
   font-family: var(--font-mono);
 }
 
 /* ── Custom variant for dark mode ── */
 @custom-variant dark (&:where(.dark, .dark *));
+
+/* ── Skeleton / shimmer animation ── */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--bg-elevated, #f3f4f6) 25%,
+    var(--bg-surface, #e5e7eb) 50%,
+    var(--bg-elevated, #f3f4f6) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+  border-radius: 0.375rem;
+}
 
 /* ── Dark theme overrides ── */
 .dark {
@@ -173,26 +204,9 @@ body {
   outline-offset: 2px;
 }
 
+/* Remove default outline for mouse users */
 :focus:not(:focus-visible) {
   outline: none;
-}
-
-/* ── Skeleton / shimmer animation ── */
-@keyframes shimmer {
-  0% { background-position: -200% 0; }
-  100% { background-position: 200% 0; }
-}
-
-.skeleton {
-  background: linear-gradient(
-    90deg,
-    var(--bg-elevated, #f3f4f6) 25%,
-    var(--bg-surface, #e5e7eb) 50%,
-    var(--bg-elevated, #f3f4f6) 75%
-  );
-  background-size: 200% 100%;
-  animation: shimmer 1.5s ease-in-out infinite;
-  border-radius: 0.375rem;
 }
 
 /* ── Page transitions ── */
