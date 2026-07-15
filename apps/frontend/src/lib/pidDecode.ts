@@ -29,7 +29,7 @@ const FALLBACK_MAP: Record<string, { full: string; short: string; unit: string }
   kff1001: { full: 'MAF-derived Speed Est',       short: 'MAF Speed', unit: 'km/h' },
   kff1005: { full: 'Fuel Trim (Long Term)',       short: 'LTFT',      unit: '%' },
   kff1006: { full: 'Fuel Trim (Short Term)',      short: 'STFT',      unit: '%' },
-  kff1007: { full: 'Engine Coolant Temp (ECT)',   short: 'Coolant 2', unit: '°C' },
+  kff1007: { full: 'Engine Coolant Temperature (F)', short: 'Coolant (F)', unit: '°F' },
   kff1201: { full: 'Intake Air Temp',             short: 'IAT 2',     unit: '°C' },
   kff1214: { full: 'O2 Sensor 1 Voltage',         short: 'O2S1V',     unit: 'V' },
   kff1223: { full: 'Acceleration Sensor',          short: 'Accel',    unit: 'g' },

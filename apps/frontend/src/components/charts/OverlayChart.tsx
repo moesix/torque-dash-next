@@ -65,8 +65,6 @@ export default function OverlayChart({
 }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<ReturnType<typeof echarts.init> | null>(null);
-  // Track the last sources length so cursor effect knows when data was rebuilt.
-  const sourcesLenRef = useRef(0);
 
   // ── Group sources by unit → y-axis map ─────────────────────────────
   const { unitGroups, yAxisIndexMap } = useMemo(() => {
@@ -116,8 +114,6 @@ export default function OverlayChart({
   useEffect(() => {
     const chart = chartRef.current;
     if (!chart) return;
-
-    sourcesLenRef.current = sources.length;
 
     if (sources.length === 0) {
       // Show placeholder — render an empty chart config so it stays mounted.
@@ -172,7 +168,7 @@ export default function OverlayChart({
         opt.position = 'left';
       } else {
         opt.position = 'right';
-        opt.offset = 60 * (axisIdx - 1);
+        opt.offset = 45 * (axisIdx - 1);
         opt.splitLine = { show: false };
         // Only show label on the last right axis to reduce clutter
         opt.axisLabel = {
@@ -186,8 +182,8 @@ export default function OverlayChart({
 
     // Grid — leave space for right-side offset axes, capped at 180px
     const rightMargin = Math.min(
-      180,
-      24 + Math.max(0, visibleAxisCount - 1) * 60,
+      150,
+      24 + Math.max(0, visibleAxisCount - 1) * 45,
     );
 
     // Build series options — hidden units still render, they just lack an axis
@@ -281,16 +277,13 @@ export default function OverlayChart({
   }, [cursorTime, sources.length]);
 
   // ── Render ─────────────────────────────────────────────────────────
-  if (sources.length === 0) {
-    return (
-      <div
-        ref={containerRef}
-        className="flex h-56 w-full items-center justify-center text-sm text-gray-400 lg:h-72"
-      >
-        <span>Select metrics to display</span>
-      </div>
-    );
-  }
-
-  return <div ref={containerRef} className="h-56 w-full lg:h-72" />;
+  return (
+    <div ref={containerRef} className="h-56 w-full lg:h-72">
+      {sources.length === 0 && (
+        <span className="flex h-full items-center justify-center text-sm text-gray-400">
+          Select metrics to display
+        </span>
+      )}
+    </div>
+  );
 }
