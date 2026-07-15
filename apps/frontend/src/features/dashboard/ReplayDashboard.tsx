@@ -34,7 +34,7 @@ import type { SeriesSource } from '@/lib/types';
 
 /** Default selected source pids — these are column-based so the chart is
  *  never empty even when frames lack OBD-II PID values. */
-const DEFAULT_PIDS = ['engineRpm', 'vehicleSpeed', 'kff1007', 'k5', 'ke', 'kff1214'];
+const DEFAULT_PIDS = ['kc', 'vehicleSpeed', 'kff1007', 'k5', 'ke', 'kff1214'];
 
 // ── Safe helpers ─────────────────────────────────────────────────────────
 
@@ -133,7 +133,7 @@ export default function ReplayDashboard() {
 
   // ── Safe max for KPI cards (fixes RangeError bug) ─────────────────
   const maxRpm = useMemo(
-    () => safeMax(frames.map((f) => coerceScalar(f.engineRpm))),
+    () => safeMax(frames.map((f) => coerceScalar(f.values?.kc))),
     [frames],
   );
   const maxSpeed = useMemo(

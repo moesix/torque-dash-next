@@ -134,12 +134,11 @@ export default function SessionSummaryCard({
   const rpmData = useMemo(
     () =>
       getSeriesData(frames, {
-        pid: 'engineRpm',
+        pid: 'kc',
         full: 'Engine RPM',
-        short: 'RPM',
+        short: 'Revs',
         unit: 'rpm',
-        source: 'column',
-        field: 'engineRpm',
+        source: 'pid',
       }),
     [frames],
   );

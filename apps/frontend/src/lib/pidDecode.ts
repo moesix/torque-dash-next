@@ -22,7 +22,7 @@ const FALLBACK_MAP: Record<string, { full: string; short: string; unit: string }
   k4a:     { full: 'Accel Pedal Position E',      short: 'Pedal E',   unit: '%' },
   k5:      { full: 'Engine Coolant Temperature',  short: 'Coolant',   unit: '°C' },
   kb:      { full: 'Intake Manifold Pressure',    short: 'MAP',       unit: 'psi' },
-  kc:      { full: 'Engine RPM',                  short: 'RPM',       unit: 'rpm' },
+  kc:      { full: 'Engine RPM',                  short: 'Revs',      unit: 'rpm' },
   kd:      { full: 'Vehicle Speed (OBD)',         short: 'Speed',     unit: 'km/h' },
   ke:      { full: 'Timing Advance',              short: 'Timing',    unit: '°' },
   kf:      { full: 'Intake Air Temperature',      short: 'IAT',       unit: '°C' },
