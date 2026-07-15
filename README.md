@@ -41,10 +41,32 @@ map, session replays, and per-session summaries.
 | Frontend  | React 18 + Vite + TypeScript, ECharts, Leaflet, pidDecode  |
 | Deploy    | Docker Compose: `db` (TimescaleDB) + `backend` + `frontend` (nginx) |
 
-## Quick start (Docker — recommended)
+## Quick start (Pre-built images — easiest)
+
+No clone needed! Just download the production compose file and run:
 
 ```bash
-git clone https://github.com/<you>/torque-dash-next.git
+# Download the production compose file
+curl -O https://raw.githubusercontent.com/moesix/torque-dash-next/master/docker-compose.prod.yml
+
+# (optional) generate a strong session secret + upload token
+export SESSION_KEYS="$(openssl rand -hex 24)"
+export UPLOAD_API_TOKEN="$(openssl rand -hex 24)"
+
+# Start the stack
+docker compose -f docker-compose.prod.yml up -d
+```
+
+Then open **http://localhost:8080**.
+
+- Images are published to [GitHub Container Registry](https://ghcr.io/moesix/torque-dash-next) on every merge to master.
+- Data is persisted in the `pgdata` volume.
+- Register the first account at the sign-up page, then sign in.
+
+## Quick start (Build from source)
+
+```bash
+git clone https://github.com/moesix/torque-dash-next.git
 cd torque-dash-next
 
 # (optional) generate a strong session secret + upload token

@@ -1,0 +1,60 @@
+# Production docker-compose.yml for torque-dash-next
+# Uses pre-built images from GitHub Container Registry (GHCR)
+#
+# Usage:
+#   1. Copy this file to your server
+#   2. Set environment variables (SESSION_KEYS, UPLOAD_API_TOKEN, etc.)
+#   3. Run: docker compose up -d
+#
+# No repo clone needed!
+
+services:
+  db:
+    image: timescale/timescaledb:2.15.3-pg16
+    environment:
+      POSTGRES_DB: torquedash
+      POSTGRES_USER: torquedash
+      POSTGRES_PASSWORD: torquedash
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U torquedash -d torquedash"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    ports:
+      - "5432:5432"
+
+  backend:
+    image: ghcr.io/moesix/torque-dash-next-backend:latest
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://torquedash:torquedash@db:5432/torquedash
+      PORT: "3000"
+      SESSION_KEYS: "${SESSION_KEYS:-please-change-this-in-production}"
+      COOKIE_SECURE: "${COOKIE_SECURE:-false}"
+      COOKIE_SAMESITE: "${COOKIE_SAMESITE:-lax}"
+      UPLOAD_RATE_LIMIT_MAX: "${UPLOAD_RATE_LIMIT_MAX:-600}"
+      UPLOAD_RATE_LIMIT_WINDOW_MS: "${UPLOAD_RATE_LIMIT_WINDOW_MS:-60000}"
+      UPLOAD_API_TOKEN: "${UPLOAD_API_TOKEN:-}"
+      AUTH_RATE_LIMIT_MAX: "${AUTH_RATE_LIMIT_MAX:-10}"
+      AUTH_RATE_LIMIT_WINDOW_MS: "${AUTH_RATE_LIMIT_WINDOW_MS:-60000}"
+      WRITE_RATE_LIMIT_MAX: "${WRITE_RATE_LIMIT_MAX:-30}"
+      WRITE_RATE_LIMIT_WINDOW_MS: "${WRITE_RATE_LIMIT_WINDOW_MS:-60000}"
+      READ_RATE_LIMIT_MAX: "${READ_RATE_LIMIT_MAX:-600}"
+      READ_RATE_LIMIT_WINDOW_MS: "${READ_RATE_LIMIT_WINDOW_MS:-60000}"
+      DISABLE_REGISTRATION: "${DISABLE_REGISTRATION:-}"
+    ports:
+      - "3000:3000"
+
+  frontend:
+    image: ghcr.io/moesix/torque-dash-next-frontend:latest
+    depends_on:
+      - backend
+    ports:
+      - "8080:80"
+
+volumes:
+  pgdata:
