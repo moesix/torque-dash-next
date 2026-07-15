@@ -67,8 +67,15 @@ Edit your `.env` file with these essential settings:
 | Variable | Description | How to generate |
 |----------|-------------|-----------------|
 | `SESSION_KEYS` | Express session secrets | `openssl rand -hex 24` |
-| `UPLOAD_API_TOKEN` | Bearer token for Torque Pro | `openssl rand -hex 24` |
+| `UPLOAD_API_TOKEN` | Bearer token for Torque Pro | `openssl rand -hex 24` or generate in Settings UI |
 | `COOKIE_SECURE` | Set to `true` behind HTTPS | — |
+
+### Security tip
+
+After creating all user accounts, disable public registration to prevent unauthorized sign-ups:
+
+- **Via Settings UI:** Toggle "Disable registration" in the Settings page
+- **Via environment variable:** Set `DISABLE_REGISTRATION=true` in your `.env` file
 
 ### Configure Torque Pro
 
@@ -176,7 +183,7 @@ In Torque Pro → *Settings → Web Preferences*:
 | `PUBLIC_ORIGIN`           | _(unset)_                               | Overrides the expected CSRF origin. Set to the browser-visible origin (e.g. `https://app.example.com`) when nginx terminates HTTPS but forwards HTTP to the backend. |
 | `UPLOAD_RATE_LIMIT_MAX`    | `600`                                   | Max uploads per `UPLOAD_RATE_LIMIT_WINDOW_MS` per IP.                       |
 | `UPLOAD_RATE_LIMIT_WINDOW_MS` | `60000`                             | Upload rate-limit window in milliseconds.                                   |
-| `UPLOAD_API_TOKEN`        | _(unset)_                               | If set, requests with `Authorization: bearer <token>` bypass the rate limit.|
+| `UPLOAD_API_TOKEN`        | _(unset)_                               | If set, uploads require `Authorization: bearer <token>` for authentication. Also skips rate limit when valid. Can also be generated from the Settings UI.|
 | `AUTH_RATE_LIMIT_MAX`     | `10`                                    | Max login/register requests per window per IP.                              |
 | `AUTH_RATE_LIMIT_WINDOW_MS` | `60000`                               | Auth rate-limit window in milliseconds.                                     |
 | `WRITE_RATE_LIMIT_MAX`    | `30`                                    | Max authenticated mutations (PUT settings/forwardurls) per window per IP.   |
