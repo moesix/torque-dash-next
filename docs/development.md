@@ -269,3 +269,88 @@ blockers are resolved and re-reviewed as PASS:
 - **Recommended gate before marking MVP "done":** run a live smoke test
   (register → login → upload telemetry → replay dashboard renders overlay chart
   with PID metrics + moving map marker), then address the MEDIUM items.
+
+---
+
+## 9. Alternative Setup Methods
+
+The sections below cover building from source and manual (non-Docker) setup. For
+most users, the Docker quick start in the README is sufficient.
+
+### Build from source
+
+```bash
+git clone https://github.com/moesix/torque-dash-next.git
+cd torque-dash-next
+
+# **Required:** generate session keys (app crashes on startup if missing)
+export SESSION_KEYS="$(openssl rand -hex 24)"
+# Strongly recommended: upload token for Torque Pro authentication
+# Can also be generated from the Settings UI after first login
+export UPLOAD_API_TOKEN="$(openssl rand -hex 24)"
+
+docker compose up -d --build
+```
+
+Then open **http://localhost:8080**.
+
+- On first boot the backend creates the database tables, turns the `Logs` table
+  into a TimescaleDB hypertable, and seeds the `Settings` row. Data is persisted
+  in the `pgdata` volume. Any unique indexes on the hypertable must include the
+  partition column (`timestamp`) — the migration creates these automatically.
+- Register the first account at the sign-up page, then sign in.
+- For Torque Pro uploads, set `UPLOAD_API_TOKEN` (below) and point the app at
+  `https://<host>/api/upload` with the matching bearer token.
+- After adding all user accounts, disable public registration via the Settings
+  UI or set `DISABLE_REGISTRATION=true` to prevent unauthorized sign-ups.
+
+> **Production note:** `SESSION_KEYS` and `DATABASE_URL` are **required** (the
+> app crashes on startup if missing). Set `COOKIE_SECURE=true` behind a
+> TLS-terminating proxy. The compose defaults are for local/http use.
+
+### Manual setup (without Docker)
+
+**Backend**
+
+```bash
+npm install
+createdb torquedash
+export DATABASE_URL=postgres://user:pass@localhost:5432/torquedash
+export SESSION_KEYS="$(openssl rand -hex 24)"   # Required — app crashes without it
+node scripts/migrate.js      # creates tables + hypertable + Settings row
+npm start                    # or: node app.js
+```
+
+**Frontend**
+
+```bash
+cd apps/frontend
+npm install
+npm run dev                  # dev server with HMR, proxies /api -> http://localhost:3000
+# production build:
+npm run build                # outputs apps/frontend/dist
+```
+
+For a production SPA, serve `apps/frontend/dist` behind a reverse proxy that
+forwards `/api` to the backend (the included `apps/frontend/nginx.conf` does this).
+
+### Existing data: PID column backfill
+
+> If you have existing sessions uploaded before July 2026, their
+> `engine_rpm` and `vehicle_speed` columns may contain **stale or incorrect**
+> values because Torque stores the PID keys as `kc` (RPM) and `kd` (Speed) — not
+> the legacy `k4`/`k5` that the previous code expected. Run the backfill
+> migration to repair existing data:
+>
+> ```sql
+> -- infra/timescale/migrations/002_backfill_pid_columns.sql
+> UPDATE "Logs"
+> SET engine_rpm = CASE WHEN (values->>'kc') ~ '^-?\d+(\.\d+)?$'
+>                       THEN (values->>'kc')::numeric ELSE NULL END,
+>     vehicle_speed = CASE WHEN (values->>'kd') ~ '^-?\d+(\.\d+)?$'
+>                          THEN (values->>'kd')::numeric ELSE NULL END
+> WHERE values ? 'kc' AND values ? 'kd';
+> ```
+>
+> Apply it via your database console or include it in your migration run. It is
+> **idempotent** — safe to re-run.
