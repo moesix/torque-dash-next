@@ -36,7 +36,7 @@ export default function GaugeTile({ title, value, max, unit = '' }: Props) {
             cy="70"
             r={radius}
             fill="none"
-            stroke="#e5e7eb"
+            className="stroke-gray-200 dark:stroke-gray-700"
             strokeWidth="12"
           />
           <circle
@@ -56,7 +56,7 @@ export default function GaugeTile({ title, value, max, unit = '' }: Props) {
             textAnchor="middle"
             fontSize="22"
             fontWeight="700"
-            fill="#111827"
+            className="fill-gray-900 dark:fill-gray-100"
           >
             {display}
           </text>
@@ -65,7 +65,7 @@ export default function GaugeTile({ title, value, max, unit = '' }: Props) {
             y="88"
             textAnchor="middle"
             fontSize="12"
-            fill="#6b7280"
+            className="fill-gray-500 dark:fill-gray-400"
           >
             {unit.trim()}
           </text>
