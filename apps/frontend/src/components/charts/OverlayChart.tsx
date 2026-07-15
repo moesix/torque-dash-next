@@ -16,6 +16,8 @@ import {
   GridComponent,
   TooltipComponent,
   MarkLineComponent,
+  DataZoomComponent,
+  DataZoomSliderComponent,
 } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
 import type { TelemetryFrame, SeriesSource } from '@/lib/types';
@@ -27,6 +29,8 @@ echarts.use([
   GridComponent,
   TooltipComponent,
   MarkLineComponent,
+  DataZoomComponent,
+  DataZoomSliderComponent,
   CanvasRenderer,
 ]);
 
@@ -53,6 +57,8 @@ interface Props {
   sources: SeriesSource[];
   cursorTime: number | null;
   onCursorMove: (tsMs: number | null) => void;
+  /** Additional CSS classes merged with computed height class. */
+  className?: string;
 }
 
 // ── Component ────────────────────────────────────────────────────────────
@@ -62,37 +68,57 @@ export default function OverlayChart({
   sources,
   cursorTime,
   onCursorMove,
+  className,
 }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<ReturnType<typeof echarts.init> | null>(null);
 
-  // ── Group sources by unit → y-axis map ─────────────────────────────
-  const { unitGroups, yAxisIndexMap } = useMemo(() => {
+  // ── Group sources by unit ──────────────────────────────────────────
+  const unitGroups = useMemo(() => {
     const ug = new Map<string, SeriesSource[]>();
-    const yMap = new Map<string, number>();
-    let idx = 0;
     for (const s of sources) {
       const u = s.unit || '_';
-      if (!ug.has(u)) {
-        ug.set(u, []);
-        yMap.set(u, idx);
-        idx++;
-      }
+      if (!ug.has(u)) ug.set(u, []);
       ug.get(u)!.push(s);
     }
-    return { unitGroups: ug, yAxisIndexMap: yMap };
+    return ug;
   }, [sources]);
 
+  // ── Dynamic height class based on source count ─────────────────────
+  const heightClass = useMemo(() => {
+    const n = sources.length;
+    if (n === 0) return 'h-56 lg:h-72';
+    if (n <= 2) return 'h-64 lg:h-80';
+    if (n <= 5) return 'h-80 lg:h-96';
+    return 'h-96 lg:h-[480px]';
+  }, [sources.length]);
+
+  const mergedClassName = [heightClass, className].filter(Boolean).join(' ');
+
   // ── Init: create chart instance, wire events, resize ───────────────
+  // Only recreate the chart instance when transitioning between empty ↔ non-empty.
+  const wasEmptyRef = useRef(sources.length === 0);
   useEffect(() => {
+    const isEmpty = sources.length === 0;
+    const transitioned = wasEmptyRef.current !== isEmpty;
+    wasEmptyRef.current = isEmpty;
+
+    // Skip recreation if no DOM swap needed and chart already exists
+    if (!transitioned && chartRef.current) return;
+
     const el = containerRef.current;
     if (!el) return;
+
+    // Dispose previous instance if any
+    if (chartRef.current) {
+      chartRef.current.dispose();
+      chartRef.current = null;
+    }
 
     const chart = echarts.init(el);
     chartRef.current = chart;
 
     // Forward axis-pointer moves to parent
-    // TODO: type params as echarts.UpdateAxisPointerParams
     chart.on('updateAxisPointer', (params: any) => {
       const axisValue = params?.axesInfo?.[0]?.axisValue;
       if (typeof axisValue === 'number') {
@@ -120,7 +146,7 @@ export default function OverlayChart({
       chart.setOption(
         {
           animation: false,
-          grid: { left: 56, right: 24, top: 24, bottom: 28 },
+          grid: { left: 56, right: 24, top: 24, bottom: 60 },
           xAxis: { type: 'time', show: true },
           yAxis: { type: 'value', show: false },
           series: [],
@@ -131,32 +157,22 @@ export default function OverlayChart({
       return;
     }
 
-    // Cap displayed axes to prevent chart area from shrinking to nothing.
-    // Show at most 1 left + 3 right = 4 total. Rare unit groups are hidden
-    // from axes but still visible in the tooltip.
-    const MAX_AXES = 4;
+    // Build ALL unit entries, sorted by frequency (most common first).
     const unitEntries = Array.from(unitGroups.entries());
-
-    // Sort by frequency (most common first) so we keep the most useful axes
     const unitFrequency = unitEntries.map(([unit, srcs]) => [unit, srcs.length] as const);
     unitFrequency.sort((a, b) => b[1] - a[1]);
 
-    const visibleUnits = new Set(unitFrequency.slice(0, MAX_AXES).map(([u]) => u));
-    const visibleAxisCount = visibleUnits.size;
+    const axisCount = unitFrequency.length;
 
-    // Rebuild yAxisIndexMap only for visible units
-    const visibleYAxisIndexMap = new Map<string, number>();
-    let visibleIdx = 0;
-    for (const [unit] of unitFrequency.slice(0, MAX_AXES)) {
-      visibleYAxisIndexMap.set(unit, visibleIdx);
-      visibleIdx++;
-    }
+    // Smart axis offset: reduce spacing when many axes
+    const axisOffset = axisCount >= 6 ? 32 : axisCount >= 5 ? 38 : 45;
 
-    // Build yAxis options — one per visible unit group
+    // Build yAxis options — one per unit group
     const yAxisOptions: any[] = [];
     let axisIdx = 0;
-    for (const [unit] of unitFrequency.slice(0, MAX_AXES)) {
+    for (const [unit] of unitFrequency) {
       const isFirst = axisIdx === 0;
+      const isLast = axisIdx === axisCount - 1;
       const opt: any = {
         type: 'value',
         name: unit === '_' ? '' : unit,
@@ -168,28 +184,38 @@ export default function OverlayChart({
         opt.position = 'left';
       } else {
         opt.position = 'right';
-        opt.offset = 45 * (axisIdx - 1);
+        opt.offset = axisOffset * (axisIdx - 1);
         opt.splitLine = { show: false };
-        // Only show label on the last right axis to reduce clutter
-        opt.axisLabel = {
-          ...opt.axisLabel,
-          show: axisIdx === visibleAxisCount - 1,
-        };
+        // When 5+ axes, show every-other label to reduce clutter
+        if (axisCount >= 5) {
+          opt.axisLabel = {
+            ...opt.axisLabel,
+            show: axisIdx % 2 === 0 || isLast,
+          };
+        } else {
+          // Show only label on the last right axis
+          opt.axisLabel = {
+            ...opt.axisLabel,
+            show: isLast,
+          };
+        }
       }
       yAxisOptions.push(opt);
       axisIdx++;
     }
 
-    // Grid — leave space for right-side offset axes, capped at 150px
+    // Grid — leave space for right-side offset axes, capped to prevent
+    // chart area from collapsing on tablets/phones with many axes.
     const rightMargin = Math.min(
-      150,
-      24 + Math.max(0, visibleAxisCount - 1) * 45,
+      180,
+      24 + Math.max(0, axisCount - 1) * axisOffset,
     );
 
-    // Build series options — hidden units still render, they just lack an axis
+    // Build series options
     const seriesOptions = sources.map((src, i) => {
       const u = src.unit || '_';
-      const yi = visibleYAxisIndexMap.get(u) ?? 0;
+      // Find yAxisIndex for this unit in the full frequency list
+      const yi = unitFrequency.findIndex(([unit]) => unit === u);
       const color = COLORS[i % COLORS.length];
       const data = getSeriesData(frames, src);
 
@@ -201,7 +227,7 @@ export default function OverlayChart({
         lineStyle: { width: 2, color },
         itemStyle: { color },
         data,
-        yAxisIndex: yi,
+        yAxisIndex: yi >= 0 ? yi : 0,
         large: true,
         sampling: 'lttb' as const,
         // Initial markLine on first series (will be maintained by cursor effect)
@@ -226,15 +252,31 @@ export default function OverlayChart({
     chart.setOption(
       {
         animation: false,
-        grid: { left: 56, right: rightMargin, top: 24, bottom: 28, containLabel: true },
+        grid: { left: 56, right: rightMargin, top: 24, bottom: 60, containLabel: true },
         tooltip: { trigger: 'axis' as const },
         xAxis: { type: 'time' as const },
         yAxis: yAxisOptions,
+        dataZoom: [
+          {
+            type: 'inside' as const,
+            filterMode: 'none' as const,
+          },
+          {
+            type: 'slider' as const,
+            filterMode: 'none' as const,
+            height: 20,
+            borderColor: 'transparent',
+            backgroundColor: 'rgba(37,99,235,0.08)',
+            fillerColor: 'rgba(37,99,235,0.15)',
+            handleStyle: { color: '#2563eb' },
+            textStyle: { color: '#6b7280', fontSize: 10 },
+          },
+        ],
         series: seriesOptions,
       },
       { notMerge: true },
     );
-  }, [sources, frames, unitGroups, yAxisIndexMap]);
+  }, [sources, frames, unitGroups]);
 
   // ── Cursor markLine effect (merge mode — does NOT re-render data) ──
   useEffect(() => {
@@ -281,12 +323,12 @@ export default function OverlayChart({
     return (
       <div
         ref={containerRef}
-        className="flex h-56 w-full items-center justify-center text-sm text-gray-400 lg:h-72"
+        className={`flex w-full items-center justify-center text-sm text-gray-400 ${mergedClassName}`}
       >
         <span>Select metrics to display</span>
       </div>
     );
   }
 
-  return <div ref={containerRef} className="h-56 w-full lg:h-72" />;
+  return <div ref={containerRef} className={`w-full ${mergedClassName}`} />;
 }
