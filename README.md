@@ -2,6 +2,8 @@
 
 A modern, self-hostable dashboard for [Torque Pro](https://torque-bhp.com/) vehicle telemetry.
 
+![Dashboard Screenshot](img_660907814cf0.png)
+
 > This project is a **modernisation of the original developer's work**,
 > [torque-dash](https://github.com/davekrejci/torque-dash) by **David Krejci**
 > (MIT licensed). The original project is **not** archived — this repository simply
@@ -23,8 +25,9 @@ map, session replays, and per-session summaries.
 - **Inline session rename** — rename sessions directly from the session table via an inline edit button (pencil icon, Enter/Escape/blur handling).
 - **PID decode engine** — auto-discovers all OBD-II parameters from Torque's JSONB `values` column using embedded metadata (`userFullName*`/`userUnit*`) and a curated fallback map; no schema changes needed for new PIDs. Torque stores OBD‑II PIDs as hex keys without leading zeros (e.g. `kc` for RPM/PID 0x0C, `kd` for Speed/PID 0x0D).
 - **Controlled ingestion** — email-gated uploads with an optional API-token
-  (`Bearer`) bypass for Torque Pro over HTTPS; token can be generated from
-  the Settings UI or set via the `UPLOAD_API_TOKEN` environment variable.
+  (`Bearer`) authentication for Torque Pro over HTTPS; token can be generated from
+  the Settings UI or set via the `UPLOAD_API_TOKEN` environment variable. When set,
+  uploads require both a valid email address AND the bearer token for authentication.
 - **Operational guards** — rate-limited upload endpoint, togglable open
   registration, and environment-driven configuration.
 - **Design system** — CSS custom properties for colors, typography, and borders; Google Fonts (Space Grotesk + Martian Mono); Tailwind v4 configured via CSS-first `@theme` block (custom font-family stacks, semantic color tokens, and Tremor design tokens all in `index.css`); PostCSS replaced by the `@tailwindcss/vite` plugin.
@@ -119,10 +122,11 @@ In Torque Pro → *Settings → Web Preferences*:
 
 - **Server URL:** `https://<your-host>/api/upload`
 - **Email address:** the email you registered with (used to link uploads to your
-  account), or
+  account)
 - **Broadcast as HTTP** with a header `Authorization: bearer <UPLOAD_API_TOKEN>`
-  (matches the `UPLOAD_API_TOKEN` env var) — lets you upload without exposing an
-  email and works through HTTPS tunnels.
+  (matches the `UPLOAD_API_TOKEN` env var) — required for authentication when
+  the token is configured. The Torque app must include both the email address
+  AND the bearer token for uploads to succeed.
 
 ## Configuration (environment variables)
 
@@ -138,7 +142,7 @@ In Torque Pro → *Settings → Web Preferences*:
 | `PUBLIC_ORIGIN`           | _(unset)_                               | Overrides the expected CSRF origin. Set to the browser-visible origin (e.g. `https://app.example.com`) when nginx terminates HTTPS but forwards HTTP to the backend. |
 | `UPLOAD_RATE_LIMIT_MAX`    | `600`                                   | Max uploads per `UPLOAD_RATE_LIMIT_WINDOW_MS` per IP.                       |
 | `UPLOAD_RATE_LIMIT_WINDOW_MS` | `60000`                             | Upload rate-limit window in milliseconds.                                   |
-| `UPLOAD_API_TOKEN`        | _(unset)_                               | If set, requests with `Authorization: bearer <token>` bypass the rate limit.|
+| `UPLOAD_API_TOKEN`        | _(unset)_                               | If set, uploads require `Authorization: bearer <token>` for authentication. Also skips rate limit when valid.|
 | `AUTH_RATE_LIMIT_MAX`     | `10`                                    | Max login/register requests per window per IP.                              |
 | `AUTH_RATE_LIMIT_WINDOW_MS` | `60000`                               | Auth rate-limit window in milliseconds.                                     |
 | `WRITE_RATE_LIMIT_MAX`    | `30`                                    | Max authenticated mutations (PUT settings/forwardurls) per window per IP.   |
