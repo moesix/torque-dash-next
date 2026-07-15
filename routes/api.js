@@ -23,16 +23,11 @@ function makeLimiter({ windowMs, max, skip }) {
     });
 }
 
-// Torque sends data through a GET request rather than POST. Ingestion is
-// unauthenticated (email-gated) so we throttle per client IP. The cap is env-
-// tunable because a single Torque device can burst well above 60/min when it
-// reconnects and flushes a backlog; UPLOAD_RATE_LIMIT_MAX (default 600) per
-// UPLOAD_RATE_LIMIT_WINDOW_MS (default 60000) absorbs those bursts.
-// When UPLOAD_API_TOKEN is set, requests presenting a matching
-// `Authorization: Bearer <token>` header (a Torque app feature) skip the
-// limiter entirely. This lets the known uploader flush backlog freely without
-// opening a spoofable hole: the token is a secret configured in the Torque app,
-// not a guessable query param, and cloudflared forwards the header intact.
+// Torque sends data through a GET request rather than POST. When an upload API
+// token is configured, requests MUST present a matching `Authorization: Bearer
+// <token>` header for authentication (401 if missing/invalid). The token also
+// skips the per-IP rate limiter so the known uploader can flush backlog freely.
+// When no token is configured, ingestion is email-gated and throttled per IP.
 const uploadLimiter = makeLimiter({
     ...rateLimits.upload,
     skip: (req) => {

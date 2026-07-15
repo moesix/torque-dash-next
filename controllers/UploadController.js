@@ -5,6 +5,7 @@ const userCache = require('../lib/userCache');
 const ssrfGuard = require('../lib/ssrfGuard');
 const moment = require('moment');
 const ingestBuffer = require('../services/ingestBuffer');
+const runtime = require('../config/runtime');
 
 // Resolve an email to a User, using the positive + negative TTL cache.
 // Returns the user, or null if unknown (unknown emails are cached as negatives).
@@ -20,6 +21,18 @@ async function resolveUser(eml) {
 class UploadController {
     static async processUpload(req, res) {
         try {
+            // ── Authentication gate ──────────────────────────────────────
+            // When an upload API token is configured, requests MUST present
+            // a matching Bearer token. This prevents unauthorized uploads
+            // using only a known email address.
+            const configuredToken = runtime.getUploadApiToken();
+            if (configuredToken) {
+                const authHeader = req.headers.authorization || '';
+                if (authHeader !== `Bearer ${configuredToken}`) {
+                    return res.status(401).send('Unauthorized: Invalid or missing upload token.');
+                }
+            }
+
             let { eml, session, time } = req.query;
             let lon = req.query.kff1005;
             let lat = req.query.kff1006;
