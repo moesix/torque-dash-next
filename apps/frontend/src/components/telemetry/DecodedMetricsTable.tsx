@@ -2,10 +2,9 @@
  * "What was uploaded" table — shows all decoded PIDs with their stats.
  *
  * Uses pre-computed memoized series data (no re-scan of frames).
- * Collapsible to keep the dashboard compact.
  */
 
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { Card, Title } from '@tremor/react';
 import type { SeriesSource } from '@/lib/types';
 import { computeStats } from '@/lib/pidDecode';
@@ -29,8 +28,6 @@ function fmtNum(v: number): string {
 // ── Component ────────────────────────────────────────────────────────────
 
 export default function DecodedMetricsTable({ sources, seriesData }: Props) {
-  const [expanded, setExpanded] = useState(false);
-
   const rows = useMemo(() => {
     return sources.map((src) => {
       const data = seriesData.get(src.pid);
@@ -47,22 +44,14 @@ export default function DecodedMetricsTable({ sources, seriesData }: Props) {
 
   return (
     <Card className="overflow-hidden">
-      <button
-        type="button"
-        onClick={() => setExpanded((v) => !v)}
-        className="flex w-full items-center justify-between"
-        aria-expanded={expanded}
-        aria-controls="decoded-table-body"
-      >
+      <div className="flex items-center justify-between mb-3">
         <Title>Decoded Metrics</Title>
-        <span className="flex items-center gap-2 text-sm text-gray-400 dark:text-[var(--text-muted)]">
-          <span className="text-xs">{summary}</span>
-          <span className="text-xs">{expanded ? '▲' : '▼'}</span>
+        <span className="text-xs text-gray-400 dark:text-[var(--text-muted)]">
+          {summary}
         </span>
-      </button>
+      </div>
 
-      {expanded && (
-        <div id="decoded-table-body" className="mt-3 overflow-x-auto">
+      <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">
             <thead>
               <tr className="border-b border-gray-200 text-gray-500 dark:border-[var(--border-default)] dark:text-[var(--text-muted)]">
@@ -147,7 +136,6 @@ export default function DecodedMetricsTable({ sources, seriesData }: Props) {
             </tbody>
           </table>
         </div>
-      )}
     </Card>
   );
 }

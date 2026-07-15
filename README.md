@@ -60,8 +60,9 @@ After creating all user accounts, disable public registration via the Settings U
 - **Inline session rename** — rename sessions directly from the session table via an inline edit button (pencil icon, Enter/Escape/blur handling).
 - **PID decode engine** — auto-discovers all OBD-II parameters from Torque's JSONB `values` column using embedded metadata (`userFullName*`/`userUnit*`) and a curated fallback map; no schema changes needed for new PIDs. Torque stores OBD‑II PIDs as hex keys without leading zeros (e.g. `kc` for RPM/PID 0x0C, `kd` for Speed/PID 0x0D).
 - **Controlled ingestion** — email-gated uploads with an optional API-token
-  (`Bearer`) bypass for Torque Pro over HTTPS; token can be generated from
-  the Settings UI or set via the `UPLOAD_API_TOKEN` environment variable.
+  (`Bearer`) authentication for Torque Pro over HTTPS; token can be generated from
+  the Settings UI or set via the `UPLOAD_API_TOKEN` environment variable. When set,
+  uploads require both a valid email address AND the bearer token for authentication.
 - **Operational guards** — rate-limited upload endpoint, togglable open
   registration, and environment-driven configuration.
 - **Design system** — CSS custom properties for colors, typography, and borders; Google Fonts (Space Grotesk + Martian Mono); Tailwind v4 configured via CSS-first `@theme` block (custom font-family stacks, semantic color tokens, and Tremor design tokens all in `index.css`); PostCSS replaced by the `@tailwindcss/vite` plugin.

@@ -113,7 +113,9 @@ export default function SettingsPage() {
           <div>
             <Text className="font-medium">Upload API Token</Text>
             <Text className="mt-1 text-sm text-gray-500 dark:text-[var(--text-muted)]">
-              A bearer token that lets a Torque app bypass the upload rate limit.
+              A bearer token required for telemetry uploads. When set, the Torque
+              app must include this token to authenticate uploads. This prevents
+              unauthorized data ingestion using only a known email address.
               Generate a token and paste it into your Torque app&rsquo;s
               configuration. The token is shown only once.
             </Text>

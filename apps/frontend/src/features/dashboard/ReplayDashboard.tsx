@@ -16,7 +16,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
-import { Card, Grid, Title } from '@tremor/react';
+import { Card, Title } from '@tremor/react';
 import { getSession, getTelemetry } from '@/lib/api';
 import Skeleton from '@/components/ui/Skeleton';
 import ErrorAlert from '@/components/ui/ErrorAlert';
@@ -156,19 +156,21 @@ export default function ReplayDashboard() {
         </div>
 
         {/* Controls + Gauges skeleton */}
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-          <div className="lg:col-span-2">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
+        <div className="lg:w-2/3 self-start">
             <Card>
               <Skeleton className="h-12 w-full" />
             </Card>
           </div>
-          <Card>
-            <div className="flex justify-around">
-              <Skeleton className="h-20 w-20" />
-              <Skeleton className="h-20 w-20" />
-              <Skeleton className="h-20 w-20" />
-            </div>
-          </Card>
+          <div className="lg:w-1/3">
+            <Card>
+              <div className="flex justify-around">
+                <Skeleton className="h-20 w-20" />
+                <Skeleton className="h-20 w-20" />
+                <Skeleton className="h-20 w-20" />
+              </div>
+            </Card>
+          </div>
         </div>
 
         {/* Chart area skeleton */}
@@ -215,30 +217,19 @@ export default function ReplayDashboard() {
         </p>
       </div>
 
-      {/* Controls + Gauges row — side by side on lg */}
-      <div className="animate-slide-up-delay-1 grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <div className="lg:col-span-2">
-          <PlaybackControls frames={frames} />
-        </div>
+      {/* Playback controls — full width */}
+      <div className="animate-slide-up-delay-1">
+        <PlaybackControls frames={frames} />
+      </div>
+
+      {/* Session Summary + Metrics + Decoded Metrics — 3 equal columns */}
+      <div className="animate-slide-up-delay-2 grid grid-cols-1 gap-4 lg:grid-cols-3">
         <SessionSummaryCard
           frames={frames}
           maxRpm={maxRpm}
           maxSpeed={maxSpeed}
           maxCoolant={maxCoolant}
         />
-      </div>
-
-      {/* Overlay chart + metric selector */}
-      <Grid numItemsLg={3} className="animate-slide-up-delay-2 gap-4">
-        <Card className="lg:col-span-2">
-          <Title>Time Series</Title>
-          <OverlayChart
-            frames={frames}
-            sources={selectedSources}
-            cursorTime={cursorTime}
-            onCursorMove={handleCursorMove}
-          />
-        </Card>
         <Card>
           <Title>Metrics</Title>
           <PidTogglePanel
@@ -250,11 +241,25 @@ export default function ReplayDashboard() {
             onReset={handleReset}
           />
         </Card>
-      </Grid>
+        <DecodedMetricsTable sources={available} seriesData={allSeriesData} />
+      </div>
 
-      {/* Map + Metrics row — side by side on lg */}
-      <div className="animate-slide-up-delay-3 grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <Card className="lg:col-span-2">
+      {/* Time Series — full width */}
+      <div className="animate-slide-up-delay-3">
+        <Card>
+          <Title>Time Series</Title>
+          <OverlayChart
+            frames={frames}
+            sources={selectedSources}
+            cursorTime={cursorTime}
+            onCursorMove={handleCursorMove}
+          />
+        </Card>
+      </div>
+
+      {/* GPS Track — full width */}
+      <div className="animate-slide-up-delay-4">
+        <Card>
           <Title>GPS Track</Title>
           {telemetryQuery.isLoading ? (
             <Skeleton className="mt-2 h-48 w-full" />
@@ -264,7 +269,6 @@ export default function ReplayDashboard() {
             </div>
           )}
         </Card>
-        <DecodedMetricsTable sources={available} seriesData={allSeriesData} />
       </div>
     </div>
   );
