@@ -93,6 +93,7 @@ git clone https://github.com/moesix/torque-dash-next.git
 cd torque-dash-next
 
 # (optional) generate a strong session secret + upload token
+# The upload token can also be generated from the Settings UI after first login
 export SESSION_KEYS="$(openssl rand -hex 24)"
 export UPLOAD_API_TOKEN="$(openssl rand -hex 24)"
 
@@ -108,6 +109,8 @@ Then open **http://localhost:8080**.
 - Register the first account at the sign-up page, then sign in.
 - For Torque Pro uploads, set `UPLOAD_API_TOKEN` (below) and point the app at
   `https://<host>/api/upload` with the matching bearer token.
+- After adding all user accounts, disable public registration via the Settings
+  UI or set `DISABLE_REGISTRATION=true` to prevent unauthorized sign-ups.
 
 > **Production note:** change `SESSION_KEYS` and set `COOKIE_SECURE=true` behind
 > a TLS-terminating proxy. The compose defaults are for local/http use.
@@ -163,11 +166,11 @@ forwards `/api` to the backend (the included `apps/frontend/nginx.conf` does thi
 In Torque Pro → *Settings → Web Preferences*:
 
 - **Server URL:** `https://<your-host>/api/upload`
-- **Email address:** the email you registered with (used to link uploads to your
-  account), or
-- **Broadcast as HTTP** with a header `Authorization: bearer <UPLOAD_API_TOKEN>`
-  (matches the `UPLOAD_API_TOKEN` env var) — lets you upload without exposing an
-  email and works through HTTPS tunnels.
+- **Email address:** the email you registered with (used to link uploads to your account)
+- **Broadcast as HTTP** with header `Authorization: bearer <UPLOAD_API_TOKEN>` —
+  required for authentication when the token is configured. You can generate the
+  token from the Settings page in the web UI, or set it via the `UPLOAD_API_TOKEN`
+  environment variable.
 
 ## Configuration (environment variables)
 
