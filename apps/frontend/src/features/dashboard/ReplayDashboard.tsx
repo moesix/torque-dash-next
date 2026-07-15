@@ -27,14 +27,14 @@ import PlaybackControls from './PlaybackControls';
 import OverlayChart from '@/components/charts/OverlayChart';
 import PidTogglePanel from '@/components/telemetry/PidTogglePanel';
 import DecodedMetricsTable from '@/components/telemetry/DecodedMetricsTable';
-import { getAvailableSeries, getSeriesData } from '@/lib/pidDecode';
+import { getAvailableSeries, getSeriesData, coerceScalar } from '@/lib/pidDecode';
 import type { SeriesSource } from '@/lib/types';
 
 // ── Constants ────────────────────────────────────────────────────────────
 
 /** Default selected source pids — these are column-based so the chart is
  *  never empty even when frames lack OBD-II PID values. */
-const DEFAULT_PIDS = ['engineRpm', 'vehicleSpeed', 'kff1007', 'k5', 'ke', 'kff1214'];
+const DEFAULT_PIDS = ['kc', 'vehicleSpeed', 'kff1007', 'k5', 'ke', 'kff1214'];
 
 // ── Safe helpers ─────────────────────────────────────────────────────────
 
@@ -132,19 +132,16 @@ export default function ReplayDashboard() {
   );
 
   // ── Safe max for KPI cards (fixes RangeError bug) ─────────────────
-  const maxRpm = useMemo(() => safeMax(frames.map((f) => f.engineRpm)), [frames]);
+  const maxRpm = useMemo(
+    () => safeMax(frames.map((f) => coerceScalar(f.values?.kc))),
+    [frames],
+  );
   const maxSpeed = useMemo(
-    () => safeMax(frames.map((f) => f.vehicleSpeed)),
+    () => safeMax(frames.map((f) => coerceScalar(f.vehicleSpeed))),
     [frames],
   );
   const maxCoolant = useMemo(
-    () =>
-      safeMax(
-        frames.map((f) => {
-          const raw = f.values?.k5;
-          return typeof raw === 'number' ? raw : null;
-        }),
-      ),
+    () => safeMax(frames.map((f) => coerceScalar(f.values?.k5))),
     [frames],
   );
 
