@@ -13,6 +13,15 @@ RUN npm ci --omit=dev
 
 COPY . .
 
+# Create non-root user
+RUN groupadd -r appuser && useradd -r -g appuser -d /app -s /sbin/nologin appuser
+
+# Set ownership
+RUN chown -R appuser:appuser /app
+
+# Switch to non-root user
+USER appuser
+
 EXPOSE 3000
 
 # Boot sequence:

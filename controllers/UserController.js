@@ -68,12 +68,11 @@ class UserController {
                 where: { id: req.user.id }
             });
             let forwardUrls = user.forwardUrls;
-            console.log(forwardUrls);
             if(!forwardUrls) return res.send([]);
             res.send(forwardUrls);
         }
         catch(err) {
-            console.log(err);
+            console.error(err.message || err);
             res.sendStatus(500);
         }
     }
@@ -95,7 +94,7 @@ class UserController {
             res.sendStatus(200);
         }
         catch(err) {
-            console.log(err);
+            console.error(err.message || err);
             res.sendStatus(500);
         }
     }
@@ -105,11 +104,10 @@ class UserController {
                 where: { id: req.user.id }
             });
             let shareId = user.shareId;
-            console.log(shareId);
             res.status(200).send(shareId);
         }
         catch(err) {
-            console.log(err);
+            console.error(err.message || err);
             res.sendStatus(500);
         }
     }
@@ -128,7 +126,7 @@ class UserController {
             res.sendStatus(200);
         }
         catch(err) {
-            console.log(err);
+            console.error(err.message || err);
             res.sendStatus(500);
         }
     }
@@ -145,7 +143,7 @@ class UserController {
                 tokenFromEnv: runtime.isFromEnv(),
             });
         } catch (err) {
-            console.log(err);
+            console.error(err.message || err);
             res.sendStatus(500);
         }
     }
@@ -207,7 +205,7 @@ class UserController {
 
             res.json({ disableRegistration: finalDisabled, hasUploadApiToken });
         } catch (err) {
-            console.log(err);
+            console.error(err.message || err);
             res.sendStatus(500);
         }
     }
@@ -229,7 +227,54 @@ class UserController {
             runtime.setUploadApiToken(token);
             res.json({ uploadApiToken: token });
         } catch (err) {
-            console.log(err);
+            console.error(err.message || err);
+            res.sendStatus(500);
+        }
+    }
+
+    // Change password endpoint. Regenerates session to invalidate all other sessions.
+    static async changePassword(req, res) {
+        try {
+            const { currentPassword, newPassword } = req.body;
+
+            if (!currentPassword || !newPassword) {
+                return res.status(400).json({ error: 'Current and new password are required.' });
+            }
+
+            if (newPassword.length < 8) {
+                return res.status(400).json({ error: 'New password must be at least 8 characters.' });
+            }
+
+            const user = await User.findByPk(req.user.id);
+            if (!user) {
+                return res.status(404).json({ error: 'User not found.' });
+            }
+
+            // Verify current password
+            const isMatch = await user.comparePassword(currentPassword);
+            if (!isMatch) {
+                return res.status(401).json({ error: 'Current password is incorrect.' });
+            }
+
+            // Update password (beforeUpdate hook will hash it)
+            await user.update({ password: newPassword });
+
+            // Regenerate session to invalidate all other sessions for this user
+            req.session.regenerate((err) => {
+                if (err) {
+                    console.error('[UserController] Session regeneration failed:', err.message);
+                    return res.status(500).json({ error: 'Password changed but session refresh failed.' });
+                }
+                // Re-login the user with the new session
+                req.logIn(user, (loginErr) => {
+                    if (loginErr) {
+                        return res.status(500).json({ error: 'Password changed but re-login failed.' });
+                    }
+                    return res.json({ ok: true, message: 'Password changed. Your session has been refreshed.' });
+                });
+            });
+        } catch (err) {
+            console.error('[UserController]', err.message || err);
             res.sendStatus(500);
         }
     }

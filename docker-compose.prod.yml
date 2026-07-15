@@ -7,23 +7,28 @@
 #   3. Run: docker compose -f docker-compose.prod.yml up -d
 #
 # No repo clone needed!
+#
+# IMPORTANT: The app will NOT start without the required variables in .env.
+# Generate secure values with:
+#   openssl rand -base64 24  # for POSTGRES_PASSWORD
+#   openssl rand -hex 24     # for SESSION_KEYS
 
 services:
   db:
     image: timescale/timescaledb:2.15.3-pg16
+    env_file:
+      - .env
     environment:
-      POSTGRES_DB: torquedash
-      POSTGRES_USER: torquedash
-      POSTGRES_PASSWORD: torquedash
+      POSTGRES_DB: ${POSTGRES_DB:-torquedash}
+      POSTGRES_USER: ${POSTGRES_USER:-torquedash}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Error: POSTGRES_PASSWORD must be set in .env}
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U torquedash -d torquedash"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-torquedash} -d ${POSTGRES_DB:-torquedash}"]
       interval: 5s
       timeout: 5s
       retries: 20
-    ports:
-      - "5432:5432"
 
   backend:
     image: ghcr.io/moesix/torque-dash-next-backend:latest
@@ -33,7 +38,7 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgres://torquedash:torquedash@db:5432/torquedash
+      DATABASE_URL: postgres://${POSTGRES_USER:-torquedash}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-torquedash}
       PORT: "3000"
     ports:
       - "3000:3000"
@@ -43,7 +48,7 @@ services:
     depends_on:
       - backend
     ports:
-      - "8080:80"
+      - "8080:8080"
 
 volumes:
   pgdata:
