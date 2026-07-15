@@ -79,6 +79,21 @@ export default function ReplayDashboard() {
 
   // ── State ──────────────────────────────────────────────────────────
   const [selectedPids, setSelectedPids] = useState<string[]>(DEFAULT_PIDS);
+  const [chartExpanded, setChartExpanded] = useState(false);
+
+  // ESC key handler + body scroll lock for expanded chart
+  useEffect(() => {
+    if (!chartExpanded) return;
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setChartExpanded(false);
+    };
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', handleKey);
+    return () => {
+      document.body.style.overflow = '';
+      window.removeEventListener('keydown', handleKey);
+    };
+  }, [chartExpanded]);
 
   // Reset playback cursor AND selected PIDs when switching sessions.
   useEffect(() => {
@@ -246,15 +261,44 @@ export default function ReplayDashboard() {
 
       {/* Time Series — full width */}
       <div className="animate-slide-up-delay-3">
-        <Card>
-          <Title>Time Series</Title>
-          <OverlayChart
-            frames={frames}
-            sources={selectedSources}
-            cursorTime={cursorTime}
-            onCursorMove={handleCursorMove}
+        {chartExpanded && (
+          <div
+            className="fixed inset-0 z-40 bg-black/50"
+            onClick={() => setChartExpanded(false)}
+            aria-hidden="true"
           />
-        </Card>
+        )}
+        <div
+          className={
+            chartExpanded
+              ? 'fixed inset-0 z-50 bg-white p-4 dark:bg-[var(--bg-card)]'
+              : ''
+          }
+          role={chartExpanded ? 'dialog' : undefined}
+          aria-modal={chartExpanded ? true : undefined}
+          aria-label={chartExpanded ? 'Expanded time series chart' : undefined}
+        >
+          <Card className={chartExpanded ? 'h-full' : ''}>
+            <div className="flex items-center justify-between">
+              <Title>Time Series</Title>
+              <button
+                type="button"
+                onClick={() => setChartExpanded((prev) => !prev)}
+                className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+                aria-label={chartExpanded ? 'Collapse chart' : 'Expand chart'}
+              >
+                {chartExpanded ? '↓' : '↑'}
+              </button>
+            </div>
+            <OverlayChart
+              frames={frames}
+              sources={selectedSources}
+              cursorTime={cursorTime}
+              onCursorMove={handleCursorMove}
+              className={chartExpanded ? 'h-full' : undefined}
+            />
+          </Card>
+        </div>
       </div>
 
       {/* GPS Track — full width */}
