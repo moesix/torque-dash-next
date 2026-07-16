@@ -13,7 +13,7 @@
  *   pattern that threw RangeError on large datasets.
  */
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
 import { Card, Title } from '@tremor/react';
@@ -79,21 +79,35 @@ export default function ReplayDashboard() {
 
   // ── State ──────────────────────────────────────────────────────────
   const [selectedPids, setSelectedPids] = useState<string[]>(DEFAULT_PIDS);
-  const [chartExpanded, setChartExpanded] = useState(false);
+  const dialogRef = useRef<HTMLDialogElement | null>(null);
 
-  // ESC key handler + body scroll lock for expanded chart
+  // Safari fallback for closedby="any" (light-dismiss)
   useEffect(() => {
-    if (!chartExpanded) return;
-    const handleKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setChartExpanded(false);
-    };
-    document.body.style.overflow = 'hidden';
-    window.addEventListener('keydown', handleKey);
-    return () => {
-      document.body.style.overflow = '';
-      window.removeEventListener('keydown', handleKey);
-    };
-  }, [chartExpanded]);
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+
+    if (!('closedBy' in HTMLDialogElement.prototype)) {
+      const handleClick = (e: MouseEvent) => {
+        if (e.target === dialog) {
+          const rect = dialog.getBoundingClientRect();
+          const isInside =
+            rect.top <= e.clientY && e.clientY <= rect.top + rect.height &&
+            rect.left <= e.clientX && e.clientX <= rect.left + rect.width;
+          if (!isInside) dialog.close();
+        }
+      };
+      dialog.addEventListener('click', handleClick);
+      return () => dialog.removeEventListener('click', handleClick);
+    }
+  }, []);
+
+  const handleExpand = useCallback(() => {
+    dialogRef.current?.showModal();
+  }, []);
+
+  const handleCollapse = useCallback(() => {
+    dialogRef.current?.close();
+  }, []);
 
   // Reset playback cursor AND selected PIDs when switching sessions.
   useEffect(() => {
@@ -261,33 +275,43 @@ export default function ReplayDashboard() {
 
       {/* Time Series — full width */}
       <div className="animate-slide-up-delay-3">
-        {chartExpanded && (
-          <div
-            className="fixed inset-0 z-40 bg-black/50"
-            onClick={() => setChartExpanded(false)}
-            aria-hidden="true"
+        <Card>
+          <div className="flex items-center justify-between">
+            <Title>Time Series</Title>
+            <button
+              type="button"
+              onClick={handleExpand}
+              className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+              aria-label="Expand chart"
+            >
+              ↑
+            </button>
+          </div>
+          <OverlayChart
+            frames={frames}
+            sources={selectedSources}
+            cursorTime={cursorTime}
+            onCursorMove={handleCursorMove}
           />
-        )}
-        <div
-          className={
-            chartExpanded
-              ? 'fixed inset-0 z-50 bg-white p-4 dark:bg-[var(--bg-card)]'
-              : ''
-          }
-          role={chartExpanded ? 'dialog' : undefined}
-          aria-modal={chartExpanded ? true : undefined}
-          aria-label={chartExpanded ? 'Expanded time series chart' : undefined}
+        </Card>
+
+        <dialog
+          ref={dialogRef}
+          closedby="any"
+          className="fixed inset-0 z-50 m-0 h-full w-full overflow-hidden bg-[var(--bg-base)] p-0 backdrop:bg-black/60 backdrop:backdrop-blur-sm"
+          aria-label="Expanded chart"
+          onClose={handleCollapse}
         >
-          <Card className={chartExpanded ? 'h-full' : ''}>
+          <Card className="h-full">
             <div className="flex items-center justify-between">
               <Title>Time Series</Title>
               <button
                 type="button"
-                onClick={() => setChartExpanded((prev) => !prev)}
+                onClick={handleCollapse}
                 className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
-                aria-label={chartExpanded ? 'Collapse chart' : 'Expand chart'}
+                aria-label="Collapse chart"
               >
-                {chartExpanded ? '↓' : '↑'}
+                ↓
               </button>
             </div>
             <OverlayChart
@@ -295,10 +319,10 @@ export default function ReplayDashboard() {
               sources={selectedSources}
               cursorTime={cursorTime}
               onCursorMove={handleCursorMove}
-              className={chartExpanded ? 'h-full' : undefined}
+              className="h-full"
             />
           </Card>
-        </div>
+        </dialog>
       </div>
 
       {/* GPS Track — full width */}

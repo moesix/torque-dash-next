@@ -16,7 +16,7 @@ import type { SeriesSource } from '@/lib/types';
 // ── Color palette (must match OverlayChart) ──────────────────────────────
 
 const COLORS = [
-  '#2563eb',
+  '#009999',
   '#16a34a',
   '#dc2626',
   '#d97706',
@@ -163,7 +163,7 @@ export default function PidTogglePanel({
         <button
           type="button"
           onClick={onSelectAll}
-          className="rounded bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700 hover:bg-blue-100 dark:bg-blue-900/40 dark:text-blue-300 dark:hover:bg-blue-900/60"
+          className="rounded bg-teal-50 px-2 py-0.5 text-xs font-medium text-teal-700 hover:bg-teal-100 dark:bg-teal-900/40 dark:text-teal-300 dark:hover:bg-teal-900/60"
         >
           Select All
         </button>
@@ -192,7 +192,7 @@ export default function PidTogglePanel({
         value={search}
         onChange={onSearchChange}
         placeholder="Search metrics…"
-        className="w-full rounded-md border border-gray-300 px-2 py-1 text-sm placeholder-gray-400 focus:border-blue-400 focus:outline-none dark:border-[var(--border-default)] dark:bg-[var(--bg-surface)] dark:text-[var(--text-primary)] dark:placeholder-[var(--text-muted)]"
+        className="w-full rounded-md border border-gray-300 px-2 py-1 text-sm placeholder-gray-400 focus:border-teal-400 focus:outline-none dark:border-[var(--border-default)] dark:bg-[var(--bg-surface)] dark:text-[var(--text-primary)] dark:placeholder-[var(--text-muted)]"
         aria-label="Filter metrics"
       />
 
@@ -239,7 +239,7 @@ export default function PidTogglePanel({
                           type="checkbox"
                           checked={isChecked}
                           onChange={() => onToggle(src.pid)}
-                          className="h-3 w-3 accent-blue-600 dark:accent-blue-400"
+                          className="h-3 w-3"
                         />
                         <span
                           className="inline-block h-2.5 w-2.5 rounded-full shrink-0"

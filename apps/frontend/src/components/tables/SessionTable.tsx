@@ -118,7 +118,7 @@ export default function SessionTable({ sessions }: Props) {
                       onKeyDown={(e) => handleKeyDown(s.id, e)}
                       onBlur={() => saveEditing(s.id)}
                       onClick={(e) => e.stopPropagation()}
-                      className="w-full border border-blue-400 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+                      className="w-full border border-teal-400 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-teal-300"
                     />
                   ) : (
                     <span className="group inline-flex items-center gap-1">

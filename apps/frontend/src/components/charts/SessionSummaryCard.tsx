@@ -195,7 +195,7 @@ export default function SessionSummaryCard({
           value={currentValues.rpm}
           max={maxRpm ?? 8000}
           unit=" rpm"
-          color="#2563eb"
+          color="#009999"
         />
         <RingGauge
           label="Coolant"

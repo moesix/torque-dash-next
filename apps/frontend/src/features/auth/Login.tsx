@@ -35,7 +35,7 @@ export default function Login() {
   return (
     <div className="flex min-h-full">
       {/* Left branding panel — hidden on mobile */}
-      <div className="hidden w-1/2 items-center justify-center bg-blue-600 p-12 lg:flex">
+      <div className="hidden w-1/2 items-center justify-center bg-gradient-to-br from-teal-600 to-teal-800 p-12 lg:flex">
         <div className="max-w-md text-center">
           <div className="mx-auto mb-6 h-16 w-16 rounded-2xl bg-white/20 backdrop-blur" />
           <h1
@@ -44,7 +44,7 @@ export default function Login() {
           >
             TorqueDash
           </h1>
-          <p className="mt-3 text-lg text-blue-100">
+          <p className="mt-3 text-lg text-teal-100">
             Real-time vehicle telemetry replay and analysis.
           </p>
         </div>
@@ -55,7 +55,7 @@ export default function Login() {
         <div className="animate-slide-up w-full max-w-sm">
           {/* Mobile-only logo */}
           <div className="mb-8 text-center lg:hidden">
-            <div className="mx-auto mb-4 h-12 w-12 rounded-xl bg-blue-600" />
+            <div className="mx-auto mb-4 h-12 w-12 rounded-xl bg-teal-600" />
             <h1
               className="text-2xl font-bold text-gray-900 dark:text-white"
               style={{ fontFamily: 'var(--font-mono)' }}
@@ -85,7 +85,7 @@ export default function Login() {
                 aria-invalid={!!error}
                 aria-describedby={error ? 'login-error' : undefined}
                 className="mt-1 w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-sm
-                  focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20
+                  focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500/20
                   dark:border-gray-600 dark:bg-gray-800 dark:text-white"
               />
             </div>
@@ -102,7 +102,7 @@ export default function Login() {
                 aria-invalid={!!error}
                 aria-describedby={error ? 'login-error' : undefined}
                 className="mt-1 w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-sm
-                  focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20
+                  focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500/20
                   dark:border-gray-600 dark:bg-gray-800 dark:text-white"
               />
             </div>
@@ -123,7 +123,7 @@ export default function Login() {
               <>
                 No account?{' '}
                 <a
-                  className="font-medium text-blue-600 hover:text-blue-500 dark:text-blue-400"
+                  className="font-medium text-teal-600 hover:text-teal-500 dark:text-teal-400"
                   href="/register"
                 >
                   Register
