@@ -13,7 +13,7 @@
  *   pattern that threw RangeError on large datasets.
  */
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
 import { Card, Title } from '@tremor/react';
@@ -34,7 +34,7 @@ import type { SeriesSource } from '@/lib/types';
 
 /** Default selected source pids — these are column-based so the chart is
  *  never empty even when frames lack OBD-II PID values. */
-const DEFAULT_PIDS = ['kc', 'vehicleSpeed', 'kff1007', 'k5', 'ke', 'kff1214'];
+const DEFAULT_PIDS = ['kc', 'vehicleSpeed', 'k5', 'ke', 'kff1214'];
 
 // ── Safe helpers ─────────────────────────────────────────────────────────
 
@@ -79,6 +79,35 @@ export default function ReplayDashboard() {
 
   // ── State ──────────────────────────────────────────────────────────
   const [selectedPids, setSelectedPids] = useState<string[]>(DEFAULT_PIDS);
+  const dialogRef = useRef<HTMLDialogElement | null>(null);
+
+  // Safari fallback for closedby="any" (light-dismiss)
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+
+    if (!('closedBy' in HTMLDialogElement.prototype)) {
+      const handleClick = (e: MouseEvent) => {
+        if (e.target === dialog) {
+          const rect = dialog.getBoundingClientRect();
+          const isInside =
+            rect.top <= e.clientY && e.clientY <= rect.top + rect.height &&
+            rect.left <= e.clientX && e.clientX <= rect.left + rect.width;
+          if (!isInside) dialog.close();
+        }
+      };
+      dialog.addEventListener('click', handleClick);
+      return () => dialog.removeEventListener('click', handleClick);
+    }
+  }, []);
+
+  const handleExpand = useCallback(() => {
+    dialogRef.current?.showModal();
+  }, []);
+
+  const handleCollapse = useCallback(() => {
+    dialogRef.current?.close();
+  }, []);
 
   // Reset playback cursor AND selected PIDs when switching sessions.
   useEffect(() => {
@@ -247,7 +276,17 @@ export default function ReplayDashboard() {
       {/* Time Series — full width */}
       <div className="animate-slide-up-delay-3">
         <Card>
-          <Title>Time Series</Title>
+          <div className="flex items-center justify-between">
+            <Title>Time Series</Title>
+            <button
+              type="button"
+              onClick={handleExpand}
+              className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+              aria-label="Expand chart"
+            >
+              ↑
+            </button>
+          </div>
           <OverlayChart
             frames={frames}
             sources={selectedSources}
@@ -255,6 +294,35 @@ export default function ReplayDashboard() {
             onCursorMove={handleCursorMove}
           />
         </Card>
+
+        <dialog
+          ref={dialogRef}
+          closedby="any"
+          className="fixed inset-0 z-50 m-0 h-full w-full overflow-hidden bg-[var(--bg-base)] p-0 backdrop:bg-black/60 backdrop:backdrop-blur-sm"
+          aria-label="Expanded chart"
+          onClose={handleCollapse}
+        >
+          <Card className="h-full">
+            <div className="flex items-center justify-between">
+              <Title>Time Series</Title>
+              <button
+                type="button"
+                onClick={handleCollapse}
+                className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+                aria-label="Collapse chart"
+              >
+                ↓
+              </button>
+            </div>
+            <OverlayChart
+              frames={frames}
+              sources={selectedSources}
+              cursorTime={cursorTime}
+              onCursorMove={handleCursorMove}
+              className="h-full"
+            />
+          </Card>
+        </dialog>
       </div>
 
       {/* GPS Track — full width */}

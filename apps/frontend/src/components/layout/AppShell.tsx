@@ -27,13 +27,13 @@ export default function AppShell() {
     <div className="flex h-full w-full bg-gray-50 dark:bg-[var(--bg-base)]">
       <a
         href="#main-content"
-        className="sr-only focus:not-sr-only focus:absolute focus:z-[100] focus:bg-blue-600 focus:text-white focus:px-4 focus:py-2 focus:rounded-md focus:font-medium"
+        className="sr-only focus:not-sr-only focus:absolute focus:z-[100] focus:bg-teal-700 focus:text-white focus:px-4 focus:py-2 focus:rounded-md focus:font-medium"
       >
         Skip to content
       </a>
-      <aside aria-label="Main navigation" className="hidden w-60 shrink-0 flex-col border-r border-gray-200 bg-white p-4 dark:border-[var(--border-default)] dark:bg-[var(--bg-card)] md:flex">
+      <aside aria-label="Main navigation" className="hidden w-60 shrink-0 flex-col bg-white p-4 shadow-[1px_0_0_0_var(--border-default),4px_0_8px_-2px_rgba(0,0,0,0.05)] dark:bg-[var(--bg-card)] md:flex">
         <div className="mb-6 flex items-center gap-2">
-          <div className="h-8 w-8 rounded-lg bg-blue-600" />
+          <div className="h-8 w-8 rounded-lg bg-teal-600" />
           <span className="text-lg font-bold tracking-tight text-gray-900 dark:text-[var(--text-primary)]">
             TorqueDash
           </span>
@@ -115,7 +115,7 @@ export default function AppShell() {
             </button>
           </div>
         </header>
-        <main id="main-content" className="min-h-0 flex-1 overflow-auto p-4">
+        <main id="main-content" className="scrollable-area min-h-0 flex-1 overflow-auto p-4">
           <div className="animate-fade-in" key={location.pathname}>
             <Outlet />
           </div>

@@ -38,11 +38,11 @@
   --color-fg-muted: var(--text-muted);
 
   /* Tremor tokens */
-  --color-tremor-brand-faint: #eff6ff;
-  --color-tremor-brand-muted: #bfdbfe;
-  --color-tremor-brand-subtle: #60a5fa;
-  --color-tremor-brand: #3b82f6;
-  --color-tremor-brand-emphasis: #1d4ed8;
+  --color-tremor-brand-faint: #e0f5f5;
+  --color-tremor-brand-muted: #99d6d6;
+  --color-tremor-brand-subtle: #40b3b3;
+  --color-tremor-brand: #009999;
+  --color-tremor-brand-emphasis: #007a7a;
   --color-tremor-brand-inverted: #ffffff;
   --color-tremor-background-muted: #f9fafb;
   --color-tremor-background-subtle: #f3f4f6;
@@ -56,11 +56,11 @@
   --color-tremor-content-strong: #111827;
   --color-tremor-content-inverted: #ffffff;
 
-  --color-dark-tremor-brand-faint: #0B1229;
-  --color-dark-tremor-brand-muted: #172554;
-  --color-dark-tremor-brand-subtle: #1e40af;
-  --color-dark-tremor-brand: #3b82f6;
-  --color-dark-tremor-brand-emphasis: #60a5fa;
+  --color-dark-tremor-brand-faint: #0a1a1a;
+  --color-dark-tremor-brand-muted: #144040;
+  --color-dark-tremor-brand-subtle: #1f6b6b;
+  --color-dark-tremor-brand: #2ec4b6;
+  --color-dark-tremor-brand-emphasis: #40d0c0;
   --color-dark-tremor-brand-inverted: #030712;
   --color-dark-tremor-background-muted: #131A2B;
   --color-dark-tremor-background-subtle: #1f2937;
@@ -91,8 +91,8 @@
   /* Font sizes */
   --text-tremor-label: 0.75rem;
   --text-tremor-default: 0.875rem;
-  --text-tremor-title: 1.125rem;
-  --text-tremor-metric: 1.875rem;
+  --text-tremor-title: clamp(1rem, 1.5cqi, 1.125rem);
+  --text-tremor-metric: clamp(1.5rem, 2cqi, 1.875rem);
   --leading-tremor-label: 1rem;
   --leading-tremor-default: 1.25rem;
   --leading-tremor-title: 1.75rem;
@@ -123,18 +123,29 @@
   --border-default: #e5e7eb;
   --border-strong: #d1d5db;
 
-  /* Accent (amber) */
-  --accent: #f59e0b;
-  --accent-hover: #d97706;
+  /* Accent (teal) */
+  --accent: #009999;
+  --accent-hover: #007a7a;
 
   /* Semantic colors */
   --color-success: #22c55e;
   --color-danger: #ef4444;
   --color-warning: #f59e0b;
-  --color-info: #3b82f6;
+  --color-info: #009999;
 
   /* Focus ring */
   --focus-ring: 0 0 0 2px var(--bg-base), 0 0 0 4px var(--accent);
+
+  /* System */
+  color-scheme: light dark;
+
+  /* Scrollbar */
+  --color-scrollbar-track: light-dark(#f1f1f1, #222);
+  --color-scrollbar-thumb: light-dark(#c1c1c1, #555);
+  scrollbar-color: var(--color-scrollbar-thumb) var(--color-scrollbar-track);
+
+  /* Form controls */
+  accent-color: var(--accent);
 }
 
 html,
@@ -150,6 +161,11 @@ body {
   color: var(--text-primary);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Balanced headings ── */
+h1, h2, h3, h4 {
+  text-wrap: balance;
 }
 
 /* Monospace data class */
@@ -189,18 +205,18 @@ body {
   --text-muted: #71717a;
   --border-default: #2d3039;
   --border-strong: #3f4250;
-  --accent: #fbbf24;
-  --accent-hover: #f59e0b;
+  --accent: #2ec4b6;
+  --accent-hover: #009999;
   --color-success: #22c55e;
   --color-danger: #ef4444;
   --color-warning: #fbbf24;
-  --color-info: #60a5fa;
+  --color-info: #2ec4b6;
   --focus-ring: 0 0 0 2px var(--bg-base), 0 0 0 4px var(--accent);
 }
 
 /* ── Accessible focus indicators ── */
 :focus-visible {
-  outline: 2px solid var(--accent, #f59e0b);
+  outline: 2px solid var(--accent, #009999);
   outline-offset: 2px;
 }
 
@@ -231,25 +247,44 @@ body {
 .animate-slide-up-delay-3 { animation: slideUp 0.4s ease-out 0.3s both; }
 .animate-slide-up-delay-4 { animation: slideUp 0.4s ease-out 0.4s both; }
 
+/* ── Scroll-driven card reveal ── */
+@keyframes session-card-reveal {
+  from {
+    opacity: 0;
+    translate: 0 1.5rem;
+  }
+}
+
+.session-card {
+  animation: session-card-reveal linear both;
+  animation-timeline: view();
+  animation-range: entry 0% entry 90%;
+}
+
+/* ── Overflow management ── */
+.scrollable-area {
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+}
+
 /* ── Card hover ── */
 .card-hover {
-  transition: box-shadow 0.2s ease, transform 0.2s ease;
+  transition: box-shadow 0.2s ease, translate 0.2s ease;
 }
 .card-hover:hover {
-  box-shadow: 0 4px 12px 0 rgb(0 0 0 / 0.12);
-  transform: translateY(-1px);
+  box-shadow: var(--shadow-tremor-dropdown);
+  translate: 0 -2px;
 }
 
 /* ── Reduced motion ── */
 @media (prefers-reduced-motion: reduce) {
-  .animate-fade-in,
-  .animate-slide-up,
-  .animate-slide-up-delay-1,
-  .animate-slide-up-delay-2,
-  .animate-slide-up-delay-3,
-  .animate-slide-up-delay-4,
-  .card-hover {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  .session-card {
     animation: none;
-    transition: none;
+    opacity: 1;
   }
 }

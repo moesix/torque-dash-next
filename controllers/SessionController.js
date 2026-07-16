@@ -183,13 +183,12 @@ class SessionController {
     static async copy(req, res) {
         try {
             await sequelize.transaction( async (t) => {
-                // find the session
+                // find the session (without loading logs into memory)
                 let session = await Session.findOne({
                     where: { 
                         userId: req.user.id,
                         id: req.params.sessionId
-                        },
-                        include: {all:true}
+                        }
                 });
                 // Create a copy of the session
                 let sessionCopy = await Session.create({
@@ -199,22 +198,25 @@ class SessionController {
                     endLocation: session.endLocation,
                     userId: session.userId
                 });
-                // Create copy for each session log
-                await Promise.all(session.Logs.map(async log => {
-                    try{
-                        await Log.create({
-                            sessionId: sessionCopy.id,
-                            timestamp: log.dataValues.timestamp,
-                            lon: log.dataValues.lon,
-                            lat: log.dataValues.lat,
-                            values: log.dataValues.values
-                        });
-                    }
-                    catch (err) {
-                        console.log(err);
-                        res.sendStatus(500);
-                    }
-                  }));
+                // Fetch log data as raw objects (not Sequelize models) to avoid
+                // hydrating thousands of model instances into memory.
+                const logs = await Log.findAll({
+                    where: { sessionId: session.id },
+                    raw: true
+                });
+                // Bulk copy all logs with resolved FK in a single INSERT
+                if (logs.length > 0) {
+                    const copyRows = logs.map(l => ({
+                        sessionId: sessionCopy.id,
+                        timestamp: l.timestamp,
+                        lon: l.lon,
+                        lat: l.lat,
+                        values: l.values,
+                        engine_rpm: l.engine_rpm,
+                        vehicle_speed: l.vehicle_speed
+                    }));
+                    await Log.bulkCreate(copyRows, { ignoreDuplicates: true });
+                }
             });
             res.sendStatus(200);
         }
@@ -233,20 +235,28 @@ class SessionController {
                 }
             });
             if(!session) return res.sendStatus(404);
-            // get session logs
-            let logs = await session.getLogs({raw:true});
-            if(filterNumber > logs.length) return res.sendStatus(200);
+            // Quick count check — if filterNumber exceeds total logs, nothing to do
+            const logCount = await Log.count({ where: { sessionId: session.id } });
+            if(filterNumber > logCount) return res.sendStatus(200);
             
-            // get list of log ids to be filtered
-            let logsToBeFiltered = [];
-            for (let i = filterNumber - 1; i < logs.length; i += filterNumber) {
-                logsToBeFiltered.push(logs[i].id);
-            }
-            // delete logs
-            await Log.destroy({ where: {
-                sessionId: session.id,
-                id: { [Op.notIn]: logsToBeFiltered}
-            }});
+            // Delete every log except every Nth row using a SQL window function.
+            // This keeps rows at positions filterNumber, 2*filterNumber, ... (1-indexed)
+            // and deletes the rest — same semantics as the original JS loop but
+            // executed entirely inside PostgreSQL without loading rows into Node.
+            await sequelize.query(`
+                DELETE FROM "Logs"
+                WHERE "sessionId" = :sessionId
+                  AND id NOT IN (
+                      SELECT id FROM (
+                          SELECT id, ROW_NUMBER() OVER (ORDER BY timestamp) as rn
+                          FROM "Logs"
+                          WHERE "sessionId" = :sessionId
+                      ) sub
+                      WHERE rn % :filterNumber != 0
+                  )
+            `, {
+                replacements: { sessionId: session.id, filterNumber: filterNumber }
+            });
             res.sendStatus(200);
         }
         catch (err) {
@@ -289,15 +299,13 @@ class SessionController {
                 where: { 
                     id: req.params.sessionId, 
                     userId: req.user.id
-                },
-                include: {all:true}
+                }
             });
             let sessionTwo = await Session.findOne({
                 where: { 
                     id: joinSessionId, 
                     userId: req.user.id
-                },
-                include: {all:true}
+                }
             })
             if(!sessionOne || !sessionTwo) return res.sendStatus(404); 
 
@@ -308,37 +316,35 @@ class SessionController {
                     name: name,
                     userId: req.user.id
                 });
-                // Create new joined logs
-                await Promise.all(sessionOne.Logs.map(async log => {
-                    try{
-                        await Log.create({
-                            sessionId: joinSession.id,
-                            timestamp: log.dataValues.timestamp,
-                            lon: log.dataValues.lon,
-                            lat: log.dataValues.lat,
-                            values: log.dataValues.values
-                        });
-                    }
-                    catch (err) {
-                        console.log(err);
-                        res.sendStatus(500);
-                    }
-                }));
-                await Promise.all(sessionTwo.Logs.map(async log => {
-                    try{
-                        await Log.create({
-                            sessionId: joinSession.id,
-                            timestamp: log.dataValues.timestamp,
-                            lon: log.dataValues.lon,
-                            lat: log.dataValues.lat,
-                            values: log.dataValues.values
-                        });
-                    }
-                    catch (err) {
-                        console.log(err);
-                        res.sendStatus(500);
-                    }
-                }));
+                // Fetch logs from both sessions as raw objects (not Sequelize models)
+                const [logsOne, logsTwo] = await Promise.all([
+                    Log.findAll({ where: { sessionId: sessionOne.id }, raw: true }),
+                    Log.findAll({ where: { sessionId: sessionTwo.id }, raw: true })
+                ]);
+                // Bulk copy all logs from both sessions in a single INSERT
+                const copyRows = [
+                    ...logsOne.map(l => ({
+                        sessionId: joinSession.id,
+                        timestamp: l.timestamp,
+                        lon: l.lon,
+                        lat: l.lat,
+                        values: l.values,
+                        engine_rpm: l.engine_rpm,
+                        vehicle_speed: l.vehicle_speed
+                    })),
+                    ...logsTwo.map(l => ({
+                        sessionId: joinSession.id,
+                        timestamp: l.timestamp,
+                        lon: l.lon,
+                        lat: l.lat,
+                        values: l.values,
+                        engine_rpm: l.engine_rpm,
+                        vehicle_speed: l.vehicle_speed
+                    }))
+                ];
+                if (copyRows.length > 0) {
+                    await Log.bulkCreate(copyRows, { ignoreDuplicates: true });
+                }
             });
             res.sendStatus(200);
         }

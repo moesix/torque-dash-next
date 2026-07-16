@@ -98,7 +98,7 @@ export default function GpsTrackMap({ frames }: Props) {
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         attribution="&copy; OpenStreetMap contributors"
       />
-      <Polyline positions={positions} pathOptions={{ color: '#2563eb', weight: 3 }} />
+      <Polyline positions={positions} pathOptions={{ color: '#009999', weight: 3 }} />
       {positions.length > 0 ? (
         <Marker ref={markerRef} position={center} />
       ) : null}

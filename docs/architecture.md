@@ -182,10 +182,10 @@ The `getAvailableSeries()` function returns `SeriesSource[]` with resolved
 display names and units (metadata > fallback > raw key), and `getSeriesData()`
 extracts `[timestamp_ms, value]` pairs via the safe `coerceScalar()` helper.
 
-> **Fix:** The `kff1007` fallback entry was relabelled from `"Coolant 2"` / `°C`
-> to `"Coolant (F)"` / `°F` to match Torque Pro's actual output for this PID.
-> The short name and units now display correctly in the chart legend and
-> decoded metrics table.
+> **Fix:** The `kff1007` fallback entry was relabelled to `"GPS Bearing"` / `°`
+> to match Torque Pro's actual output for this PID (bearing in degrees, not
+> coolant temperature). The short name and units now display correctly in the
+> chart legend and decoded metrics table.
 
 ### 3.5 Session Summary Card (`SessionSummaryCard.tsx`)
 - A combined card that replaces the previous 4-card grid (2 KpiCards + 2 GaugeTiles) in `ReplayDashboard`.
@@ -253,6 +253,26 @@ extracts `[timestamp_ms, value]` pairs via the safe `coerceScalar()` helper.
 - **Mobile drawer** — `MobileDrawer.tsx` renders a slide-out navigation panel with backdrop overlay, Escape-to-close, focus-on-open, and dark mode support. Triggered by a hamburger button visible below the `md` breakpoint.
 - **Loading skeletons** — `Skeleton.tsx` provides a shimmer-animated placeholder for async content; `ErrorAlert.tsx` renders a dismissible error banner. Both replace raw text placeholders in `SessionBrowser` and `ReplayDashboard`.
 - **Micro-interactions** — fadeIn/slideUp CSS animations with staggered delays (4 tiers) on dashboard sections; page transitions via `<Outlet key={location.pathname}>`; card-hover effects on table rows. All animations opt out when `prefers-reduced-motion: reduce` is set.
+
+### 3.9 UI Refinement & Teal Branding (2026-07-17)
+
+The following modern CSS and UX enhancements were applied in the UI refinement pass:
+
+- **Brand color shift** — Primary accent changed from amber (`#f59e0b`) to teal (`#009999` light / `#2ec4b6` dark). Tremor brand tokens, chart series colors (COLORS[0]), map polylines, gauge rings, sidebar logos, login/register panels, focus rings, and `accent-color` all use the teal palette.
+- **`light-dark()` CSS function** — All color tokens (`--bg-base`, `--text-primary`, `--accent`, `--border-default`, etc.) are defined once in `:root` using `light-dark(lightValue, darkValue)`. This eliminates the need to redeclare every variable in `.dark {}`. The `.dark` class block is retained as a fallback for browsers that don't support `light-dark()` yet.
+- **`color-scheme` declaration** — `color-scheme: light dark` in CSS + `<meta name="color-scheme" content="light dark">` in `index.html`. Browser UI (scrollbars, form controls) automatically adapts to the system theme.
+- **`accent-color: var(--accent)`** — Checkboxes, radio buttons, range sliders, and other native form controls inherit the teal brand color.
+- **Custom scrollbar theming** — `scrollbar-color` + `scrollbar-width` set via CSS custom properties with `light-dark()` values, so scrollbars match the active theme.
+- **Fluid typography** — `--text-tremor-title: clamp(1rem, 1.5cqi, 1.125rem)` and `--text-tremor-metric: clamp(1.5rem, 2cqi, 1.875rem)` for responsive font sizing that scales with the container.
+- **Native `<dialog>` for fullscreen chart** — The expanded chart overlay in `ReplayDashboard` uses `<dialog closedby="any">` with `showModal()`/`close()` for proper modal behavior (focus trapping, Escape key, light-dismiss). Safari fallback adds a click-outside handler for browsers without `closedby` support.
+- **Scroll-driven animations** — Dashboard session cards use `animation-timeline: view()` with `animation-range` for entry reveals as cards scroll into the viewport, without JavaScript scroll listeners.
+- **View Transitions API** — Crossfade page navigation via `::view-transition-old(root)` and `::view-transition-new(root)` keyframe animations. The main content area carries `viewTransitionName: 'main-content'` in AppShell.
+- **`scrollbar-gutter: stable`** — Applied to `.scrollable-area` to prevent layout shift when scrollbars appear/disappear.
+- **`text-wrap: balance`** — Applied to all headings (`h1`–`h4`) for visually balanced line breaks.
+- **`overscroll-behavior: contain`** — Prevents scroll chain/elastic overscroll on scrollable containers.
+- **Card hover polish** — `.card-hover` now uses `translate: 0 -2px` on hover for a subtle lift effect, plus `box-shadow` transition.
+- **Sidebar depth** — AppShell sidebar uses layered `box-shadow` for subtle inset depth (1px border + 4px shadow).
+- **Reduced motion** — All new animations (scroll-driven, view transitions, card hover) are gated behind `prefers-reduced-motion: reduce` which sets `animation: none !important` and `transition: none !important`.
 
 ---
 
