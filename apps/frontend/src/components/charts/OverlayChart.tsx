@@ -141,12 +141,15 @@ export default function OverlayChart({
     const chart = chartRef.current;
     if (!chart) return;
 
+    const containerWidth = containerRef.current?.clientWidth ?? 640;
+    const isMobile = containerWidth < 640;
+
     if (sources.length === 0) {
       // Show placeholder — render an empty chart config so it stays mounted.
       chart.setOption(
         {
           animation: false,
-          grid: { left: 56, right: 24, top: 24, bottom: 60 },
+          grid: { left: isMobile ? 32 : 56, right: 24, top: 24, bottom: 60 },
           xAxis: { type: 'time', show: true },
           yAxis: { type: 'value', show: false },
           series: [],
@@ -166,6 +169,8 @@ export default function OverlayChart({
 
     // Smart axis offset: reduce spacing when many axes
     const axisOffset = axisCount >= 6 ? 32 : axisCount >= 5 ? 38 : 45;
+    const mobileAxisOffset = Math.min(axisOffset, 28);
+    const effectiveOffset = isMobile ? mobileAxisOffset : axisOffset;
 
     // Build yAxis options — one per unit group
     const yAxisOptions: any[] = [];
@@ -184,7 +189,7 @@ export default function OverlayChart({
         opt.position = 'left';
       } else {
         opt.position = 'right';
-        opt.offset = axisOffset * (axisIdx - 1);
+        opt.offset = effectiveOffset * (axisIdx - 1);
         opt.splitLine = { show: false };
         // When 5+ axes, show every-other label to reduce clutter
         if (axisCount >= 5) {
@@ -204,11 +209,11 @@ export default function OverlayChart({
       axisIdx++;
     }
 
-    // Grid — leave space for right-side offset axes, capped to prevent
-    // chart area from collapsing on tablets/phones with many axes.
+    // Grid — leave space for right-side offset axes.
+    // On mobile (<640px), use tighter margins to prevent chart area collapse.
     const rightMargin = Math.min(
-      180,
-      24 + Math.max(0, axisCount - 1) * axisOffset,
+      isMobile ? 90 : 180,
+      24 + Math.max(0, axisCount - 1) * effectiveOffset,
     );
 
     // Build series options
@@ -252,7 +257,7 @@ export default function OverlayChart({
     chart.setOption(
       {
         animation: false,
-        grid: { left: 56, right: rightMargin, top: 24, bottom: 60, containLabel: true },
+        grid: { left: isMobile ? 32 : 56, right: rightMargin, top: 24, bottom: 60, containLabel: true },
         tooltip: { trigger: 'axis' as const },
         xAxis: { type: 'time' as const },
         yAxis: yAxisOptions,

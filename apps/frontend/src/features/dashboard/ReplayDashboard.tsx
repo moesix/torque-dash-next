@@ -34,7 +34,7 @@ import type { SeriesSource } from '@/lib/types';
 
 /** Default selected source pids — these are column-based so the chart is
  *  never empty even when frames lack OBD-II PID values. */
-const DEFAULT_PIDS = ['kc', 'vehicleSpeed', 'kff1007', 'k5', 'ke', 'kff1214'];
+const DEFAULT_PIDS = ['kc', 'vehicleSpeed', 'k5', 'ke', 'kff1214'];
 
 // ── Safe helpers ─────────────────────────────────────────────────────────
 

@@ -182,10 +182,10 @@ The `getAvailableSeries()` function returns `SeriesSource[]` with resolved
 display names and units (metadata > fallback > raw key), and `getSeriesData()`
 extracts `[timestamp_ms, value]` pairs via the safe `coerceScalar()` helper.
 
-> **Fix:** The `kff1007` fallback entry was relabelled from `"Coolant 2"` / `°C`
-> to `"Coolant (F)"` / `°F` to match Torque Pro's actual output for this PID.
-> The short name and units now display correctly in the chart legend and
-> decoded metrics table.
+> **Fix:** The `kff1007` fallback entry was relabelled to `"GPS Bearing"` / `°`
+> to match Torque Pro's actual output for this PID (bearing in degrees, not
+> coolant temperature). The short name and units now display correctly in the
+> chart legend and decoded metrics table.
 
 ### 3.5 Session Summary Card (`SessionSummaryCard.tsx`)
 - A combined card that replaces the previous 4-card grid (2 KpiCards + 2 GaugeTiles) in `ReplayDashboard`.
