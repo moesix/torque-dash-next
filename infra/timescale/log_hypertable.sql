@@ -4,6 +4,9 @@ CREATE EXTENSION IF NOT EXISTS timescaledb;
 --    Keep `id` globally unique for id-based ops (filter/cut/join).
 --    NOTE: the unique index on id is created AFTER create_hypertable below
 --    because TimescaleDB requires the partition column in every unique index.
+--    Disable compression temporarily — ALTER TABLE is not supported on
+--    compressed hypertables.
+ALTER TABLE "Logs" SET (timescaledb.compress = false);
 ALTER TABLE "Logs" DROP CONSTRAINT "Logs_pkey";
 ALTER TABLE "Logs" ADD PRIMARY KEY ("sessionId", timestamp);
 
@@ -26,6 +29,14 @@ CREATE UNIQUE INDEX IF NOT EXISTS logs_id_uidx ON "Logs"(id, timestamp);
 
 -- 6. Index for the dominant access pattern
 CREATE INDEX IF NOT EXISTS logs_session_time_idx ON "Logs" ("sessionId", timestamp DESC);
+
+-- 8. Re-enable compression on the hypertable (was disabled in step 1 for ALTER)
+ALTER TABLE "Logs" SET (
+  timescaledb.compress,
+  timescaledb.compress_segmentby = '"sessionId"',
+  timescaledb.compress_orderby = '"timestamp" DESC'
+);
+SELECT add_compression_policy('"Logs"', INTERVAL '7 days');
 
 -- 7. Continuous aggregate over promoted columns (safe; backfilled)
 CREATE MATERIALIZED VIEW IF NOT EXISTS log_1min

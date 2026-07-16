@@ -25,7 +25,8 @@ function isBenignError(err) {
         /duplicate.*constraint/i.test(msg) ||
         /multiple primary keys/i.test(msg) ||
         /relation "log_1min" already exists/i.test(msg) ||
-        /already a hypertable/i.test(msg)
+        /already a hypertable/i.test(msg) ||
+        /operation not supported on hypertables that have compression enabled/i.test(msg)
     );
 }
 
