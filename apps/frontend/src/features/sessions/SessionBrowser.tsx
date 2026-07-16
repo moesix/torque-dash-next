@@ -45,7 +45,7 @@ export default function SessionBrowser() {
   }
 
   return (
-    <Card>
+    <Card className="session-card">
       <Title>Your Sessions</Title>
       <Text>Select a session to replay its telemetry.</Text>
       {data && data.length > 0 ? (

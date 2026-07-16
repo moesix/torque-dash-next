@@ -76,7 +76,7 @@ export default function PlaybackControls({ frames }: Props) {
           step={1}
           value={cursorTime ?? start}
           onChange={onScrub}
-          className="min-w-[200px] flex-1 h-10 accent-blue-600 dark:accent-blue-400"
+          className="min-w-[200px] flex-1 h-10"
           aria-label="Playback scrubber"
         />
         <span className="w-24 text-right text-sm tabular-nums text-gray-600 dark:text-[var(--text-muted)]" aria-live="polite">

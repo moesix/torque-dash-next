@@ -37,7 +37,7 @@ echarts.use([
 // ── Constants ────────────────────────────────────────────────────────────
 
 const COLORS = [
-  '#2563eb',
+  '#009999',
   '#16a34a',
   '#dc2626',
   '#d97706',
@@ -271,9 +271,9 @@ export default function OverlayChart({
             filterMode: 'none' as const,
             height: 20,
             borderColor: 'transparent',
-            backgroundColor: 'rgba(37,99,235,0.08)',
-            fillerColor: 'rgba(37,99,235,0.15)',
-            handleStyle: { color: '#2563eb' },
+            backgroundColor: 'rgba(0,153,153,0.08)',
+            fillerColor: 'rgba(0,153,153,0.15)',
+            handleStyle: { color: '#009999' },
             textStyle: { color: '#6b7280', fontSize: 10 },
           },
         ],
