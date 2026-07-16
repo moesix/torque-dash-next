@@ -11,7 +11,13 @@ let config = {
             return process.env.DATABASE_URL;
         })(),
         options: {
-            logging: false
+            logging: false,
+            pool: {
+                max: 10,
+                min: 2,
+                idle: 30000,
+                acquire: 60000
+            }
         }
     },
     session: {

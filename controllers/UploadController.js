@@ -65,7 +65,7 @@ class UploadController {
 
             // After findOrCreate, if this is a new session, give it a default name
             if (currentSession[1] && time) {
-                const ts = moment(Number(time));
+                const ts = moment.utc(Number(time));
                 const name = `Trip ${ts.format('DDMMYYYY hh:mm A')}`;
                 await sess.update({ name });
             }
