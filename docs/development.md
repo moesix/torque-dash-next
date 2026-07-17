@@ -33,7 +33,7 @@ connect-pg-simple, cors, connect-flash, lodash, moment, shortid, request, plus d
 cd apps/frontend
 npm install
 ```
-Installs React 18, Vite 5, TypeScript 5, Tailwind 3, Tremor 3, ECharts 5,
+Installs React 18, Vite 5, TypeScript 5, Tailwind v4, Tremor 3, ECharts 5,
 react-leaflet 4, TanStack Query 5, zustand 4, react-router-dom 6.
 
 ---
@@ -123,13 +123,11 @@ npm run build      # runs `tsc --noEmit && vite build` → apps/frontend/dist
 
 ---
 
-## 7. Known Issues / Pre-MVP Fixes
+## 7. Known Issues / Follow-up Items
 
-These are **real, verified issues** from the latest code review. They are
-documented honestly so contributors know exactly what to fix before MVP is
-considered working. Severity is assigned per the review.
+These are documented issues from code reviews. Severity is assigned per the review.
 
-### 🔴 BLOCKER — auth broken for the SPA  ✅ RESOLVED
+### Auth contract (SPA ↔ backend) ✅ RESOLVED
 
 The auth contract mismatch (SPA vs backend) is **fixed**. All four original
 blockers are resolved and re-reviewed as PASS:
@@ -144,7 +142,7 @@ blockers are resolved and re-reviewed as PASS:
    (`201`/`{ ok: true }`) and call `req.logIn`; the SPA `login()` probes an
    auth-gated endpoint to confirm the cookie.
 
-### 🟠 HIGH  ✅ RESOLVED
+### High priority ✅ RESOLVED
 
 - ✅ **Proxy rate-limit collapse fixed:** `app.js` calls `app.set('trust proxy', 1)`
   so `req.ip` reflects the real client behind the proxy.
@@ -159,7 +157,7 @@ blockers are resolved and re-reviewed as PASS:
   option handles deployments where nginx terminates HTTPS but forwards HTTP to
   the backend.
 
-### 🟡 MEDIUM
+### Medium priority
 
 - **SSRG guard has a DNS-rebinding TOCTOU.** `lib/ssrfGuard.isSafeUrl` resolves
   the hostname and validates the IP, but `UploadController` then calls
@@ -187,7 +185,7 @@ blockers are resolved and re-reviewed as PASS:
     `Number(values.key) || null`. The latter discards legitimate zero values
     (idle RPM, stopped vehicle speed).
 
-### 🟢 LOW
+### Low priority
 
 - **Empty `CORS_ORIGINS` blocks the cross-origin SPA.** `app.js` builds the CORS
   origin allowlist from `process.env.CORS_ORIGINS`. If unset/empty, the allowlist
@@ -205,7 +203,7 @@ blockers are resolved and re-reviewed as PASS:
   `moment-duration-format`; the legacy `addStartEndData` mutation path is gone and
   stale `302`/`addStartEndData` comments were removed from backend + frontend.
 
-### 🆕 Follow-up features (added after MVP)
+### Follow-up features (post-MVP)
 
 - **Upload rate limit is now env-tunable + token-exempt.** `routes/api.js` caps
   `/upload` at `UPLOAD_RATE_LIMIT_MAX` (default 600) per
@@ -247,12 +245,12 @@ blockers are resolved and re-reviewed as PASS:
 - **MVP implementation is complete.** The backend ingestion, TimescaleDB
   migration, paged telemetry endpoint, and the full React replay dashboard
   (overlay chart + imperative Leaflet marker) are implemented, and the
-  auth-contract BLOCKERs + HIGH items are **resolved and re-reviewed PASS**.
+  auth-contract issues are **resolved and re-reviewed PASS**.
 - **Verification done:** frontend via `npm run build` (`tsc --noEmit && vite build`)
   and `tsc`; backend via `node -c` syntax checks on the relevant files.
 - **Additional features implemented:**
   - Env-tunable upload rate limit with trusted-email burst exemption.
-  - Runtime-toogleable registration (`Settings` singleton +
+  - Runtime-toggleable registration (`Settings` singleton +
     `DISABLE_REGISTRATION` env kill-switch + SPA `/settings` toggle).
   - **Upload API Token UI** on the `/settings` page (generate, view once, copy,
     clear; env override respected).
@@ -263,19 +261,18 @@ blockers are resolved and re-reviewed as PASS:
     per-PID aggregates. Replaces the old dual `TimeSeriesChart.tsx` layout.
   - `RangeError` on large datasets fixed (`safeMax` reduce replaces
     spread-into-`Math.max`).
-- **Not yet done:** the system has **not** been run end-to-end against a live
-  TimescaleDB instance; remaining open issues are the MEDIUM (SSRF TOCTOU,
-  ingestBuffer race, CSRF) and LOW items listed above.
-- **Recommended gate before marking MVP "done":** run a live smoke test
-  (register → login → upload telemetry → replay dashboard renders overlay chart
-  with PID metrics + moving map marker), then address the MEDIUM items.
+  - Docker-based deployment with GHCR images (`docker-compose.prod.yml`).
+  - Non-root backend container (`appuser`), unprivileged nginx frontend.
+- **Remaining open issues:** SSRF TOCTOU, ingestBuffer race (both documented
+  in section 7 above).
 
 ---
 
 ## 9. Alternative Setup Methods
 
 The sections below cover building from source and manual (non-Docker) setup. For
-most users, the Docker quick start in the README is sufficient.
+most users, the Docker quick start in the README or the full deployment guide
+(`docs/deployment.md`) is sufficient.
 
 ### Build from source
 

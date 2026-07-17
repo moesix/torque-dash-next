@@ -29,6 +29,9 @@ docker compose -f docker-compose.prod.yml up -d
 
 Then open **http://localhost:8080**.
 
+> For detailed deployment instructions, environment variables reference, and
+> troubleshooting, see [docs/deployment.md](docs/deployment.md).
+
 ### Required configuration
 
 The app **will not start** without `DATABASE_URL` and `SESSION_KEYS`.
