@@ -47,6 +47,11 @@ router.get('/upload', uploadLimiter, UploadController.processUpload);
 const authLimiter = makeLimiter(rateLimits.auth);
 // Tighter limiter for authenticated mutations to bound write churn.
 const writeLimiter = makeLimiter(rateLimits.write);
+// Dedicated limiter for CSV export (full-table-scan per request).
+const exportLimiter = makeLimiter({
+    windowMs: 60000,
+    max: 10,
+});
 // Public read of site settings (register/login pages need this to decide whether
 // to show the signup form). Toggling requires an authenticated session.
 router.get('/settings', UserController.getSettings);
@@ -73,6 +78,7 @@ router.get('/sessions/shared/:shareId', sharedLimiter, SessionController.getAllS
 router.get('/sessions/shared/:shareId/:sessionId', sharedLimiter, SessionController.getOneShared);
 router.get('/sessions/:sessionId', authenticate, SessionController.getOne);
 router.delete('/sessions/:sessionId', authenticate, SessionController.delete);
+router.get('/sessions/:sessionId/export/csv', exportLimiter, authenticate, SessionController.exportCsv);
 
 // Paged telemetry frames (ownership enforced inside the controller)
 router.get('/sessions/:id/telemetry', authenticate, TelemetryController.range);
