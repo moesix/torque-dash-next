@@ -202,3 +202,42 @@ export async function deleteAnalysis(sessionId: string, analysisId: number): Pro
     method: 'DELETE',
   });
 }
+
+// ── CSV Export ─────────────────────────────────────────────────────────
+
+/**
+ * Export all telemetry data for a session as a CSV file.
+ * Triggers a browser download with the filename from the server's
+ * Content-Disposition header.
+ */
+export async function exportSessionCsv(sessionId: string): Promise<void> {
+  const res = await fetch(`/api/sessions/${sessionId}/export/csv`, {
+    credentials: 'include',
+  });
+
+  if (res.status === 401) {
+    if (!isAuthPage()) {
+      window.location.assign('/login');
+    }
+    throw new ApiError('Unauthorized', 401);
+  }
+  if (!res.ok) {
+    throw new ApiError(`Export failed with status ${res.status}`, res.status);
+  }
+
+  // Extract filename from Content-Disposition header
+  const disposition = res.headers.get('content-disposition') ?? '';
+  const match = disposition.match(/filename="?([^";\n]+)"?/);
+  const filename = match?.[1] ?? `session-${sessionId}.csv`;
+
+  // Create blob and trigger download via ephemeral <a> element
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}

@@ -17,7 +17,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
 import { Card, Title } from '@tremor/react';
-import { getSession, getTelemetry } from '@/lib/api';
+import { getSession, getTelemetry, exportSessionCsv } from '@/lib/api';
 import AnalysisPanel from '@/components/ai/AnalysisPanel';
 import type { AnalysisPanelHandle } from '@/components/ai/AnalysisPanel';
 import Skeleton from '@/components/ui/Skeleton';
@@ -81,6 +81,8 @@ export default function ReplayDashboard() {
 
   // ── State ──────────────────────────────────────────────────────────
   const [selectedPids, setSelectedPids] = useState<string[]>(DEFAULT_PIDS);
+  const [isExporting, setIsExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
   const dialogRef = useRef<HTMLDialogElement | null>(null);
   const analysisPanelRef = useRef<AnalysisPanelHandle>(null);
   const [showAnalysisConfirm, setShowAnalysisConfirm] = useState(false);
@@ -243,27 +245,59 @@ export default function ReplayDashboard() {
   return (
     <div className="space-y-4">
       {/* Slim session banner — not a full Card */}
-      <div className="animate-slide-up flex items-center justify-between rounded-lg bg-white px-4 py-3 shadow-xs dark:bg-[var(--bg-card)]">
-        <div>
-          <h1 className="text-lg font-semibold text-gray-900 dark:text-white font-display">
-            {sessionQuery.data.name || 'Session Replay'}
-          </h1>
-          <p className="text-sm text-gray-500 dark:text-[var(--text-secondary)]">
-            {sessionQuery.data.startDate
-              ? new Date(sessionQuery.data.startDate).toLocaleString()
-              : ''}
-            {sessionQuery.data.duration ? ` · ${sessionQuery.data.duration}` : ''}
-          </p>
+      <div className="animate-slide-up rounded-lg bg-white px-4 py-3 shadow-xs dark:bg-[var(--bg-card)]">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <h1 className="text-lg font-semibold text-gray-900 dark:text-white font-display">
+              {sessionQuery.data.name || 'Session Replay'}
+            </h1>
+            <p className="text-sm text-gray-500 dark:text-[var(--text-secondary)]">
+              {sessionQuery.data.startDate
+                ? new Date(sessionQuery.data.startDate).toLocaleString()
+                : ''}
+              {sessionQuery.data.duration ? ` · ${sessionQuery.data.duration}` : ''}
+            </p>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setShowAnalysisConfirm(true)}
+              className="rounded p-1.5 text-xs font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+              title="AI-powered session analysis"
+              aria-label="AI Analysis"
+            >
+              🤖 AI
+            </button>
+            <button
+              type="button"
+              onClick={async () => {
+                if (!id) return;
+                setIsExporting(true);
+                setExportError(null);
+                try {
+                  await exportSessionCsv(id);
+                } catch (err) {
+                  setExportError(err instanceof Error ? err.message : 'Download failed');
+                } finally {
+                  setIsExporting(false);
+                }
+              }}
+              disabled={isExporting}
+              className="rounded p-1.5 text-xs font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200 disabled:opacity-50"
+              title="Download session data as CSV"
+              aria-label="Download CSV"
+            >
+              {isExporting ? (
+                <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-gray-400 border-t-transparent" />
+              ) : (
+                '↓ CSV'
+              )}
+            </button>
+            {exportError && (
+              <span className="text-xs text-red-500">{exportError}</span>
+            )}
+          </div>
         </div>
-        <button
-          type="button"
-          onClick={() => setShowAnalysisConfirm(true)}
-          className="rounded p-1.5 text-xs font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
-          title="AI-powered session analysis"
-          aria-label="AI Analysis"
-        >
-          🤖 AI
-        </button>
       </div>
 
       {/* Playback controls — full width */}
