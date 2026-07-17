@@ -70,6 +70,12 @@ let config = {
         global: {
             windowMs: Number(process.env.READ_RATE_LIMIT_WINDOW_MS) || 60000,
             max: Number(process.env.READ_RATE_LIMIT_MAX) || 600
+        },
+        // AI analysis (POST /sessions/:id/analyze, POST /settings/test-llm):
+        // cost-bound operations — each request calls an external LLM API.
+        ai: {
+            windowMs: Number(process.env.AI_RATE_LIMIT_WINDOW_MS) || 60000,
+            max: Number(process.env.AI_RATE_LIMIT_MAX) || 5
         }
     }
 };

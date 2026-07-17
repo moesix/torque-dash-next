@@ -7,6 +7,7 @@ const SessionController = require('../controllers/SessionController');
 const UploadController = require('../controllers/UploadController');
 const UserController = require('../controllers/UserController');
 const TelemetryController = require('../controllers/TelemetryController');
+const AnalysisController = require('../controllers/AnalysisController');
 const runtime = require('../config/runtime');
 
 // Shared limiter defaults: key on req.ip (real client IP via trust proxy),
@@ -52,6 +53,8 @@ const exportLimiter = makeLimiter({
     windowMs: 60000,
     max: 10,
 });
+// Dedicated limiter for AI analysis (cost-bound LLM API calls).
+const aiLimiter = makeLimiter(rateLimits.ai);
 // Public read of site settings (register/login pages need this to decide whether
 // to show the signup form). Toggling requires an authenticated session.
 router.get('/settings', UserController.getSettings);
@@ -89,6 +92,12 @@ router.patch('/sessions/filter/:sessionId', authenticate, SessionController.filt
 router.patch('/sessions/cut/:sessionId', authenticate, SessionController.cut);
 router.post('/sessions/copy/:sessionId', authenticate, SessionController.copy);
 router.post('/sessions/join/:sessionId', authenticate, SessionController.join);
+
+// ── BYOK LLM Analysis ─────────────────────────────────────────────────
+router.post('/settings/test-llm', aiLimiter, authenticate, AnalysisController.testConnection);
+router.post('/sessions/:sessionId/analyze', aiLimiter, authenticate, AnalysisController.analyzeSession);
+router.get('/sessions/:sessionId/analyses', authenticate, AnalysisController.listAnalyses);
+router.delete('/sessions/:sessionId/analyses/:analysisId', authenticate, AnalysisController.deleteAnalysis);
 
 
 module.exports = router;
