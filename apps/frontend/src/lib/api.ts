@@ -4,6 +4,9 @@ import type {
   RawTelemetryRow,
   Settings,
   GenerateUploadTokenResponse,
+  Analysis,
+  UpdateLlmSettings,
+  TestLlmResponse,
 } from './types';
 
 /**
@@ -148,6 +151,59 @@ export async function renameSession(
     body: JSON.stringify({ name }),
   });
 }
+
+// ── BYOK LLM Analysis ─────────────────────────────────────────────────
+
+/** Update LLM provider and vehicle settings. */
+export async function updateLlmSettings(body: UpdateLlmSettings): Promise<Settings> {
+  return request<Settings>('/api/settings', {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+}
+
+/** Test LLM connection. */
+export async function testLlmConnection(): Promise<TestLlmResponse> {
+  return request<TestLlmResponse>('/api/settings/test-llm', {
+    method: 'POST',
+  });
+}
+
+/** Trigger AI analysis for a session. Returns a ReadableStream for SSE. */
+export async function analyzeSession(
+  sessionId: string,
+): Promise<ReadableStream<Uint8Array>> {
+  const res = await fetch(`/api/sessions/${sessionId}/analyze`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+  });
+
+  if (res.status === 401) {
+    if (!isAuthPage()) window.location.assign('/login');
+    throw new ApiError('Unauthorized', 401);
+  }
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ error: 'Analysis failed' }));
+    throw new ApiError(body.error || `Analysis failed (${res.status})`, res.status);
+  }
+
+  return res.body!;
+}
+
+/** List past analyses for a session. */
+export async function listAnalyses(sessionId: string): Promise<Analysis[]> {
+  return request<Analysis[]>(`/api/sessions/${sessionId}/analyses`);
+}
+
+/** Delete a cached analysis. */
+export async function deleteAnalysis(sessionId: string, analysisId: number): Promise<void> {
+  await request(`/api/sessions/${sessionId}/analyses/${analysisId}`, {
+    method: 'DELETE',
+  });
+}
+
+// ── CSV Export ─────────────────────────────────────────────────────────
 
 /**
  * Export all telemetry data for a session as a CSV file.
