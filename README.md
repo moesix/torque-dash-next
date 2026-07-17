@@ -53,11 +53,13 @@ After creating all user accounts, disable public registration via the Settings U
 
 - **Dashboard & visualization** — Live vehicle gauges (RPM, Coolant, Speed), a multi-series PID overlay chart with toggleable metrics and collapsible stats, a route map with color-coded speed traces, and session replays with a playback cursor that drives the gauges in real time. Session summary cards with live SVG ring gauges update as playback progresses.
 
-- **Data ingestion** — Email-gated uploads from Torque Pro over HTTPS. Optional Bearer token authentication for an additional security layer — generate from the Settings UI or set via `UPLOAD_API_TOKEN`. Rate-limited upload endpoint with configurable thresholds.
+- **Data ingestion** — Email-gated uploads from Torque Pro over HTTPS with Bearer token authentication — both a valid email address and the token are required. Generate the token from the Settings UI or set via `UPLOAD_API_TOKEN`. Rate-limited upload endpoint with configurable thresholds.
 
 - **Deployment** — Docker-first: one `docker compose up -d` and you're running. PostgreSQL/TimescaleDB, Node.js backend, and nginx frontend all orchestrated via Compose. Non-root container users, unprivileged nginx.
 
 - **Session management** — Sessions auto-name as `Trip DDMMYYYY HH:MM AM/PM` on first upload. Rename inline from the session table with pencil-icon editing (Enter/Escape/blur handling).
+
+- **CSV export** — Download any session as a CSV file. All telemetry frames included with auto-discovered PID columns. Perfect for analysis in Excel, Google Sheets, or data science tools.
 
 - **PID decode engine** — Auto-discovers all OBD-II parameters from Torque's JSONB `values` column using embedded metadata and a curated fallback map. No schema changes needed for new PIDs. Renders per-unit group axes on the chart.
 
