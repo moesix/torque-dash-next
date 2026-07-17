@@ -353,6 +353,92 @@ class SessionController {
             res.sendStatus(500);
         }
     }
+    static async exportCsv(req, res) {
+        try {
+            // 1. Ownership check
+            const session = await Session.findOne({
+                where: { id: req.params.sessionId, userId: req.user.id }
+            });
+            if (!session) return res.status(404).json({ error: 'Session not found' });
+
+            // 2. Discover all k* PID keys via jsonb_object_keys SQL
+            const [keyRows] = await sequelize.query(`
+                SELECT DISTINCT key FROM (
+                    SELECT jsonb_object_keys(values) AS key
+                    FROM "Logs" WHERE "sessionId" = :sessionId
+                ) sub
+                WHERE key ~ '^k' AND length(key) > 1
+                ORDER BY key
+            `, { replacements: { sessionId: session.id } });
+
+            const pidKeys = keyRows.map(r => r.key);
+
+            // 3. Set headers for streaming CSV download
+            const filename = sanitizeFilename(session.name || `session-${session.id}`);
+            res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+            res.setHeader('Content-Disposition', `attachment; filename="${filename}.csv"`);
+
+            // 4. Write header row: fixed columns + promoted hot columns + discovered PID keys
+            const fixedCols = ['timestamp', 'lat', 'lon', 'engine_rpm', 'vehicle_speed'];
+            const header = [...fixedCols, ...pidKeys];
+            // Prepend UTF-8 BOM for Excel compatibility; escape header values defensively
+            res.write('\ufeff' + header.map(csvEscape).join(',') + '\n');
+
+            // 5. Stream data rows using cursor-based pagination (no offset drift).
+            //    Uses Op.gte + id exclusion for tie-breaking on identical timestamps.
+            const BATCH_SIZE = 1000;
+            let cursor = null; // { timestamp, id }
+            let hasMore = true;
+
+            while (hasMore) {
+                const where = { sessionId: session.id };
+                if (cursor) {
+                    where[Op.or] = [
+                        { timestamp: { [Op.gt]: cursor.timestamp } },
+                        { timestamp: cursor.timestamp, id: { [Op.gt]: cursor.id } }
+                    ];
+                }
+
+                const batch = await Log.findAll({
+                    where,
+                    attributes: ['id', 'timestamp', 'lat', 'lon', 'engine_rpm', 'vehicle_speed', 'values'],
+                    order: [['timestamp', 'ASC'], ['id', 'ASC']],
+                    limit: BATCH_SIZE,
+                    raw: true
+                });
+
+                if (batch.length === 0) {
+                    hasMore = false;
+                    break;
+                }
+
+                for (const row of batch) {
+                    const values = row.values || {};
+                    const cells = [
+                        csvEscape(new Date(row.timestamp).toISOString()),
+                        csvEscape(row.lat),
+                        csvEscape(row.lon),
+                        csvEscape(row.engine_rpm),
+                        csvEscape(row.vehicle_speed),
+                        ...pidKeys.map(k => csvEscape(values[k]))
+                    ];
+                    res.write(cells.join(',') + '\n');
+                }
+
+                cursor = { timestamp: batch[batch.length - 1].timestamp, id: batch[batch.length - 1].id };
+                if (batch.length < BATCH_SIZE) hasMore = false;
+            }
+
+            res.end();
+        } catch (err) {
+            console.error('[SessionController.exportCsv]', err);
+            if (!res.headersSent) {
+                res.status(500).json({ error: 'Export failed' });
+            } else {
+                res.end();
+            }
+        }
+    }
 }
 
 // Aggregated session summary (start/end time + max speed/RPM) computed with a
@@ -395,6 +481,33 @@ function formatDuration(start, end) {
     const ms = new Date(end) - new Date(start);
     if (isNaN(ms) || ms < 0) return null;
     return moment.duration(ms).format('d[d] h[h] m[m] s[s]', { trim: 'both' });
+}
+
+// Strip path-dangerous chars from session names for Content-Disposition filenames,
+// replace spaces with hyphens, and cap at 100 characters.
+function sanitizeFilename(name) {
+    return (String(name)
+        .replace(/[^a-zA-Z0-9_\- ]/g, '')
+        .replace(/\s+/g, '-')
+        .slice(0, 100)
+    ) || 'session';
+}
+
+// Escape a single CSV cell value: null/undefined -> empty string; if the value
+// contains commas, double-quotes, newlines, carriage returns, or tabs, wrap it
+// in double-quotes and escape embedded quotes as "".  Also prefix cells starting
+// with +, -, =, @, or | with a single quote to prevent Excel formula injection.
+function csvEscape(val) {
+    if (val === null || val === undefined) return '';
+    let str = String(val);
+    // Excel formula injection guard: prefix dangerous leading chars
+    if (/^[+\-=@|]/.test(str)) {
+        str = "'" + str;
+    }
+    if (/[,"\n\r\t]/.test(str)) {
+        return '"' + str.replace(/"/g, '""') + '"';
+    }
+    return str;
 }
 
 module.exports = SessionController;

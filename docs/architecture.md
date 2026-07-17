@@ -125,6 +125,22 @@ which enforces ownership (or `?shareId=` for shared sessions) and returns
 > Columns are **camelCase** (`sessionId`, `engine_rpm`) because no
 > `underscore: true` is set; the SQL uses quoted identifiers accordingly.
 
+### 2.5 `TelemetryController.exportCsv` (`controllers/TelemetryController.js`)
+- `GET /api/sessions/:sessionId/export/csv` — authenticated (cookie + owner), streams
+  all telemetry frames for a session as a CSV download.
+- **Dynamic column discovery** — reads the `values` JSONB from each frame and
+  auto-discovers all unique PID keys across the session's data. Each PID becomes
+  a column header (resolved to its human-readable display name and unit via
+  `pidDecode.ts`). Timestamp, GPS coordinates, engine RPM, and vehicle speed are
+  promoted as fixed columns.
+- **Streaming response** — the entire response is streamed as `text/csv` with
+  `Content-Disposition: attachment`, so even large sessions don't exhaust server
+  memory. CSV is written row-by-row using a lightweight streaming approach
+  instead of buffering the full result set.
+- **Frontend trigger** — a "↓ CSV" button in the `ReplayDashboard` header calls
+  this endpoint, prompting a file download in the browser.
+- Returns `404` if the session doesn't exist or doesn't belong to the user.
+
 ---
 
 ## 3. Frontend Internals (`apps/frontend/`)
@@ -354,6 +370,7 @@ deployment guide.
 | `GET /api/sessions` | cookie | list sessions (summary) |
 | `GET /api/sessions/:id` | cookie + owner | session metadata (no full logs) |
 | `GET /api/sessions/:id/telemetry?from&to&limit` | cookie + owner | paged telemetry frames |
+| `GET /api/sessions/:id/export/csv` | cookie + owner | stream all telemetry as CSV with dynamic PID column discovery |
 | `PATCH /api/sessions/:id` | cookie + owner | rename session (body: `{ name }`) |
 | `GET /api/sessions/:id/shared/:shareId` | shareId | shared view |
 | `GET /api/settings` | none | public settings (disableRegistration, hasUploadApiToken) |

@@ -59,6 +59,8 @@ After creating all user accounts, disable public registration via the Settings U
 
 - **Session management** — Sessions auto-name as `Trip DDMMYYYY HH:MM AM/PM` on first upload. Rename inline from the session table with pencil-icon editing (Enter/Escape/blur handling).
 
+- **CSV export** — Download any session as a CSV file. All telemetry frames included with auto-discovered PID columns. Perfect for analysis in Excel, Google Sheets, or data science tools.
+
 - **PID decode engine** — Auto-discovers all OBD-II parameters from Torque's JSONB `values` column using embedded metadata and a curated fallback map. No schema changes needed for new PIDs. Renders per-unit group axes on the chart.
 
 ## Configuration
