@@ -1,6 +1,9 @@
 import { useState, useEffect } from 'react';
 import { Card, Text, Title, Switch } from '@tremor/react';
 import { getSettings, updateSettings, generateUploadToken } from '@/lib/api';
+import type { Settings } from '@/lib/types';
+import AiProviderCard from './AiProviderCard';
+import VehicleCard from './VehicleCard';
 
 export default function SettingsPage() {
   const [disableRegistration, setDisableRegistration] = useState(false);
@@ -16,12 +19,28 @@ export default function SettingsPage() {
   const [tokenError, setTokenError] = useState<string | null>(null);
   const [tokenBusy, setTokenBusy] = useState(false);
 
+  const [llmSettings, setLlmSettings] = useState<Settings>({
+    disableRegistration: false,
+    hasUploadApiToken: false,
+    tokenFromEnv: false,
+    hasLlmProvider: false,
+    llmProvider: null,
+    llmModel: null,
+    llmEndpoint: null,
+    hasLlmApiKey: false,
+    vehicleMake: null,
+    vehicleModel: null,
+    vehicleYear: null,
+    engineCc: null,
+  });
+
   useEffect(() => {
     getSettings()
       .then((s) => {
         setDisableRegistration(s.disableRegistration);
         setHasUploadApiToken(s.hasUploadApiToken);
         setTokenFromEnv(s.tokenFromEnv);
+        setLlmSettings(s);
       })
       .catch(() => setError('Failed to load settings.'));
   }, []);
@@ -191,6 +210,9 @@ export default function SettingsPage() {
           ) : null}
         </div>
       </Card>
+
+      <AiProviderCard settings={llmSettings} onUpdate={setLlmSettings} />
+      <VehicleCard settings={llmSettings} onUpdate={setLlmSettings} />
     </div>
   );
 }

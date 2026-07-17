@@ -18,6 +18,8 @@ import { useQuery } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
 import { Card, Title } from '@tremor/react';
 import { getSession, getTelemetry } from '@/lib/api';
+import AnalysisPanel from '@/components/ai/AnalysisPanel';
+import type { AnalysisPanelHandle } from '@/components/ai/AnalysisPanel';
 import Skeleton from '@/components/ui/Skeleton';
 import ErrorAlert from '@/components/ui/ErrorAlert';
 import { usePlaybackStore } from '@/app/playbackStore';
@@ -80,6 +82,8 @@ export default function ReplayDashboard() {
   // ── State ──────────────────────────────────────────────────────────
   const [selectedPids, setSelectedPids] = useState<string[]>(DEFAULT_PIDS);
   const dialogRef = useRef<HTMLDialogElement | null>(null);
+  const analysisPanelRef = useRef<AnalysisPanelHandle>(null);
+  const [showAnalysisConfirm, setShowAnalysisConfirm] = useState(false);
 
   // Safari fallback for closedby="any" (light-dismiss)
   useEffect(() => {
@@ -160,6 +164,11 @@ export default function ReplayDashboard() {
     [setCursorTime],
   );
 
+  function scrollToAnalysis() {
+    const el = document.getElementById('ai-analysis-panel');
+    el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
   // ── Safe max for KPI cards (fixes RangeError bug) ─────────────────
   const maxRpm = useMemo(
     () => safeMax(frames.map((f) => coerceScalar(f.values?.kc))),
@@ -234,16 +243,27 @@ export default function ReplayDashboard() {
   return (
     <div className="space-y-4">
       {/* Slim session banner — not a full Card */}
-      <div className="animate-slide-up rounded-lg bg-white px-4 py-3 shadow-xs dark:bg-[var(--bg-card)]">
-        <h1 className="text-lg font-semibold text-gray-900 dark:text-white font-display">
-          {sessionQuery.data.name || 'Session Replay'}
-        </h1>
-        <p className="text-sm text-gray-500 dark:text-[var(--text-secondary)]">
-          {sessionQuery.data.startDate
-            ? new Date(sessionQuery.data.startDate).toLocaleString()
-            : ''}
-          {sessionQuery.data.duration ? ` · ${sessionQuery.data.duration}` : ''}
-        </p>
+      <div className="animate-slide-up flex items-center justify-between rounded-lg bg-white px-4 py-3 shadow-xs dark:bg-[var(--bg-card)]">
+        <div>
+          <h1 className="text-lg font-semibold text-gray-900 dark:text-white font-display">
+            {sessionQuery.data.name || 'Session Replay'}
+          </h1>
+          <p className="text-sm text-gray-500 dark:text-[var(--text-secondary)]">
+            {sessionQuery.data.startDate
+              ? new Date(sessionQuery.data.startDate).toLocaleString()
+              : ''}
+            {sessionQuery.data.duration ? ` · ${sessionQuery.data.duration}` : ''}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setShowAnalysisConfirm(true)}
+          className="rounded p-1.5 text-xs font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+          title="AI-powered session analysis"
+          aria-label="AI Analysis"
+        >
+          🤖 AI
+        </button>
       </div>
 
       {/* Playback controls — full width */}
@@ -337,6 +357,47 @@ export default function ReplayDashboard() {
             </div>
           )}
         </Card>
+      </div>
+
+      {/* AI Analysis confirmation dialog */}
+      <dialog
+        open={showAnalysisConfirm}
+        onClose={() => setShowAnalysisConfirm(false)}
+        className="fixed inset-0 z-50 m-auto w-full max-w-sm rounded-lg border bg-white p-6 shadow-xl dark:border-[var(--border-strong)] dark:bg-[var(--bg-card)]"
+      >
+        <div className="space-y-4">
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Run AI Analysis?</h2>
+          <p className="text-sm text-gray-600 dark:text-[var(--text-secondary)]">
+            This will send session telemetry data to your configured LLM provider
+            and may incur API costs (~$0.01–0.05 per analysis depending on provider
+            and session size).
+          </p>
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setShowAnalysisConfirm(false)}
+              className="rounded border bg-white px-4 py-2 text-sm font-medium hover:bg-gray-50 dark:border-[var(--border-default)] dark:bg-[var(--bg-card)] dark:text-[var(--text-primary)] dark:hover:bg-[var(--bg-surface)]"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setShowAnalysisConfirm(false);
+                scrollToAnalysis();
+                analysisPanelRef.current?.triggerAnalysis();
+              }}
+              className="rounded bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-600"
+            >
+              Analyze
+            </button>
+          </div>
+        </div>
+      </dialog>
+
+      {/* AI Analysis panel — at the bottom */}
+      <div id="ai-analysis-panel" className="animate-slide-up-delay-5">
+        <AnalysisPanel ref={analysisPanelRef} sessionId={id as string} />
       </div>
     </div>
   );

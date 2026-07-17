@@ -62,6 +62,17 @@ export interface Settings {
   /** True when the upload token is sourced from the UPLOAD_API_TOKEN env var
    *  (deploy-time override). When true, the UI generation/clear are disabled. */
   tokenFromEnv: boolean;
+
+  // ── BYOK LLM fields ────────────────────────────────────────────────
+  hasLlmProvider: boolean;
+  llmProvider: string | null;
+  llmModel: string | null;
+  llmEndpoint: string | null;
+  hasLlmApiKey: boolean;
+  vehicleMake: string | null;
+  vehicleModel: string | null;
+  vehicleYear: number | null;
+  engineCc: number | null;
 }
 
 /** Response from POST /api/settings/upload-token (token generation). The full
@@ -93,3 +104,35 @@ export interface ColumnMeta {
 
 /** Union of every discoverable metric source. */
 export type SeriesSource = PidMeta | ColumnMeta;
+
+// ── BYOK LLM Analysis types ───────────────────────────────────────────
+
+/** A cached analysis result. */
+export interface Analysis {
+  id: number;
+  provider: string;
+  model: string;
+  response: string;
+  tokenUsage: Record<string, unknown> | null;
+  createdAt: string;
+}
+
+/** Request body for updating LLM settings. */
+export interface UpdateLlmSettings {
+  llmProvider?: string | null;
+  llmApiKey?: string | null;
+  llmModel?: string | null;
+  llmEndpoint?: string | null;
+  vehicleMake?: string | null;
+  vehicleModel?: string | null;
+  vehicleYear?: number | null;
+  engineCc?: number | null;
+}
+
+/** Response from POST /api/settings/test-llm. */
+export interface TestLlmResponse {
+  ok: boolean;
+  response?: string;
+  provider?: string;
+  error?: string;
+}
