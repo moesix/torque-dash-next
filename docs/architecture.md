@@ -78,7 +78,7 @@ which enforces ownership (or `?shareId=` for shared sessions) and returns
 - **GPS:** `kff1005` = lon, `kff1006` = lat. Non-GPS uploads are stored with
   null lat/lon (no longer dropped).
 - **Promoted columns:** `engineRpm` ← `values.kc` (PID 0x0C), `vehicleSpeed` ← `values.kd` (PID 0x0D). Torque stores hex keys **without leading zeros**, so the key is `kc`, not `k0c`. Values are extracted with a zero‑safe pattern: `values.kc != null ? Number(values.kc) : null` (preserves legitimate `0` values).
-- **Auto-naming:** new sessions are automatically named `Trip DDMMYYYY HH:MM AM/PM` using the upload timestamp on first upload.
+- **Auto-naming:** new sessions are automatically named `Trip DDMMYYYY HH:MM AM/PM` using `moment.utc()` on the upload timestamp. The UTC call ensures consistent session naming regardless of the server's local timezone.
 - **SSRF-guarded `forwardUrls`:** each URL is checked with `lib/ssrfGuard.isSafeUrl`
   before a fire-and-forget `fetch`.
 - Responds `200 OK` immediately; the DB flush is asynchronous.
@@ -102,7 +102,9 @@ which enforces ownership (or `?shareId=` for shared sessions) and returns
   (`min(limit||5000, 10000)`), ordered ASC, **limited attributes**
   (`timestamp, lon, lat, values, engine_rpm, vehicle_speed`).
 - Returns JSON frames (unlike the legacy `getOne`/`getAll` which eager-load
-  the full `Log` array — see Known Issues, HIGH).
+  the full `Log` array). Session list endpoints use `aggregateSummaries()`
+  (one `GROUP BY` per request) instead of including full log associations —
+  eliminating the N+1 query pattern that previously flooded telemetry queries.
 
 ### 2.4 TimescaleDB (`infra/timescale/log_hypertable.sql`)
 - **Hypertable** `Logs` partitioned by `timestamp` (`chunk_time_interval = 1 day`).
@@ -112,6 +114,11 @@ which enforces ownership (or `?shareId=` for shared sessions) and returns
 - **Promoted columns** `engine_rpm` (double precision) and `vehicle_speed`
   (double precision) for hot-path queries.
 - **Index** `logs_session_time_idx ON "Logs"("sessionId", timestamp DESC)`.
+- **Compression** — enabled on the hypertable, segmenting by `sessionId` and
+  ordering by `timestamp DESC`. A compression policy auto-compresses chunks
+  older than 7 days (`add_compression_policy('"Logs"', INTERVAL '7 days')`).
+  The migration temporarily disables compression during ALTER TABLE operations
+  (TimescaleDB does not support ALTER on compressed hypertables).
 - **Continuous aggregate** `log_1min` (1-minute buckets of avg/max rpm & speed,
   count) with a refresh policy. Currently **unused** by the API (Known Issues, LOW).
 
@@ -307,34 +314,32 @@ is unnecessary.
 
 ---
 
-## 5. Containerisation Topology (conceptual)
+## 5. Containerisation Topology
 
-The intended production topology is three services on an internal network:
+The production topology uses three services on an internal network:
 
 ```
 ┌────────────┐     ┌──────────────────┐     ┌──────────────────────────┐
 │  db        │◀────│  backend (Express)│◀────│  frontend / nginx        │
-│ PostgreSQL +│     │  :3000           │     │  serves SPA build,        │
-│ TimescaleDB │     │  /api + /api/upload│   │  proxies /api -> backend  │
-└────────────┘     └──────────────────┘     └──────────────────────────┘
-   internal net        internal net              edge / public
+│ PostgreSQL +│     │  :3000           │     │  :8080                   │
+│ TimescaleDB │     │  /api + /api/upload│   │  serves SPA build,        │
+└────────────┘     └──────────────────┘     │  proxies /api -> backend  │
+   internal net        internal net         └──────────────────────────┘
+                                            edge / public
 ```
 
 - **db** — PostgreSQL with the TimescaleDB extension; migrated via
-  `scripts/migrate.js`.
+  `scripts/migrate.js`. Data persisted in a `pgdata` Docker volume.
 - **backend** — Express on `:3000`; CORS allowlist + `sameSite:none; secure`
-  cookie for cross-origin SPA auth; `/health` probe.
-- **frontend / nginx** — serves the `apps/frontend/dist` build (or a CDN) and
-  proxies `/api` to the backend; public edge.
+  cookie for cross-origin SPA auth; `/health` probe. Runs as non-root user
+  (`appuser`). Requires `DATABASE_URL` and `SESSION_KEYS` (app crashes on
+  startup if missing).
+- **frontend / nginx** — serves the `apps/frontend/dist` build via unprivileged
+  Nginx on port `8080`; proxies `/api` to the backend; public edge.
 
-Each service should expose a healthcheck (backend: `GET /health`).
-
-> ⚠️ **Status:** This container topology is **documented/scaffolded, not yet a
-> committed compose file.** No `docker-compose.yml` (or Kubernetes manifests)
-> currently exists in the repo — only `infra/timescale/log_hypertable.sql`.
-> The deploy topology (separate SPA origin/CDN vs. same-origin nginx) is still
-> to be finalized; see Known Issues (LOW) regarding Express not serving the SPA
-> build today.
+Both `docker-compose.yml` (build from source) and `docker-compose.prod.yml`
+(pre-built GHCR images) are provided. See `docs/deployment.md` for the full
+deployment guide.
 
 ---
 
