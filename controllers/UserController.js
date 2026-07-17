@@ -141,6 +141,15 @@ class UserController {
                 disableRegistration: settings.disableRegistration || envDisabled,
                 hasUploadApiToken: Boolean(settings.uploadApiToken || runtime.isFromEnv()),
                 tokenFromEnv: runtime.isFromEnv(),
+                hasLlmProvider: Boolean(settings.llmProvider),
+                llmProvider: settings.llmProvider || null,
+                llmModel: settings.llmModel || null,
+                llmEndpoint: settings.llmEndpoint || null,
+                hasLlmApiKey: Boolean(settings.llmApiKeyEnc),
+                vehicleMake: settings.vehicleMake || null,
+                vehicleModel: settings.vehicleModel || null,
+                vehicleYear: settings.vehicleYear || null,
+                engineCc: settings.engineCc || null,
             });
         } catch (err) {
             console.error(err.message || err);
@@ -184,6 +193,51 @@ class UserController {
                 updateData.uploadApiToken = uploadApiToken;
             }
 
+            // LLM config fields
+            const { llmProvider, llmApiKey, llmModel, llmEndpoint,
+                    vehicleMake, vehicleModel, vehicleYear, engineCc } = req.body;
+
+            if (llmProvider !== undefined) updateData.llmProvider = llmProvider;
+            if (llmModel !== undefined) updateData.llmModel = llmModel;
+            if (llmEndpoint !== undefined) {
+              if (llmEndpoint !== null) {
+                try { new URL(llmEndpoint); } catch {
+                  return res.status(400).json({ error: 'Invalid endpoint URL' });
+                }
+              }
+              updateData.llmEndpoint = llmEndpoint;
+            }
+            if (vehicleMake !== undefined) updateData.vehicleMake = vehicleMake;
+            if (vehicleModel !== undefined) updateData.vehicleModel = vehicleModel;
+            if (vehicleYear !== undefined) {
+              if (vehicleYear !== null) {
+                const y = Number(vehicleYear);
+                if (!Number.isInteger(y) || y < 1900 || y > 2099) {
+                  return res.status(400).json({ error: 'Vehicle year must be between 1900 and 2099' });
+                }
+              }
+              updateData.vehicleYear = vehicleYear;
+            }
+            if (engineCc !== undefined) {
+              if (engineCc !== null) {
+                const c = Number(engineCc);
+                if (!Number.isInteger(c) || c < 50 || c > 20000) {
+                  return res.status(400).json({ error: 'Engine CC must be between 50 and 20000' });
+                }
+              }
+              updateData.engineCc = engineCc;
+            }
+
+            // API key requires encryption
+            if (llmApiKey !== undefined) {
+              if (llmApiKey === null) {
+                updateData.llmApiKeyEnc = null;
+              } else if (typeof llmApiKey === 'string' && llmApiKey.length > 0) {
+                const { prepareApiKey } = require('../lib/llmProviders');
+                updateData.llmApiKeyEnc = prepareApiKey(llmApiKey);
+              }
+            }
+
             await Settings.upsert(updateData);
 
             // Keep the runtime holder in sync
@@ -191,19 +245,22 @@ class UserController {
                 runtime.setUploadApiToken(uploadApiToken);
             }
 
-            // Determine state for the response, OR-ing with env overrides
-            const [currentSettings] = await Settings.findOrCreate({
-                where: { id: 1 },
-                defaults: { disableRegistration: false, uploadApiToken: null },
+            // Re-fetch the full settings row to return complete state
+            const current = await Settings.getSingleton();
+            res.json({
+                disableRegistration: current.disableRegistration || envDisabled,
+                hasUploadApiToken: Boolean(current.uploadApiToken || runtime.isFromEnv()),
+                tokenFromEnv: runtime.isFromEnv(),
+                hasLlmProvider: Boolean(current.llmProvider),
+                llmProvider: current.llmProvider || null,
+                llmModel: current.llmModel || null,
+                llmEndpoint: current.llmEndpoint || null,
+                hasLlmApiKey: Boolean(current.llmApiKeyEnc),
+                vehicleMake: current.vehicleMake || null,
+                vehicleModel: current.vehicleModel || null,
+                vehicleYear: current.vehicleYear || null,
+                engineCc: current.engineCc || null,
             });
-            const finalDisabled = disableRegistration !== undefined
-                ? (disableRegistration || envDisabled)
-                : (currentSettings.disableRegistration || envDisabled);
-            const hasUploadApiToken = uploadApiToken !== undefined
-                ? Boolean(uploadApiToken)
-                : Boolean(currentSettings.uploadApiToken);
-
-            res.json({ disableRegistration: finalDisabled, hasUploadApiToken });
         } catch (err) {
             console.error(err.message || err);
             res.sendStatus(500);
