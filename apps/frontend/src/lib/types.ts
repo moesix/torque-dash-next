@@ -113,6 +113,7 @@ export interface Analysis {
   provider: string;
   model: string;
   response: string;
+  reasoning?: string | null;
   tokenUsage: Record<string, unknown> | null;
   createdAt: string;
 }

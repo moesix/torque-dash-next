@@ -35,6 +35,10 @@ module.exports = (sequelize, DataTypes) => {
             type: DataTypes.JSONB,
             allowNull: true,
         },
+        reasoning: {
+            type: DataTypes.TEXT,
+            allowNull: true,
+        },
     }, {
         tableName: 'Analyses',
         timestamps: true,

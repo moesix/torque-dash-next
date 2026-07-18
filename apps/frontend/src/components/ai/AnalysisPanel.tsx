@@ -136,6 +136,16 @@ const AnalysisPanel = forwardRef<AnalysisPanelHandle, Props>(
                     </button>
                   </div>
                   <div className="prose prose-sm dark:prose-invert max-w-none">
+                    {a.reasoning && (
+                      <details className="mb-3">
+                        <summary className="cursor-pointer text-xs text-gray-500 dark:text-gray-400">
+                          Reasoning
+                        </summary>
+                        <div className="mt-2 text-xs text-gray-600 dark:text-gray-400 whitespace-pre-wrap border-l-2 border-gray-300 dark:border-gray-600 pl-3">
+                          {a.reasoning}
+                        </div>
+                      </details>
+                    )}
                     <Markdown>{a.response}</Markdown>
                   </div>
                 </details>

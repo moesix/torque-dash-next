@@ -112,6 +112,7 @@ class AnalysisController {
       const reader = llmRes.body.getReader();
       const decoder = new TextDecoder();
       let fullResponse = '';
+      let fullReasoning = '';
       let buffer = '';
 
       while (true) {
@@ -137,8 +138,16 @@ class AnalysisController {
             // Anthropic-style: delta.text from content_block_delta events
             const text = delta || reasoning || parsed.delta?.text;
             if (text) {
-              fullResponse += text;
-              res.write(`data: ${JSON.stringify({ text })}\n\n`);
+              if (delta) {
+                fullResponse += text;
+              } else if (reasoning) {
+                fullReasoning += text;
+              } else {
+                // Anthropic-style (no delta/reasoning distinction) — treat as content
+                fullResponse += text;
+              }
+              const type = delta ? 'content' : (reasoning ? 'reasoning' : 'content');
+              res.write(`data: ${JSON.stringify({ type, text })}\n\n`);
             }
           } catch {
             // Skip malformed chunks
@@ -154,7 +163,8 @@ class AnalysisController {
           provider: settings.llmProvider,
           model: settings.llmModel || 'default',
           prompt,
-          response: fullResponse,
+          response: fullResponse || fullReasoning,
+          reasoning: fullReasoning || null,
           tokenUsage: null,
         });
       } catch (cacheErr) {
@@ -185,7 +195,7 @@ class AnalysisController {
         where: { sessionId: session.id, userId: req.user.id },
         order: [['createdAt', 'DESC']],
         limit: 20,
-        attributes: ['id', 'provider', 'model', 'response', 'tokenUsage', 'createdAt'],
+        attributes: ['id', 'provider', 'model', 'response', 'reasoning', 'tokenUsage', 'createdAt'],
       });
 
       res.json(analyses);
@@ -236,7 +246,8 @@ class AnalysisController {
           try {
             const parsed = JSON.parse(data);
             const delta = parsed.choices?.[0]?.delta?.content;
-            const chunk = delta || parsed.delta?.text;
+            const reasoning = parsed.choices?.[0]?.delta?.reasoning_content;
+            const chunk = delta || reasoning || parsed.delta?.text;
             if (chunk) text += chunk;
           } catch {}
         }
