@@ -139,8 +139,10 @@ class AnalysisController {
             const parsed = JSON.parse(data);
             // OpenAI-style: choices[0].delta.content
             const delta = parsed.choices?.[0]?.delta?.content;
+            // DeepSeek reasoning models: content is null, text comes via reasoning_content
+            const reasoning = parsed.choices?.[0]?.delta?.reasoning_content;
             // Anthropic-style: delta.text from content_block_delta events
-            const text = delta || parsed.delta?.text;
+            const text = delta || reasoning || parsed.delta?.text;
             if (fullResponse.length === 0) {
               console.log(`[AnalysisController] First parsed chunk keys: ${JSON.stringify(Object.keys(parsed))}, choices: ${JSON.stringify(parsed.choices?.[0])}`);
             }
