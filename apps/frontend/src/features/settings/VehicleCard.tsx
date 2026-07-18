@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Card, Text } from '@tremor/react';
 import { updateLlmSettings } from '@/lib/api';
 import type { Settings } from '@/lib/types';
@@ -13,6 +13,27 @@ export default function VehicleCard({ settings, onUpdate }: Props) {
   const [model, setModel] = useState(settings.vehicleModel || '');
   const [year, setYear] = useState(settings.vehicleYear?.toString() || '');
   const [cc, setCc] = useState(settings.engineCc?.toString() || '');
+
+  const prevSavedRef = useRef({
+    make: settings.vehicleMake,
+    model: settings.vehicleModel,
+    year: settings.vehicleYear,
+    cc: settings.engineCc,
+  });
+
+  useEffect(() => {
+    if (settings.vehicleMake !== prevSavedRef.current.make) setMake(settings.vehicleMake || '');
+    if (settings.vehicleModel !== prevSavedRef.current.model) setModel(settings.vehicleModel || '');
+    if (settings.vehicleYear !== prevSavedRef.current.year) setYear(settings.vehicleYear?.toString() || '');
+    if (settings.engineCc !== prevSavedRef.current.cc) setCc(settings.engineCc?.toString() || '');
+    prevSavedRef.current = {
+      make: settings.vehicleMake,
+      model: settings.vehicleModel,
+      year: settings.vehicleYear,
+      cc: settings.engineCc,
+    };
+  }, [settings.vehicleMake, settings.vehicleModel, settings.vehicleYear, settings.engineCc]);
+
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);

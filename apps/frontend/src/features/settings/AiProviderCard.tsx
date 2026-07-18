@@ -6,6 +6,7 @@ import type { Settings } from '@/lib/types';
 const PROVIDERS = [
   { value: 'openai', label: 'OpenAI', models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4.1-nano'] },
   { value: 'anthropic', label: 'Anthropic', models: ['claude-sonnet-4-20250514', 'claude-3.5-haiku'] },
+  { value: 'deepseek', label: 'DeepSeek', models: ['deepseek-v4-flash', 'deepseek-v4-pro'] },
   { value: 'ollama', label: 'Ollama (Local)', models: ['llama3.1', 'mistral', 'codellama'] },
   { value: 'custom', label: 'Custom (OpenAI-compatible)', models: [] },
 ];
@@ -20,6 +21,8 @@ export default function AiProviderCard({ settings, onUpdate }: Props) {
   const [apiKey, setApiKey] = useState('');
   const [model, setModel] = useState(settings.llmModel || '');
   const [endpoint, setEndpoint] = useState(settings.llmEndpoint || '');
+  const [thinkingMode, setThinkingMode] = useState(settings.llmThinkingMode ?? true);
+  const [reasoningEffort, setReasoningEffort] = useState(settings.llmReasoningEffort || 'high');
   const [busy, setBusy] = useState(false);
   const [testResult, setTestResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -35,6 +38,10 @@ export default function AiProviderCard({ settings, onUpdate }: Props) {
       if (apiKey) body.llmApiKey = apiKey;
       if (model) body.llmModel = model;
       if (endpoint) body.llmEndpoint = endpoint;
+      if (provider === 'deepseek') {
+        body.llmThinkingMode = thinkingMode;
+        body.llmReasoningEffort = reasoningEffort;
+      }
       const updated = await updateLlmSettings(body);
       onUpdate(updated);
       setApiKey('');
@@ -149,6 +156,39 @@ export default function AiProviderCard({ settings, onUpdate }: Props) {
               className="w-full rounded border bg-white px-3 py-2 text-sm dark:border-[var(--border-default)] dark:bg-[var(--bg-surface)]"
             />
           </div>
+        )}
+
+        {provider === 'deepseek' && (
+          <>
+            <div className="flex items-center gap-2 mt-4">
+              <input
+                type="checkbox"
+                id="thinkingMode"
+                checked={thinkingMode}
+                onChange={(e) => setThinkingMode(e.target.checked)}
+                className="rounded border-gray-300 dark:border-[var(--border-default)]"
+              />
+              <label htmlFor="thinkingMode" className="text-sm font-medium">
+                Thinking Mode
+              </label>
+              <span className="text-xs text-gray-500 dark:text-[var(--text-muted)]">
+                Enable chain-of-thought reasoning
+              </span>
+            </div>
+            {thinkingMode && (
+              <div className="mt-2">
+                <Text className="text-sm font-medium mb-1">Reasoning Effort</Text>
+                <select
+                  value={reasoningEffort}
+                  onChange={(e) => setReasoningEffort(e.target.value)}
+                  className="w-full rounded border bg-white px-3 py-2 text-sm dark:border-[var(--border-default)] dark:bg-[var(--bg-surface)]"
+                >
+                  <option value="high">High (faster, default)</option>
+                  <option value="max">Max (more thorough)</option>
+                </select>
+              </div>
+            )}
+          </>
         )}
 
         <div className="flex gap-2">

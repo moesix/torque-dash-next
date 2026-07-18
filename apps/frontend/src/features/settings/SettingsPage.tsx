@@ -32,6 +32,8 @@ export default function SettingsPage() {
     vehicleModel: null,
     vehicleYear: null,
     engineCc: null,
+    llmThinkingMode: true,
+    llmReasoningEffort: 'high',
   });
 
   useEffect(() => {

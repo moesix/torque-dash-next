@@ -212,7 +212,7 @@ export default function OverlayChart({
     // Grid — leave space for right-side offset axes.
     // On mobile (<640px), use tighter margins to prevent chart area collapse.
     const rightMargin = Math.min(
-      isMobile ? 90 : 180,
+      isMobile ? 60 : 180,
       24 + Math.max(0, axisCount - 1) * effectiveOffset,
     );
 
@@ -257,7 +257,7 @@ export default function OverlayChart({
     chart.setOption(
       {
         animation: false,
-        grid: { left: isMobile ? 32 : 56, right: rightMargin, top: 24, bottom: 60, containLabel: true },
+        grid: { left: isMobile ? 8 : 56, right: rightMargin, top: 24, bottom: 60, containLabel: true },
         tooltip: { trigger: 'axis' as const },
         xAxis: { type: 'time' as const },
         yAxis: yAxisOptions,
@@ -328,12 +328,12 @@ export default function OverlayChart({
     return (
       <div
         ref={containerRef}
-        className={`flex w-full items-center justify-center text-sm text-gray-400 ${mergedClassName}`}
+        className={`flex w-full min-w-0 items-center justify-center text-sm text-gray-400 ${mergedClassName}`}
       >
         <span>Select metrics to display</span>
       </div>
     );
   }
 
-  return <div ref={containerRef} className={`w-full ${mergedClassName}`} />;
+  return <div ref={containerRef} className={`w-full min-w-0 ${mergedClassName}`} />;
 }

@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="530" height="80" viewBox="0 0 530 80"
+     role="img" aria-labelledby="logo-title">
+  <title id="logo-title">torqueDASH-Next</title>
+  
+  <defs>
+    <linearGradient id="logo-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#0d1117"/>
+      <stop offset="100%" stop-color="#161b22"/>
+    </linearGradient>
+    <linearGradient id="logo-accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#009999" stop-opacity="0"/>
+      <stop offset="20%" stop-color="#009999" stop-opacity="1"/>
+      <stop offset="80%" stop-color="#009999" stop-opacity="1"/>
+      <stop offset="100%" stop-color="#009999" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="530" height="80" rx="8" fill="url(#logo-bg)"/>
+  
+  <!-- Text -->
+  <text x="24" y="58"
+        font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+        font-size="56"><tspan font-weight="700" fill="#e6edf3">torque</tspan><tspan font-weight="800" fill="#009999">DASH</tspan><tspan font-weight="600" fill="#8b949e">-Next</tspan></text>
+  
+  <!-- Bottom accent line -->
+  <rect x="0" y="76" width="530" height="4" rx="0" fill="url(#logo-accent)"/>
+</svg>

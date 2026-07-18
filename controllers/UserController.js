@@ -150,6 +150,8 @@ class UserController {
                 vehicleModel: settings.vehicleModel || null,
                 vehicleYear: settings.vehicleYear || null,
                 engineCc: settings.engineCc || null,
+                llmThinkingMode: settings.llmThinkingMode ?? true,
+                llmReasoningEffort: settings.llmReasoningEffort || 'high',
             });
         } catch (err) {
             console.error(err.message || err);
@@ -228,6 +230,22 @@ class UserController {
               updateData.engineCc = engineCc;
             }
 
+            // DeepSeek thinking mode fields
+            const { llmThinkingMode, llmReasoningEffort } = req.body;
+
+            if (llmThinkingMode !== undefined) {
+              if (typeof llmThinkingMode !== 'boolean') {
+                return res.status(400).json({ error: 'llmThinkingMode must be a boolean.' });
+              }
+              updateData.llmThinkingMode = llmThinkingMode;
+            }
+            if (llmReasoningEffort !== undefined) {
+              if (llmReasoningEffort !== null && !['low', 'medium', 'high', 'max'].includes(llmReasoningEffort)) {
+                return res.status(400).json({ error: 'llmReasoningEffort must be low, medium, high, or max.' });
+              }
+              updateData.llmReasoningEffort = llmReasoningEffort;
+            }
+
             // API key requires encryption
             if (llmApiKey !== undefined) {
               if (llmApiKey === null) {
@@ -260,6 +278,8 @@ class UserController {
                 vehicleModel: current.vehicleModel || null,
                 vehicleYear: current.vehicleYear || null,
                 engineCc: current.engineCc || null,
+                llmThinkingMode: current.llmThinkingMode ?? true,
+                llmReasoningEffort: current.llmReasoningEffort || 'high',
             });
         } catch (err) {
             console.error(err.message || err);

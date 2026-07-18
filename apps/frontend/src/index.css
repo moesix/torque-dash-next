@@ -1,5 +1,6 @@
 @import 'leaflet/dist/leaflet.css';
 @import "tailwindcss";
+@plugin "@tailwindcss/typography";
 @config "../tailwind.config.ts";
 
 @source "../node_modules/@tremor/react/dist/**/*.{js,ts,jsx,tsx}";
@@ -287,4 +288,39 @@ h1, h2, h3, h4 {
     animation: none;
     opacity: 1;
   }
+}
+
+/* AI Analysis content styling */
+.analysis-prose h2 {
+  @apply text-lg font-bold text-gray-900 dark:text-gray-100 mt-6 mb-3 pb-2 border-b border-gray-200 dark:border-gray-700;
+}
+
+.analysis-prose h3 {
+  @apply text-base font-semibold text-gray-800 dark:text-gray-200 mt-4 mb-2;
+}
+
+.analysis-prose table {
+  @apply text-sm my-4;
+  display: block;
+  overflow-x: auto;
+}
+
+.analysis-prose th {
+  @apply bg-gray-100 dark:bg-gray-800 font-semibold text-left px-3 py-2;
+}
+
+.analysis-prose td {
+  @apply px-3 py-2 border-t border-gray-200 dark:border-gray-700;
+}
+
+.analysis-prose blockquote {
+  @apply border-l-4 border-amber-400 bg-amber-50 dark:bg-amber-900/20 px-4 py-2 my-3 rounded-r;
+}
+
+.analysis-prose code {
+  @apply text-xs bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded font-mono;
+}
+
+.analysis-prose pre code {
+  @apply bg-transparent p-0;
 }

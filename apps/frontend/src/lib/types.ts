@@ -73,6 +73,8 @@ export interface Settings {
   vehicleModel: string | null;
   vehicleYear: number | null;
   engineCc: number | null;
+  llmThinkingMode?: boolean;
+  llmReasoningEffort?: string;
 }
 
 /** Response from POST /api/settings/upload-token (token generation). The full
@@ -128,6 +130,8 @@ export interface UpdateLlmSettings {
   vehicleModel?: string | null;
   vehicleYear?: number | null;
   engineCc?: number | null;
+  llmThinkingMode?: boolean;
+  llmReasoningEffort?: string;
 }
 
 /** Response from POST /api/settings/test-llm. */

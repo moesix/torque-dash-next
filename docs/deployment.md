@@ -1,4 +1,4 @@
-# TorqueDashNext — Docker Deployment Guide
+# torqueDASH-Next — Docker Deployment Guide
 
 This guide covers deploying torque-dash-next using Docker Compose with
 pre-built images from GitHub Container Registry (GHCR). No repo clone needed.
@@ -18,7 +18,7 @@ pre-built images from GitHub Container Registry (GHCR). No repo clone needed.
 ```bash
 mkdir -p ~/torquedash && cd ~/torquedash
 
-curl -O https://raw.githubusercontent.com/moesix/torque-dash-next/master/docker-compose.prod.yml
+curl -O https://raw.githubusercontent.com/moesix/torque-dash-next/master/docker-compose.yml
 curl -O https://raw.githubusercontent.com/moesix/torque-dash-next/master/.env.example
 ```
 
@@ -45,6 +45,7 @@ The application **will not start** without these:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `UPLOAD_API_TOKEN` | _(unset)_ | Bearer token for Torque Pro uploads. Generate with `openssl rand -hex 24`, or generate from the Settings UI after first login. When set, uploads **require** this token. |
+| `LLM_ENCRYPTION_KEY` | _(unset)_ | 64-char hex key for AES-256-GCM encryption of LLM API keys at rest. Generate with `openssl rand -hex 32`. Required for AI analysis feature. |
 | `COOKIE_SECURE` | `false` | Set to `true` behind a HTTPS reverse proxy (recommended for production). |
 
 ### Other variables
@@ -58,7 +59,7 @@ settings.
 ## 3. Start the stack
 
 ```bash
-docker compose -f docker-compose.prod.yml up -d
+docker compose up -d
 ```
 
 This pulls three images and starts the services:
@@ -96,6 +97,13 @@ In Torque Pro → *Settings → Web Preferences*:
 After creating all user accounts, disable public sign-up via the **Settings**
 UI toggle or set `DISABLE_REGISTRATION=true` in your `.env` file.
 
+### AI analysis (optional)
+
+torqueDASH-Next supports BYOK (Bring Your Own Key) AI-powered session analysis.
+Go to **Settings** to configure an LLM provider (OpenAI, Anthropic, DeepSeek,
+Ollama, or any OpenAI-compatible endpoint). Set `LLM_ENCRYPTION_KEY` in your
+`.env` to encrypt API keys at rest.
+
 ---
 
 ## 5. Upgrading
@@ -104,10 +112,10 @@ UI toggle or set `DISABLE_REGISTRATION=true` in your `.env` file.
 cd ~/torquedash  # or wherever you deployed
 
 # Pull the latest images
-docker compose -f docker-compose.prod.yml pull
+docker compose pull
 
 # Recreate containers with the new images
-docker compose -f docker-compose.prod.yml up -d
+docker compose up -d
 ```
 
 Data is persisted in the `pgdata` Docker volume — it survives container
@@ -120,14 +128,14 @@ recreations. The TimescaleDB migration runs automatically on startup if needed.
 ### Backup the database
 
 ```bash
-docker compose -f docker-compose.prod.yml exec db \
+docker compose exec db \
   pg_dump -U torquedash torquedash > backup_$(date +%Y%m%d).sql
 ```
 
 ### Restore from backup
 
 ```bash
-cat backup_20260717.sql | docker compose -f docker-compose.prod.yml exec -T db \
+cat backup_20260717.sql | docker compose exec -T db \
   psql -U torquedash torquedash
 ```
 
@@ -141,14 +149,14 @@ cat backup_20260717.sql | docker compose -f docker-compose.prod.yml exec -T db \
   app requires these values. Check your `.env` file.
 - **Database not ready** — the backend waits for `pg_isready` to pass. If the
   database is slow to start, give it a moment and check
-  `docker compose -f docker-compose.prod.yml logs db`.
+  `docker compose logs db`.
 
 ### Can't connect to the frontend
 
 - Verify the frontend container is running:
-  `docker compose -f docker-compose.prod.yml ps`
+  `docker compose ps`
 - Check nginx logs:
-  `docker compose -f docker-compose.prod.yml logs frontend`
+  `docker compose logs frontend`
 - Ensure port `8080` is not blocked by a firewall.
 
 ### Uploads failing with 401
@@ -156,30 +164,30 @@ cat backup_20260717.sql | docker compose -f docker-compose.prod.yml exec -T db \
 - If `UPLOAD_API_TOKEN` is set in `.env` or generated from the Settings UI,
   Torque Pro must send the matching `Authorization: bearer <token>` header.
 - Check the backend logs:
-  `docker compose -f docker-compose.prod.yml logs backend`
+  `docker compose logs backend`
 
 ### Viewing logs
 
 ```bash
 # All services
-docker compose -f docker-compose.prod.yml logs -f
+docker compose logs -f
 
 # Specific service
-docker compose -f docker-compose.prod.yml logs -f backend
-docker compose -f docker-compose.prod.yml logs -f db
-docker compose -f docker-compose.prod.yml logs -f frontend
+docker compose logs -f backend
+docker compose logs -f db
+docker compose logs -f frontend
 ```
 
 ### Stopping the stack
 
 ```bash
-docker compose -f docker-compose.prod.yml down
+docker compose down
 ```
 
 Add `-v` to also remove the database volume (**data will be lost**):
 
 ```bash
-docker compose -f docker-compose.prod.yml down -v
+docker compose down -v
 ```
 
 ---
