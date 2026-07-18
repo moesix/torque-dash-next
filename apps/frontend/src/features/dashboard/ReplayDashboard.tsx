@@ -84,6 +84,7 @@ export default function ReplayDashboard() {
   const [isExporting, setIsExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
   const dialogRef = useRef<HTMLDialogElement | null>(null);
+  const analysisDialogRef = useRef<HTMLDialogElement | null>(null);
   const analysisPanelRef = useRef<AnalysisPanelHandle>(null);
   const [showAnalysisConfirm, setShowAnalysisConfirm] = useState(false);
 
@@ -106,6 +107,17 @@ export default function ReplayDashboard() {
       return () => dialog.removeEventListener('click', handleClick);
     }
   }, []);
+
+  // Show/close analysis confirmation dialog via showModal() for proper top-layer rendering
+  useEffect(() => {
+    const dialog = analysisDialogRef.current;
+    if (!dialog) return;
+    if (showAnalysisConfirm) {
+      dialog.showModal();
+    } else {
+      dialog.close();
+    }
+  }, [showAnalysisConfirm]);
 
   const handleExpand = useCallback(() => {
     dialogRef.current?.showModal();
@@ -395,7 +407,7 @@ export default function ReplayDashboard() {
 
       {/* AI Analysis confirmation dialog */}
       <dialog
-        open={showAnalysisConfirm}
+        ref={analysisDialogRef}
         onClose={() => setShowAnalysisConfirm(false)}
         className="fixed inset-0 z-50 m-auto w-full max-w-sm rounded-lg border bg-white p-6 shadow-xl dark:border-[var(--border-strong)] dark:bg-[var(--bg-card)]"
       >
