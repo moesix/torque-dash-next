@@ -69,7 +69,7 @@ export default function MobileDrawer({ open, onClose }: Props) {
         <div className="mb-6 flex items-center gap-2">
           <div className="h-8 w-8 rounded-lg bg-teal-600" />
           <span className="text-lg font-bold tracking-tight text-gray-900 dark:text-[var(--text-primary)]">
-            TorqueDash
+            TorqueDash-Next
           </span>
         </div>
 

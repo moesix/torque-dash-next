@@ -156,7 +156,7 @@ const AnalysisPanel = forwardRef<AnalysisPanelHandle, Props>(
                       {copiedTextId === a.id ? 'Copied!' : 'Copy Text'}
                     </button>
                   </div>
-                  <div className="prose prose-sm dark:prose-invert max-w-none analysis-prose">
+                  <div className="prose prose-sm dark:prose-invert max-w-none analysis-prose overflow-hidden">
                     {a.reasoning && (
                       <details className="mb-3">
                         <summary className="cursor-pointer text-xs text-gray-500 dark:text-gray-400">
