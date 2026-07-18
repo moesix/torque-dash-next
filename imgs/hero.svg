@@ -48,16 +48,10 @@
           font-size="14" font-weight="500" fill="#009999"
           letter-spacing="2">SELF-HOSTED OBD-II TELEMETRY</text>
 
-    <!-- Project name: "torque" in light + "DASH" in bold teal -->
+    <!-- Project name: "torque" in light + "DASH" in bold teal + "-Next" in muted -->
     <text x="0" y="54"
           font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
-          font-size="56" font-weight="700" fill="#e6edf3">torque</text>
-    <text x="214" y="54"
-          font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
-          font-size="56" font-weight="800" fill="#009999">DASH</text>
-    <text x="352" y="54"
-          font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
-          font-size="28" font-weight="600" fill="#8b949e">-Next</text>
+          font-size="56"><tspan font-weight="700" fill="#e6edf3">torque</tspan><tspan font-weight="800" fill="#009999">DASH</tspan><tspan font-weight="600" fill="#8b949e">-Next</tspan></text>
 
     <!-- Tagline -->
     <text x="0" y="92"

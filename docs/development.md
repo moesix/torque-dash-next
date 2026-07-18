@@ -1,11 +1,10 @@
-# TorqueDashNext — Development & Contributing
+# torqueDASH-Next — Development & Contributing
 
-Guidance for contributors working on the TorqueDashNext backend (repo root) and
+Guidance for contributors working on the torqueDASH-Next backend (repo root) and
 the React/Vite frontend (`apps/frontend/`).
 
-> **Read this file's "Known Issues" section before building features.** The
-> backend auth contract is currently broken for the SPA (BLOCKER), and several
-> scalability/security gaps are documented below.
+> **Known issues and follow-up items are documented below.** See the
+> "Known Issues" section for scalability, security, and correctness gaps.
 
 ---
 
@@ -25,7 +24,7 @@ the React/Vite frontend (`apps/frontend/`).
 npm install
 ```
 Installs Express 4, Sequelize 6, `pg`, Passport, Joi, bcrypt, express-session,
-connect-pg-simple, cors, connect-flash, lodash, moment, shortid, request, plus dev tooling
+connect-pg-simple, cors, connect-flash, lodash, moment, nanoid, plus dev tooling
 (eslint, morgan, nodemon).
 
 ### Frontend (`apps/frontend/`)
@@ -56,6 +55,7 @@ Set these at the backend repo root (`.env` or exported in the shell).
 | `UPLOAD_RATE_LIMIT_WINDOW_MS` | no | `60000` | Window length (ms) for the `/upload` rate limiter. |
 | `UPLOAD_API_TOKEN` | no | unset | If set, uploads **REQUIRE** `Authorization: Bearer <token>` — without it, uploads return 401. This is a security gate: email alone is no longer sufficient. Can also be generated from the Settings UI (UI token takes precedence). |
 | `DISABLE_REGISTRATION` | no | unset | Hard kill-switch: when `'true'`, `UserController.register` returns `403` and `GET /api/settings` reports `disableRegistration: true` regardless of the runtime `Settings` toggle. |
+| `LLM_ENCRYPTION_KEY` | yes (AI) | unset | 64-char hex key for AES-256-GCM encryption of LLM API keys at rest. Generate with `openssl rand -hex 32`. Required when using the AI analysis feature. |
 
 > The migration script (`scripts/migrate.js`) reads `DATABASE_URL`, falling back
 > to `config/config.js` (`postgres://postgres:heslo@localhost:5432/torquedash`).
@@ -242,12 +242,12 @@ blockers are resolved and re-reviewed as PASS:
 
 ## 8. Status
 
-- **MVP implementation is complete.** The backend ingestion, TimescaleDB
-  migration, paged telemetry endpoint, and the full React replay dashboard
-  (overlay chart + imperative Leaflet marker) are implemented, and the
-  auth-contract issues are **resolved and re-reviewed PASS**.
-- **Verification done:** frontend via `npm run build` (`tsc --noEmit && vite build`)
-  and `tsc`; backend via `node -c` syntax checks on the relevant files.
+- **Core features complete:** ingestion, TimescaleDB migration, paged telemetry,
+  React replay dashboard (overlay chart + imperative Leaflet marker), CSV export,
+  session management, BYOK AI analysis.
+- **Auth contract resolved and re-reviewed PASS.**
+- **Verification:** frontend via `npm run build` (`tsc --noEmit && vite build`),
+  backend via `node -c` syntax checks.
 - **Additional features implemented:**
   - Env-tunable upload rate limit with trusted-email burst exemption.
   - Runtime-toggleable registration (`Settings` singleton +
@@ -258,10 +258,18 @@ blockers are resolved and re-reviewed as PASS:
     all OBD-II PIDs from the `values` JSONB; `OverlayChart.tsx` renders multiple
     series with per-unit-group y-axes; `PidTogglePanel` provides search,
     category filtering, and selection management; `DecodedMetricsTable` shows
-    per-PID aggregates. Replaces the old dual `TimeSeriesChart.tsx` layout.
+    per-PID aggregates.
   - `RangeError` on large datasets fixed (`safeMax` reduce replaces
     spread-into-`Math.max`).
-  - Docker-based deployment with GHCR images (`docker-compose.prod.yml`).
+  - **BYOK AI analysis** — connect any OpenAI-compatible LLM provider for
+    per-session diagnostic insights. SSE streaming, cost confirmation dialog,
+    syntax-highlighted markdown output.
+  - **DeepSeek first-class** — `deepseek-v4-flash` / `deepseek-v4-pro` with
+    toggleable Thinking Mode and configurable reasoning effort (High / Max).
+    Migration 006 adds `llmThinkingMode` and `llmReasoningEffort` columns.
+  - **LLM API keys encrypted at rest** with AES-256-GCM via `LLM_ENCRYPTION_KEY`.
+  - **SSRF guard** (`lib/ssrfGuard.js`) validates custom LLM endpoints.
+  - Docker-based deployment with GHCR images (`docker-compose.yml`).
   - Non-root backend container (`appuser`), unprivileged nginx frontend.
 - **Remaining open issues:** SSRF TOCTOU, ingestBuffer race (both documented
   in section 7 above).
