@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import Markdown from 'react-markdown';
 
 interface StreamEvent {
@@ -12,49 +12,46 @@ interface Props {
   onError?: (error: string) => void;
 }
 
-/**
- * Throttled state updater for streaming text.
- * Accumulates text in refs and flushes to state at most every `intervalMs`.
- * This avoids re-rendering on every SSE chunk during high-throughput streaming.
- */
-function useThrottledFlush(intervalMs = 100) {
+export default function StreamRenderer({ stream, onDone, onError }: Props) {
   const [contentText, setContentText] = useState('');
   const [reasoningText, setReasoningText] = useState('');
+  const [done, setDone] = useState(false);
+
   const contentRef = useRef('');
   const reasoningRef = useRef('');
   const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onDoneRef = useRef(onDone);
+  const onErrorRef = useRef(onError);
+  onDoneRef.current = onDone;
+  onErrorRef.current = onError;
 
-  /** Append to the content accumulator. */
-  function appendContent(chunk: string) {
+  const appendContent = useCallback((chunk: string) => {
     contentRef.current += chunk;
-  }
+  }, []);
 
-  /** Append to the reasoning accumulator. */
-  function appendReasoning(chunk: string) {
+  const appendReasoning = useCallback((chunk: string) => {
     reasoningRef.current += chunk;
-  }
+  }, []);
 
-  /** Schedule a state flush if one isn't already pending. */
-  function scheduleFlush() {
+  const scheduleFlush = useCallback(() => {
     if (flushTimerRef.current) return;
     flushTimerRef.current = setTimeout(() => {
       flushTimerRef.current = null;
       setContentText(contentRef.current);
       setReasoningText(reasoningRef.current);
-    }, intervalMs);
-  }
+    }, 100);
+  }, []);
 
-  /** Flush immediately — used on stream completion. */
-  function flushNow() {
+  const flushNow = useCallback(() => {
     if (flushTimerRef.current) {
       clearTimeout(flushTimerRef.current);
       flushTimerRef.current = null;
     }
     setContentText(contentRef.current);
     setReasoningText(reasoningRef.current);
-  }
+  }, []);
 
-  /** Cleanup timer on unmount. */
+  // Cleanup timer on unmount
   useEffect(() => {
     return () => {
       if (flushTimerRef.current) {
@@ -63,41 +60,9 @@ function useThrottledFlush(intervalMs = 100) {
     };
   }, []);
 
-  return {
-    contentText,
-    reasoningText,
-    contentRef,
-    reasoningRef,
-    appendContent,
-    appendReasoning,
-    scheduleFlush,
-    flushNow,
-  };
-}
-
-export default function StreamRenderer({ stream, onDone, onError }: Props) {
-  const {
-    contentText,
-    reasoningText,
-    contentRef,
-    reasoningRef,
-    appendContent,
-    appendReasoning,
-    scheduleFlush,
-    flushNow,
-  } = useThrottledFlush(100);
-
-  const [done, setDone] = useState(false);
-  const readerRef = useRef<ReadableStreamDefaultReader<Uint8Array> | null>(null);
-  const onDoneRef = useRef(onDone);
-  const onErrorRef = useRef(onError);
-  onDoneRef.current = onDone;
-  onErrorRef.current = onError;
-
   useEffect(() => {
     let cancelled = false;
     const reader = stream.getReader();
-    readerRef.current = reader;
     const decoder = new TextDecoder();
     let buffer = '';
 
@@ -129,7 +94,6 @@ export default function StreamRenderer({ stream, onDone, onError }: Props) {
               }
               const event = parsed as unknown as StreamEvent;
               if (event.text) {
-                // Backward compat: if `type` is missing, treat as "content"
                 if (event.type === 'reasoning') {
                   appendReasoning(event.text);
                 } else {
@@ -142,7 +106,6 @@ export default function StreamRenderer({ stream, onDone, onError }: Props) {
             }
           }
         }
-        // Stream ended without [DONE] sentinel
         flushNow();
         setDone(true);
         onDoneRef.current?.(contentRef.current);
@@ -158,10 +121,9 @@ export default function StreamRenderer({ stream, onDone, onError }: Props) {
       cancelled = true;
       reader.cancel();
     };
-  }, [stream, appendContent, appendReasoning, scheduleFlush, flushNow]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stream]);
 
-  // When only reasoning is received (content is empty), show reasoning as main content.
-  // DeepSeek reasoning models often put everything in the reasoning field.
   const hasContent = contentText.length > 0;
   const hasReasoning = reasoningText.length > 0;
 
