@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <img src="./imgs/tdn-session.jpg" width="100%" alt="torqueDASH-Next dashboard showing GPS route map with color-coded speed and a multi-series telemetry chart">
+  <img src="./imgs/TDN-session.jpg" width="100%" alt="torqueDASH-Next dashboard showing GPS route map with color-coded speed and a multi-series telemetry chart">
 </p>
 
 A self-hosted dashboard for [Torque Pro](https://torque-bhp.com/) vehicle telemetry. Torque Pro streams live OBD-II data from your car over HTTPS; torqueDASH-Next stores it in a time-series database and renders it in a React dashboard — live gauges, a route map, session replays, and per-session summaries. All data stays on your own server.
