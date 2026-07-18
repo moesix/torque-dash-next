@@ -131,7 +131,7 @@ class AnalysisController {
         for (const line of lines) {
           if (!line.startsWith('data: ')) continue;
           const data = line.slice(6).trim();
-          console.log(`[AnalysisController] SSE line: ${data.slice(0, 150)}`);
+          console.log(`[AnalysisController] SSE data: ${data}`);
           if (data === '[DONE]') {
             break;
           }
@@ -141,6 +141,9 @@ class AnalysisController {
             const delta = parsed.choices?.[0]?.delta?.content;
             // Anthropic-style: delta.text from content_block_delta events
             const text = delta || parsed.delta?.text;
+            if (fullResponse.length === 0) {
+              console.log(`[AnalysisController] First parsed chunk keys: ${JSON.stringify(Object.keys(parsed))}, choices: ${JSON.stringify(parsed.choices?.[0])}`);
+            }
             if (text) {
               fullResponse += text;
               res.write(`data: ${JSON.stringify({ text })}\n\n`);
