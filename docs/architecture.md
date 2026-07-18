@@ -1,4 +1,4 @@
-# TorqueDashNext — System Architecture
+# torqueDASH-Next — System Architecture
 
 This document describes the architecture of the Tier-2 modernization of
 `torque-dash`. It covers the high-level topology, backend internals, frontend
@@ -78,7 +78,9 @@ which enforces ownership (or `?shareId=` for shared sessions) and returns
 - **GPS:** `kff1005` = lon, `kff1006` = lat. Non-GPS uploads are stored with
   null lat/lon (no longer dropped).
 - **Promoted columns:** `engineRpm` ← `values.kc` (PID 0x0C), `vehicleSpeed` ← `values.kd` (PID 0x0D). Torque stores hex keys **without leading zeros**, so the key is `kc`, not `k0c`. Values are extracted with a zero‑safe pattern: `values.kc != null ? Number(values.kc) : null` (preserves legitimate `0` values).
-- **Auto-naming:** new sessions are automatically named `Trip DDMMYYYY HH:MM AM/PM` using `moment.utc()` on the upload timestamp. The UTC call ensures consistent session naming regardless of the server's local timezone.
+- **Auto-naming:** new sessions are automatically named `Trip DDMMYYYY h:mmA`
+  using `moment(Number(time))` (local time from the Torque `time` param).
+  The format uses 12-hour clock with AM/PM for human-readable session names.
 - **SSRF-guarded `forwardUrls`:** each URL is checked with `lib/ssrfGuard.isSafeUrl`
   before a fire-and-forget `fetch`.
 - Responds `200 OK` immediately; the DB flush is asynchronous.
@@ -354,6 +356,7 @@ The production topology uses three services on an internal network:
   Nginx on port `8080`; proxies `/api` to the backend; public edge.
 
 `docker-compose.yml` uses pre-built GHCR images (no repo clone needed).
+Configuration is loaded from `.env` via the `env_file` directive.
 See `docs/deployment.md` for the full deployment guide.
 
 ---
@@ -370,11 +373,16 @@ See `docs/deployment.md` for the full deployment guide.
 | `GET /api/sessions/:id` | cookie + owner | session metadata (no full logs) |
 | `GET /api/sessions/:id/telemetry?from&to&limit` | cookie + owner | paged telemetry frames |
 | `GET /api/sessions/:id/export/csv` | cookie + owner | stream all telemetry as CSV with dynamic PID column discovery |
-| `PATCH /api/sessions/:id` | cookie + owner | rename session (body: `{ name }`) |
+| `PATCH /api/sessions/rename/:id` | cookie + owner | rename session (body: `{ name }`) |
+| `DELETE /api/sessions/:id` | cookie + owner | delete a session |
 | `GET /api/sessions/:id/shared/:shareId` | shareId | shared view |
-| `GET /api/settings` | none | public settings (disableRegistration, hasUploadApiToken) |
-| `PUT /api/settings` | cookie | update settings (disableRegistration, uploadApiToken) |
+| `POST /api/sessions/:id/analyze` | cookie + owner | trigger AI analysis for a session (SSE stream) |
+| `GET /api/sessions/:id/analyses` | cookie + owner | list cached analyses for a session |
+| `DELETE /api/sessions/:id/analyses/:analysisId` | cookie + owner | delete a cached analysis |
+| `GET /api/settings` | none | public settings (disableRegistration, hasUploadApiToken, hasLlmProvider, vehicle fields) |
+| `PUT /api/settings` | cookie | update settings (disableRegistration, uploadApiToken, llmProvider, llmApiKey, llmModel, llmEndpoint, llmThinkingMode, llmReasoningEffort, vehicle fields) |
 | `POST /api/settings/upload-token` | cookie | generate a new upload API token (shown once) |
+| `POST /api/settings/test-llm` | cookie | test LLM connection (returns streaming response) |
 | `POST /api/upload` (`/upload` from Torque) | email-gated + **Bearer token required when `UPLOAD_API_TOKEN` is set** | ingest (401 without token) |
 | `GET /health` | none | probe |
 

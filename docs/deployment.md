@@ -1,4 +1,4 @@
-# TorqueDashNext — Docker Deployment Guide
+# torqueDASH-Next — Docker Deployment Guide
 
 This guide covers deploying torque-dash-next using Docker Compose with
 pre-built images from GitHub Container Registry (GHCR). No repo clone needed.
@@ -45,6 +45,7 @@ The application **will not start** without these:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `UPLOAD_API_TOKEN` | _(unset)_ | Bearer token for Torque Pro uploads. Generate with `openssl rand -hex 24`, or generate from the Settings UI after first login. When set, uploads **require** this token. |
+| `LLM_ENCRYPTION_KEY` | _(unset)_ | 64-char hex key for AES-256-GCM encryption of LLM API keys at rest. Generate with `openssl rand -hex 32`. Required for AI analysis feature. |
 | `COOKIE_SECURE` | `false` | Set to `true` behind a HTTPS reverse proxy (recommended for production). |
 
 ### Other variables
@@ -95,6 +96,13 @@ In Torque Pro → *Settings → Web Preferences*:
 
 After creating all user accounts, disable public sign-up via the **Settings**
 UI toggle or set `DISABLE_REGISTRATION=true` in your `.env` file.
+
+### AI analysis (optional)
+
+torqueDASH-Next supports BYOK (Bring Your Own Key) AI-powered session analysis.
+Go to **Settings** to configure an LLM provider (OpenAI, Anthropic, DeepSeek,
+Ollama, or any OpenAI-compatible endpoint). Set `LLM_ENCRYPTION_KEY` in your
+`.env` to encrypt API keys at rest.
 
 ---
 
