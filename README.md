@@ -1,7 +1,7 @@
 # torqueDASH-Next
 
 <p align="center">
-  <img src="./assets/readme/hero.svg" width="100%" alt="torqueDASH-Next — Self-hosted OBD-II vehicle telemetry dashboard with live PID data">
+  <img src="./imgs/hero.svg" width="100%" alt="torqueDASH-Next — Self-hosted OBD-II vehicle telemetry dashboard with live PID data">
 </p>
 
 <p align="center">
@@ -22,7 +22,7 @@ A self-hosted dashboard for [Torque Pro](https://torque-bhp.com/) vehicle teleme
 
 ```bash
 # Download the production files
-curl -O https://raw.githubusercontent.com/moesix/torque-dash-next/master/docker-compose.prod.yml
+curl -O https://raw.githubusercontent.com/moesix/torque-dash-next/master/docker-compose.yml
 curl -O https://raw.githubusercontent.com/moesix/torque-dash-next/master/.env.example
 
 # Create your .env and edit with your settings
@@ -30,7 +30,7 @@ cp .env.example .env
 nano .env
 
 # Start the stack
-docker compose -f docker-compose.prod.yml up -d
+docker compose up -d
 ```
 
 Then open **http://localhost:8080**.

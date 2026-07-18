@@ -1,6 +1,23 @@
+# docker-compose.yml for torque-dash-next
+# Uses pre-built images from GitHub Container Registry (GHCR)
+#
+# Usage:
+#   1. Copy this file and .env.example to your server
+#   2. Rename .env.example to .env and configure your settings
+#   3. Run: docker compose up -d
+#
+# No repo clone needed!
+#
+# IMPORTANT: The app will NOT start without the required variables in .env.
+# Generate secure values with:
+#   openssl rand -base64 24  # for POSTGRES_PASSWORD
+#   openssl rand -hex 24     # for SESSION_KEYS
+
 services:
   db:
     image: timescale/timescaledb:2.15.3-pg16
+    env_file:
+      - .env
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-torquedash}
       POSTGRES_USER: ${POSTGRES_USER:-torquedash}
@@ -12,36 +29,23 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
-    ports:
-      - "5432:5432"
 
   backend:
-    build: .
+    image: ghcr.io/moesix/torque-dash-next-backend:latest
     depends_on:
       db:
         condition: service_healthy
+    env_file:
+      - .env
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-torquedash}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-torquedash}
       PORT: "3000"
-      SESSION_KEYS: ${SESSION_KEYS:?Error: SESSION_KEYS must be set in .env}
-      COOKIE_SECURE: ${COOKIE_SECURE:-false}
-      COOKIE_SAMESITE: ${COOKIE_SAMESITE:-lax}
-      UPLOAD_RATE_LIMIT_MAX: ${UPLOAD_RATE_LIMIT_MAX:-600}
-      UPLOAD_RATE_LIMIT_WINDOW_MS: ${UPLOAD_RATE_LIMIT_WINDOW_MS:-60000}
-      UPLOAD_API_TOKEN: ${UPLOAD_API_TOKEN:-}
-      AUTH_RATE_LIMIT_MAX: ${AUTH_RATE_LIMIT_MAX:-10}
-      AUTH_RATE_LIMIT_WINDOW_MS: ${AUTH_RATE_LIMIT_WINDOW_MS:-60000}
-      WRITE_RATE_LIMIT_MAX: ${WRITE_RATE_LIMIT_MAX:-30}
-      WRITE_RATE_LIMIT_WINDOW_MS: ${WRITE_RATE_LIMIT_WINDOW_MS:-60000}
-      READ_RATE_LIMIT_MAX: ${READ_RATE_LIMIT_MAX:-600}
-      READ_RATE_LIMIT_WINDOW_MS: ${READ_RATE_LIMIT_WINDOW_MS:-60000}
-      DISABLE_REGISTRATION: ${DISABLE_REGISTRATION:-false}
       TZ: UTC
     ports:
       - "3000:3000"
 
   frontend:
-    build: ./apps/frontend
+    image: ghcr.io/moesix/torque-dash-next-frontend:latest
     depends_on:
       - backend
     ports:

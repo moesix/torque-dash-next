@@ -261,7 +261,7 @@ blockers are resolved and re-reviewed as PASS:
     per-PID aggregates. Replaces the old dual `TimeSeriesChart.tsx` layout.
   - `RangeError` on large datasets fixed (`safeMax` reduce replaces
     spread-into-`Math.max`).
-  - Docker-based deployment with GHCR images (`docker-compose.prod.yml`).
+  - Docker-based deployment with GHCR images (`docker-compose.yml`).
   - Non-root backend container (`appuser`), unprivileged nginx frontend.
 - **Remaining open issues:** SSRF TOCTOU, ingestBuffer race (both documented
   in section 7 above).

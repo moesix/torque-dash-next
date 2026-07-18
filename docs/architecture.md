@@ -353,9 +353,8 @@ The production topology uses three services on an internal network:
 - **frontend / nginx** — serves the `apps/frontend/dist` build via unprivileged
   Nginx on port `8080`; proxies `/api` to the backend; public edge.
 
-Both `docker-compose.yml` (build from source) and `docker-compose.prod.yml`
-(pre-built GHCR images) are provided. See `docs/deployment.md` for the full
-deployment guide.
+`docker-compose.yml` uses pre-built GHCR images (no repo clone needed).
+See `docs/deployment.md` for the full deployment guide.
 
 ---
 
