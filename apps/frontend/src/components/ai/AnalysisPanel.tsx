@@ -1,9 +1,12 @@
 import { useState, useEffect, useRef, useImperativeHandle, forwardRef, useCallback } from 'react';
 import { Card, Title, Text } from '@tremor/react';
 import Markdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import rehypeHighlight from 'rehype-highlight';
 import { analyzeSession, listAnalyses, getSettings } from '@/lib/api';
 import StreamRenderer from './StreamRenderer';
 import type { Analysis, Settings } from '@/lib/types';
+import { stripMarkdown } from '@/lib/utils';
 
 export interface AnalysisPanelHandle {
   triggerAnalysis: () => void;
@@ -21,6 +24,7 @@ const AnalysisPanel = forwardRef<AnalysisPanelHandle, Props>(
     const [error, setError] = useState<string | null>(null);
     const [pastAnalyses, setPastAnalyses] = useState<Analysis[]>([]);
     const [copiedId, setCopiedId] = useState<number | null>(null);
+    const [copiedTextId, setCopiedTextId] = useState<number | null>(null);
     const [copiedStream, setCopiedStream] = useState(false);
     const latestResponseRef = useRef('');
     const panelRef = useRef<HTMLDivElement>(null);
@@ -56,6 +60,16 @@ const AnalysisPanel = forwardRef<AnalysisPanelHandle, Props>(
       setAnalyzing(false);
       latestResponseRef.current = fullText;
       listAnalyses(sessionId).then(setPastAnalyses).catch(() => {});
+    }
+
+    async function copyAsPlainText(text: string, id?: number) {
+      try {
+        await navigator.clipboard.writeText(stripMarkdown(text));
+        if (id !== undefined) {
+          setCopiedTextId(id);
+          setTimeout(() => setCopiedTextId(null), 2000);
+        }
+      } catch {}
     }
 
     async function copyToClipboard(text: string, id?: number) {
@@ -134,8 +148,15 @@ const AnalysisPanel = forwardRef<AnalysisPanelHandle, Props>(
                     >
                       {copiedId === a.id ? 'Copied!' : 'Copy'}
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => copyAsPlainText(a.response, a.id)}
+                      className="text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 ml-2"
+                    >
+                      {copiedTextId === a.id ? 'Copied!' : 'Copy Text'}
+                    </button>
                   </div>
-                  <div className="prose prose-sm dark:prose-invert max-w-none">
+                  <div className="prose prose-sm dark:prose-invert max-w-none analysis-prose">
                     {a.reasoning && (
                       <details className="mb-3">
                         <summary className="cursor-pointer text-xs text-gray-500 dark:text-gray-400">
@@ -146,7 +167,12 @@ const AnalysisPanel = forwardRef<AnalysisPanelHandle, Props>(
                         </div>
                       </details>
                     )}
-                    <Markdown>{a.response}</Markdown>
+                    <Markdown
+                      remarkPlugins={[remarkGfm]}
+                      rehypePlugins={[rehypeHighlight]}
+                    >
+                      {a.response}
+                    </Markdown>
                   </div>
                 </details>
               ))}

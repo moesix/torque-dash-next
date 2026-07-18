@@ -65,6 +65,16 @@ module.exports = (sequelize, DataTypes) => {
             allowNull: true,
             defaultValue: null,
         },
+
+        // ── DeepSeek thinking / reasoning fields (migration 006) ──────
+        llmThinkingMode: {
+            type: DataTypes.BOOLEAN,
+            defaultValue: true,
+        },
+        llmReasoningEffort: {
+            type: DataTypes.TEXT,
+            defaultValue: 'high',
+        },
     });
 
     // Resolve the singleton row, creating it on first access.
@@ -82,6 +92,8 @@ module.exports = (sequelize, DataTypes) => {
                 vehicleModel: null,
                 vehicleYear: null,
                 engineCc: null,
+                llmThinkingMode: true,
+                llmReasoningEffort: 'high',
             },
         });
         return row;

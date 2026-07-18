@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import Markdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import rehypeHighlight from 'rehype-highlight';
 
 interface StreamEvent {
   type?: 'content' | 'reasoning';
@@ -128,7 +130,7 @@ export default function StreamRenderer({ stream, onDone, onError }: Props) {
   const hasReasoning = reasoningText.length > 0;
 
   return (
-    <div className="prose prose-sm dark:prose-invert max-w-none">
+    <div className="prose prose-sm dark:prose-invert max-w-none analysis-prose">
       {hasReasoning && hasContent && (
         <details className="mb-4">
           <summary className="cursor-pointer text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200">
@@ -140,7 +142,12 @@ export default function StreamRenderer({ stream, onDone, onError }: Props) {
         </details>
       )}
       {hasContent ? (
-        <Markdown>{contentText}</Markdown>
+        <Markdown
+          remarkPlugins={[remarkGfm]}
+          rehypePlugins={done ? [rehypeHighlight] : []}
+        >
+          {contentText}
+        </Markdown>
       ) : hasReasoning ? (
         <>
           <div className="mb-2 text-xs text-gray-500 dark:text-gray-400 italic">

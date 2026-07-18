@@ -61,7 +61,7 @@ After creating all user accounts, disable public registration via the Settings U
 
 - **CSV export** — Download any session as a CSV file. All telemetry frames included with auto-discovered PID columns. Perfect for analysis in Excel, Google Sheets, or data science tools.
 
-- **AI-powered session analysis** — Bring Your Own Key (BYOK): connect any OpenAI-compatible LLM provider (OpenAI, Anthropic, Ollama, DeepSeek, Custom) to get AI-driven diagnostic insights on your telemetry sessions. API keys are encrypted at rest with AES-256-GCM. Analysis streams in real-time via SSE with a built-in cost confirmation dialog and copy-to-clipboard. Past analyses are cached per session.
+- **AI-powered session analysis** — Bring Your Own Key (BYOK): connect any OpenAI-compatible LLM provider (OpenAI, Anthropic, DeepSeek, Ollama, Custom) to get AI-driven diagnostic insights on your telemetry sessions. **DeepSeek** is a first-class provider (`deepseek-v4-flash`, `deepseek-v4-pro`) with a toggleable chain-of-thought **Thinking Mode** and configurable reasoning effort (High / Max). API keys are encrypted at rest with AES-256-GCM. Analysis streams in real-time via SSE with a built-in cost confirmation dialog, "Copy" and "Copy Text" (strips markdown) buttons, and syntax-highlighted markdown output (GFM tables, code blocks via `rehype-highlight`). Past analyses are cached per session. Default `max_tokens` raised to 8192 for more thorough responses.
 
 - **PID decode engine** — Auto-discovers all OBD-II parameters from Torque's JSONB `values` column using embedded metadata and a curated fallback map. No schema changes needed for new PIDs. Renders per-unit group axes on the chart.
 
