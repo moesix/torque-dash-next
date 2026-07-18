@@ -1,11 +1,11 @@
 # torqueDASH-Next
 
 <p align="center">
-  <img src="./imgs/logo.svg" width="100%" alt="torqueDASH-Next">
+  <img src="./imgs/hero.svg" width="100%" alt="torqueDASH-Next — Self-hosted OBD-II vehicle telemetry dashboard with live PID data">
 </p>
 
 <p align="center">
-  <img src="./imgs/tdn-session.jpg" width="100%" alt="torqueDASH-Next — Self-hosted OBD-II vehicle telemetry dashboard with live PID data, GPS map, and multi-series overlay chart">
+  <img src="./imgs/tdn-session.jpg" width="100%" alt="torqueDASH-Next dashboard showing GPS route map with color-coded speed and a multi-series telemetry chart">
 </p>
 
 A self-hosted dashboard for [Torque Pro](https://torque-bhp.com/) vehicle telemetry. Torque Pro streams live OBD-II data from your car over HTTPS; torqueDASH-Next stores it in a time-series database and renders it in a React dashboard — live gauges, a route map, session replays, and per-session summaries. All data stays on your own server.
