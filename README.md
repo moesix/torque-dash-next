@@ -61,6 +61,8 @@ After creating all user accounts, disable public registration via the Settings U
 
 - **CSV export** — Download any session as a CSV file. All telemetry frames included with auto-discovered PID columns. Perfect for analysis in Excel, Google Sheets, or data science tools.
 
+- **AI-powered session analysis** — Bring Your Own Key (BYOK): connect any OpenAI-compatible LLM provider (OpenAI, Anthropic, Ollama, DeepSeek, Custom) to get AI-driven diagnostic insights on your telemetry sessions. API keys are encrypted at rest with AES-256-GCM. Analysis streams in real-time via SSE with a built-in cost confirmation dialog and copy-to-clipboard. Past analyses are cached per session.
+
 - **PID decode engine** — Auto-discovers all OBD-II parameters from Torque's JSONB `values` column using embedded metadata and a curated fallback map. No schema changes needed for new PIDs. Renders per-unit group axes on the chart.
 
 ## Configuration
@@ -89,6 +91,7 @@ After creating all user accounts, disable public registration via the Settings U
 | `READ_RATE_LIMIT_MAX` | `600` | Max requests to all other `/api` routes per window per IP. |
 | `READ_RATE_LIMIT_WINDOW_MS` | `60000` | Global `/api` rate-limit window in milliseconds. |
 | `DISABLE_REGISTRATION` | _(unset)_ | If `true`, public sign-up is disabled. |
+| `LLM_ENCRYPTION_KEY` | _(unset)_ | 64-char hex key for AES-256-GCM encryption of LLM API keys at rest. Generate with `openssl rand -hex 32`. Required for AI analysis feature. |
 
 For detailed deployment instructions, troubleshooting, and reverse proxy setup, see [docs/deployment.md](docs/deployment.md).
 
