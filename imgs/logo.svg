@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg"
-     width="480" height="80" viewBox="0 0 480 80"
+     width="580" height="80" viewBox="0 0 580 80"
      role="img" aria-labelledby="logo-title">
   <title id="logo-title">torqueDASH-Next</title>
   
@@ -25,5 +25,5 @@
         font-size="56"><tspan font-weight="700" fill="#e6edf3">torque</tspan><tspan font-weight="800" fill="#009999">DASH</tspan><tspan font-weight="600" fill="#8b949e">-Next</tspan></text>
   
   <!-- Bottom accent line -->
-  <rect x="0" y="76" width="480" height="4" rx="0" fill="url(#logo-accent)"/>
+  <rect x="0" y="76" width="580" height="4" rx="0" fill="url(#logo-accent)"/>
 </svg>
