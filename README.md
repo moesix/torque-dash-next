@@ -1,27 +1,33 @@
 # torqueDASH-Next
 
 <p align="center">
-  <img src="./imgs/hero.svg" width="100%" alt="torqueDASH-Next — Self-hosted OBD-II vehicle telemetry dashboard with live PID data">
+  <img src="./imgs/logo.svg" width="100%" alt="torqueDASH-Next">
 </p>
 
 <p align="center">
-  <img src="./imgs/dashboard.jpg" width="100%" alt="torqueDASH-Next dashboard showing GPS route map with color-coded speed and a multi-series telemetry chart">
+  <img src="./imgs/tdn-session.jpg" width="100%" alt="torqueDASH-Next — Self-hosted OBD-II vehicle telemetry dashboard with live PID data, GPS map, and multi-series overlay chart">
 </p>
 
 A self-hosted dashboard for [Torque Pro](https://torque-bhp.com/) vehicle telemetry. Torque Pro streams live OBD-II data from your car over HTTPS; torqueDASH-Next stores it in a time-series database and renders it in a React dashboard — live gauges, a route map, session replays, and per-session summaries. All data stays on your own server.
 
-## How it works
+## Features
 
-| Layer | Stack |
-|-------|-------|
-| Backend | Node.js + Express 4, Sequelize 6, PostgreSQL / TimescaleDB |
-| Frontend | React 18 + Vite + TypeScript, ECharts, Leaflet |
-| Deploy | Docker Compose: `db` (TimescaleDB) + `backend` + `frontend` (nginx) |
+| | |
+|---|---|
+| **Real-time telemetry playback** | Watch your drive unfold — gauges, chart, and map all move in sync with a single playback cursor. |
+| **GPS route map** | Leaflet map with color-coded speed traces and an animated position marker that follows the playback head. |
+| **Multi-series overlay chart** | Toggle any combination of PIDs on a shared time axis with per-unit-group y-axes (ECharts + LTTB sampling for large datasets). |
+| **CSV export** | Download any session with auto-discovered PID columns — ready for Excel, Google Sheets, or Python notebooks. |
+| **BYOK AI analysis** | Connect your own LLM (OpenAI, Anthropic, DeepSeek, Ollama, or any OpenAI-compatible endpoint) for per-session diagnostic insights. |
+| **DeepSeek first-class** | `deepseek-v4-flash` / `deepseek-v4-pro` with chain-of-thought Thinking Mode and configurable reasoning effort (High / Max). |
+| **PID decode engine** | Auto-discovers every OBD-II parameter from Torque's `values` JSONB — no schema changes when you add new PIDs. |
+| **Session management** | Auto-named trips (`Trip DDMMYYYY HH:MM AM/PM`), inline rename, shareable links. |
 
 ## Quick start
 
 ```bash
 # Download the production files
+mkdir -p ~/torquedash && cd ~/torquedash
 curl -O https://raw.githubusercontent.com/moesix/torque-dash-next/master/docker-compose.yml
 curl -O https://raw.githubusercontent.com/moesix/torque-dash-next/master/.env.example
 
@@ -49,21 +55,87 @@ In Torque Pro → *Settings → Web Preferences*:
 
 After creating all user accounts, disable public registration via the Settings UI or set `DISABLE_REGISTRATION=true` in your `.env` file.
 
-## Features
+## Screenshots
 
-- **Dashboard & visualization** — Live vehicle gauges (RPM, Coolant, Speed), a multi-series PID overlay chart with toggleable metrics and collapsible stats, a route map with color-coded speed traces, and session replays with a playback cursor that drives the gauges in real time. Session summary cards with live SVG ring gauges update as playback progresses.
+<details>
+<summary><strong>Session replay with overlay chart & GPS track</strong></summary>
 
-- **Data ingestion** — Email-gated uploads from Torque Pro over HTTPS with Bearer token authentication — both a valid email address and the token are required. Generate the token from the Settings UI or set via `UPLOAD_API_TOKEN`. Rate-limited upload endpoint with configurable thresholds.
+<p align="center">
+  <img src="./imgs/TDN-session.png" width="100%" alt="Session replay view with overlay chart showing multi-series PID data and a Leaflet GPS map with color-coded speed trace">
+</p>
 
-- **Deployment** — Docker-first: one `docker compose up -d` and you're running. PostgreSQL/TimescaleDB, Node.js backend, and nginx frontend all orchestrated via Compose. Non-root container users, unprivileged nginx.
+</details>
 
-- **Session management** — Sessions auto-name as `Trip DDMMYYYY HH:MM AM/PM` on first upload. Rename inline from the session table with pencil-icon editing (Enter/Escape/blur handling).
+<details>
+<summary><strong>Session list & dashboard overview</strong></summary>
 
-- **CSV export** — Download any session as a CSV file. All telemetry frames included with auto-discovered PID columns. Perfect for analysis in Excel, Google Sheets, or data science tools.
+<p align="center">
+  <img src="./imgs/tdn-session-list.png" width="100%" alt="Session list with summary cards showing trip duration, distance, and max speed">
+</p>
 
-- **AI-powered session analysis** — Bring Your Own Key (BYOK): connect any OpenAI-compatible LLM provider (OpenAI, Anthropic, DeepSeek, Ollama, Custom) to get AI-driven diagnostic insights on your telemetry sessions. **DeepSeek** is a first-class provider (`deepseek-v4-flash`, `deepseek-v4-pro`) with a toggleable chain-of-thought **Thinking Mode** and configurable reasoning effort (High / Max). API keys are encrypted at rest with AES-256-GCM. Analysis streams in real-time via SSE with a built-in cost confirmation dialog, "Copy" and "Copy Text" (strips markdown) buttons, and syntax-highlighted markdown output (GFM tables, code blocks via `rehype-highlight`). Past analyses are cached per session. Default `max_tokens` raised to 8192 for more thorough responses.
+</details>
 
-- **PID decode engine** — Auto-discovers all OBD-II parameters from Torque's JSONB `values` column using embedded metadata and a curated fallback map. No schema changes needed for new PIDs. Renders per-unit group axes on the chart.
+<details>
+<summary><strong>AI-powered session analysis</strong></summary>
+
+<p align="center">
+  <img src="./imgs/tdn-ai-analysis.png" width="100%" alt="AI analysis panel showing a diagnostic summary generated from session telemetry data">
+</p>
+
+</details>
+
+<details>
+<summary><strong>Time-series map view</strong></summary>
+
+<p align="center">
+  <img src="./imgs/tdn-timeseries-map.png" width="100%" alt="Combined time-series chart and GPS map view for a telemetry session">
+</p>
+
+</details>
+
+<details>
+<summary><strong>GPS map view</strong></summary>
+
+<p align="center">
+  <img src="./imgs/mapview.png" width="100%" alt="Leaflet GPS map with color-coded speed track">
+</p>
+
+</details>
+
+<details>
+<summary><strong>Mobile — login</strong></summary>
+
+<p align="center">
+  <img src="./imgs/tdn-mobile-login.jpg" width="100%" alt="Mobile login screen">
+</p>
+
+</details>
+
+<details>
+<summary><strong>Mobile — AI provider settings</strong></summary>
+
+<p align="center">
+  <img src="./imgs/tdn-mobile-settings-ai-provider.jpg" width="100%" alt="Mobile AI provider settings panel with DeepSeek selected">
+</p>
+
+</details>
+
+<details>
+<summary><strong>Mobile — AI analysis</strong></summary>
+
+<p align="center">
+  <img src="./imgs/tdn-mobile-ai-analysis.jpg" width="100%" alt="Mobile AI analysis view with streaming diagnostic output">
+</p>
+
+</details>
+
+## How it works
+
+| Layer | Stack |
+|-------|-------|
+| Backend | Node.js + Express 4, Sequelize 6, PostgreSQL / TimescaleDB |
+| Frontend | React 18 + Vite + TypeScript, ECharts, Leaflet |
+| Deploy | Docker Compose: `db` (TimescaleDB) + `backend` + `frontend` (nginx) |
 
 ## Configuration
 
@@ -104,6 +176,14 @@ For detailed deployment instructions, troubleshooting, and reverse proxy setup, 
 **Password changes:** Users can change their password via `POST /api/users/change-password`. This validates the current password, enforces a minimum length of 8 characters, and invalidates all other sessions. Bcrypt salt factor is 10.
 
 **Registration control:** After creating accounts, disable public sign-up via the Settings UI toggle or `DISABLE_REGISTRATION=true`.
+
+## Docs
+
+| Document | Description |
+|----------|-------------|
+| [Deployment guide](docs/deployment.md) | Docker Compose setup, env vars, backup/restore, troubleshooting |
+| [Architecture](docs/architecture.md) | System topology, backend internals, data flow, API contract |
+| [Development](docs/development.md) | Contributing guide, known issues, manual setup, PID backfill |
 
 ## License
 
