@@ -122,17 +122,18 @@ export default function StreamRenderer({ stream, onDone, onError }: Props) {
               return;
             }
             try {
-              const parsed: StreamEvent = JSON.parse(data);
-              if ((parsed as Record<string, unknown>).error) {
-                onErrorRef.current?.((parsed as Record<string, unknown>).error as string);
+              const parsed = JSON.parse(data) as Record<string, unknown>;
+              if (parsed.error) {
+                onErrorRef.current?.(parsed.error as string);
                 return;
               }
-              if (parsed.text) {
+              const event = parsed as unknown as StreamEvent;
+              if (event.text) {
                 // Backward compat: if `type` is missing, treat as "content"
-                if (parsed.type === 'reasoning') {
-                  appendReasoning(parsed.text);
+                if (event.type === 'reasoning') {
+                  appendReasoning(event.text);
                 } else {
-                  appendContent(parsed.text);
+                  appendContent(event.text);
                 }
                 scheduleFlush();
               }
