@@ -23,7 +23,7 @@ flowchart LR
 
     ING --> UC[lib/userCache - email->user]
     ING --> IB[services/ingestBuffer]
-    IB -->|Log.bulkCreate batched| DB[(PostgreSQL + TimescaleDB\nhypertable "Logs")]
+    IB -->|Log.bulkCreate batched| DB[(PostgreSQL + TimescaleDB<br/>hypertable Logs)]
 
     API --> SC[SessionController]
     API --> TC[TelemetryController.range]
