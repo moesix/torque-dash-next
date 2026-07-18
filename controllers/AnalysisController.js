@@ -103,6 +103,7 @@ class AnalysisController {
 
       // 7. Call LLM and stream response
       const { response: llmRes, abortController: llmAbort } = await analyze(prompt, settings);
+      console.log(`[AnalysisController] LLM response status: ${llmRes.status}, content-type: ${llmRes.headers.get('content-type')}`);
 
       // Cancel LLM API call if client disconnects mid-stream (saves cost)
       req.on('close', () => {
@@ -119,12 +120,18 @@ class AnalysisController {
         if (done) break;
 
         buffer += decoder.decode(value, { stream: true });
+        // Debug: log raw chunks
+        if (!value._logged) {
+          console.log(`[AnalysisController] Chunk ${value.length} bytes, text preview: ${buffer.slice(0, 200)}`);
+          value._logged = true;
+        }
         const lines = buffer.split('\n');
         buffer = lines.pop() || '';
 
         for (const line of lines) {
           if (!line.startsWith('data: ')) continue;
           const data = line.slice(6).trim();
+          console.log(`[AnalysisController] SSE line: ${data.slice(0, 150)}`);
           if (data === '[DONE]') {
             break;
           }
@@ -143,6 +150,7 @@ class AnalysisController {
           }
         }
       }
+      console.log(`[AnalysisController] Stream complete. fullResponse length: ${fullResponse.length}`);
 
       // 8. Cache the analysis (BEFORE signaling done so listAnalyses finds it)
       try {
