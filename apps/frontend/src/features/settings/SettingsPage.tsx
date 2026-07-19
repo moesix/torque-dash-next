@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Card, Text, Title, Switch } from '@tremor/react';
-import { getSettings, updateSettings, generateUploadToken } from '@/lib/api';
+import { getSettings, updateSettings, generateUploadToken, getVersion } from '@/lib/api';
 import type { Settings } from '@/lib/types';
 import AiProviderCard from './AiProviderCard';
 import VehicleCard from './VehicleCard';
@@ -19,6 +19,8 @@ export default function SettingsPage() {
   const [tokenError, setTokenError] = useState<string | null>(null);
   const [tokenBusy, setTokenBusy] = useState(false);
 
+  const [version, setVersion] = useState<string>('');
+
   const [llmSettings, setLlmSettings] = useState<Settings>({
     disableRegistration: false,
     hasUploadApiToken: false,
@@ -35,6 +37,10 @@ export default function SettingsPage() {
     llmThinkingMode: true,
     llmReasoningEffort: 'high',
   });
+
+  useEffect(() => {
+    getVersion().then((v) => setVersion(v.version)).catch(() => {});
+  }, []);
 
   useEffect(() => {
     getSettings()
@@ -103,7 +109,14 @@ export default function SettingsPage() {
   return (
     <div className="max-w-2xl space-y-4">
       <div>
-        <Title>Settings</Title>
+        <div className="flex items-center gap-2">
+          <Title>Settings</Title>
+          {version && (
+            <span className="text-sm text-gray-500 dark:text-gray-400">
+              v{version}
+            </span>
+          )}
+        </div>
         <Text className="mt-1 dark:text-[var(--text-secondary)]">Global site configuration.</Text>
       </div>
       <Card>

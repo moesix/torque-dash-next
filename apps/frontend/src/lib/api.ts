@@ -96,7 +96,10 @@ export async function register(email: string, password: string): Promise<void> {
 }
 
 export async function logout(): Promise<void> {
-  await request('/api/users/logout', { method: 'GET' });
+  await fetch('/api/users/logout', {
+    method: 'POST',
+    credentials: 'include',
+  });
 }
 
 export async function getSessions(): Promise<Session[]> {
@@ -240,4 +243,16 @@ export async function exportSessionCsv(sessionId: string): Promise<void> {
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
+}
+
+// ── Version ─────────────────────────────────────────────────────────────
+
+export interface VersionResponse {
+  version: string;
+}
+
+export async function getVersion(): Promise<VersionResponse> {
+  const res = await fetch('/api/version', { credentials: 'include' });
+  if (!res.ok) throw new Error('Failed to fetch version');
+  return res.json();
 }

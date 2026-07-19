@@ -17,7 +17,7 @@ class SessionController {
             res.sendStatus(200);
         }
         catch (err) {
-            console.log(err);
+            console.error('[SessionController]', err);
             res.sendStatus(500);
         }
     }
@@ -44,7 +44,7 @@ class SessionController {
             res.json(out);
         }
         catch (err) {
-            console.log(err);
+            console.error('[SessionController]', err);
             res.sendStatus(500);
         }
     }
@@ -54,7 +54,7 @@ class SessionController {
             let user = await User.findOne({
                 where: { id: req.user.id }
             });
-            if(!user) return res.status(401);
+            if(!user) return res.status(401).json({ error: 'User not found' });
 
             // Get all sessions for user (no eager Log load)
             let sessions = await Session.findAll({
@@ -76,7 +76,7 @@ class SessionController {
             res.json(out);
         }
         catch (err) {
-            console.log(err);
+            console.error('[SessionController]', err);
             res.sendStatus(500);
         }
     }
@@ -109,7 +109,7 @@ class SessionController {
             res.json(out);
         }
         catch (err) {
-            console.log(err);
+            console.error('[SessionController]', err);
             res.sendStatus(500);
         }
     }
@@ -141,7 +141,7 @@ class SessionController {
             res.json(out);
         }
         catch (err) {
-            console.log(err);
+            console.error('[SessionController]', err);
             res.sendStatus(500);
         }
     }
@@ -158,12 +158,26 @@ class SessionController {
             res.sendStatus(200);
         }
         catch (err) {
-            console.log(err);
+            console.error('[SessionController]', err);
             res.sendStatus(500);
         }
     }
     static async addLocation(req, res) {
         try {
+            let session = await Session.findOne({
+                where: {
+                    id: req.params.sessionId,
+                    userId: req.user.id
+                }
+            });
+            if(!session) return res.sendStatus(404);
+            // ── VALIDATION ──────────────────────────────────────────────
+            if (!req.body.locations || !req.body.locations.start || !req.body.locations.end) {
+                return res.status(400).json({
+                    error: 'locations.start and locations.end are required'
+                });
+            }
+            // ── END VALIDATION ──────────────────────────────────────────
             await Session.update(
                 { startLocation: req.body.locations.start,
                   endLocation: req.body.locations.end },
@@ -176,7 +190,7 @@ class SessionController {
             res.sendStatus(200);
         }
         catch (err) {
-            console.log(err);
+            console.error('[SessionController]', err);
             res.sendStatus(500);
         }
     }
@@ -221,13 +235,19 @@ class SessionController {
             res.sendStatus(200);
         }
         catch (err) {
-            console.log(err);
+            console.error('[SessionController]', err);
             res.sendStatus(500);
         }
     }
     static async filter(req, res) {
         try {
-            let filterNumber = parseInt(req.body.filterNumber);
+            let filterNumber = parseInt(req.body.filterNumber, 10);
+            // Validate filterNumber prevents data destruction (modulo by zero or one)
+            if (isNaN(filterNumber) || filterNumber < 2) {
+                return res.status(400).json({
+                    error: 'filterNumber must be an integer >= 2'
+                });
+            }
             let session = await Session.findOne({ 
                 where: { 
                     id: req.params.sessionId, 
@@ -260,7 +280,7 @@ class SessionController {
             res.sendStatus(200);
         }
         catch (err) {
-            console.log(err);
+            console.error('[SessionController]', err);
             res.sendStatus(500);
         }
     }
@@ -288,7 +308,7 @@ class SessionController {
             res.sendStatus(200);
         }
         catch (err) {
-            console.log(err);
+            console.error('[SessionController]', err);
             res.sendStatus(500);
         }
     }
@@ -349,7 +369,7 @@ class SessionController {
             res.sendStatus(200);
         }
         catch (err) {
-            console.log(err);
+            console.error('[SessionController]', err);
             res.sendStatus(500);
         }
     }

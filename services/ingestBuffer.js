@@ -16,6 +16,7 @@ const Log = require('../models').Log;
 const BATCH_SIZE = 1000;
 const FLUSH_MS = 1000;
 const MAX_RETRIES = 3;
+const MAX_BUFFER_SIZE = 50000; // drop oldest rows if exceeded
 
 const buffer = [];
 
@@ -32,8 +33,11 @@ function toLogRow(item) {
     };
 }
 
+let flushing = false;
+
 async function flush() {
-    if (buffer.length === 0) return;
+    if (flushing || buffer.length === 0) return;
+    flushing = true;
     const batch = buffer.splice(0, buffer.length); // synchronous snapshot
     try {
         const rows = batch.map(toLogRow);
@@ -51,6 +55,8 @@ async function flush() {
                 });
             }
         }
+    } finally {
+        flushing = false;
     }
 }
 
@@ -69,6 +75,11 @@ function ingest({ userId, sessionId, time, lon, lat, values, engineRpm, vehicleS
         vehicleSpeed,
         __attempts: 0
     });
+    // Drop oldest rows if buffer exceeds cap (backpressure)
+    if (buffer.length > MAX_BUFFER_SIZE) {
+        const dropped = buffer.splice(0, buffer.length - MAX_BUFFER_SIZE);
+        console.error('[ingestBuffer] buffer overflow, dropping', dropped.length, 'rows');
+    }
     if (buffer.length >= BATCH_SIZE) {
         // fire-and-forget; the request path must NOT await the flush
         flush().catch((e) => console.error('[ingestBuffer] flush error:', e.message));
