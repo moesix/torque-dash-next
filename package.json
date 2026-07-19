@@ -7,7 +7,7 @@
     "start": "node app.js",
     "lint": "eslint .",
     "test": "node --test",
-    "prepare": "husky"
+    "prepare": "husky || true"
   },
   "keywords": [],
   "author": "",
