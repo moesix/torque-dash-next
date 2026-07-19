@@ -31,9 +31,10 @@ function isBenignError(err) {
 }
 
 /**
- * Strip SQL comments so that semicolons inside /* ... *​/ or -- comments
- * don't fragment the naive ;-split below.  Block comments are stripped
- * first to avoid stripping line-comment syntax that appears inside them.
+ * Strip SQL comments so that semicolons inside block comments (slash-star
+ * ... star-slash) or line comments (double-dash) don't fragment the naive
+ * ;-split below.  Block comments are stripped first to avoid stripping
+ * line-comment syntax that appears inside them.
  */
 function stripComments(sql) {
     // Strip /* ... */ block comments (non-greedy, handles multi-line)

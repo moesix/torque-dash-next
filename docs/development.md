@@ -123,7 +123,81 @@ npm run build      # runs `tsc --noEmit && vite build` → apps/frontend/dist
 
 ---
 
-## 7. Known Issues / Follow-up Items
+## 7. Development Tooling
+
+### 7.1 ESLint
+
+The project uses **ESLint 8** for backend code with a project-local `.eslintrc.js`
+configuration:
+
+```sh
+npm run lint
+```
+
+The config (`node` env, `es2022`, `eslint:recommended`) ignores
+`apps/frontend/dist/` (Vite build output). Custom rules include:
+
+- `no-unused-vars` set to `warn` (ignoring args prefixed with `_`).
+- `no-console` is **off** — the server intentionally uses `console.log`/`console.error`.
+- `no-empty` is `error` — empty catch blocks are forbidden.
+
+### 7.2 Pre-commit Hooks (husky + lint-staged)
+
+The project uses **husky 9** and **lint-staged 17** to run lint and syntax checks
+on every commit:
+
+- **husky** (`package.json` → `"prepare": "husky"`) installs Git hooks after
+  `npm install`.
+- **lint-staged** is configured in `package.json`:
+  ```json
+  "lint-staged": {
+    "*.js": ["eslint --fix", "node -c"]
+  }
+  ```
+  Before every `git commit`, staged `.js` files are checked with `eslint --fix`
+  and validated with `node -c` (syntax check). If either step fails, the commit
+  is blocked.
+
+> First-time setup: run `npm install` (or `npm run prepare`) to initialise the
+> husky hooks directory (`.husky/`).
+
+### 7.3 CI Pipeline
+
+A **GitHub Actions** workflow (`.github/workflows/ci.yml`) runs on every push
+or pull request to the `development` branch:
+
+- **Backend checks:** `npm ci` → `npm test` → `npm run lint`.
+- **Frontend checks:** `npm ci` → `npx tsc --noEmit` (typecheck) → `npm run build`.
+
+The workflow uses `actions/checkout@v7` and `actions/setup-node@v7` with npm
+caching. The lint step currently has `continue-on-error: true` as a transitional
+measure.
+
+### 7.4 Versioning
+
+A **Version Bump** workflow (`.github/workflows/version-bump.yml`) runs on every
+push to `master`. It:
+
+1. Analyses commits since the last tag using Conventional Commits heuristics to
+   determine the bump type (major / minor / patch).
+2. Runs `npm version <bump> --no-git-tag-version` to update `package.json` and
+   `package-lock.json`.
+3. Commits the result as `chore: release v<version>` and creates an annotated
+   tag.
+4. Pushes the commit and tag back to `master`.
+
+> **Chaining to Docker builds:** pushes made with the default `GITHUB_TOKEN` do
+> **not** trigger downstream workflows (like `docker-publish.yml`). To enable
+> the chain, configure a PAT with `contents:write` as `secrets.GH_PAT` and
+> replace the token reference in the `git push` step.
+
+Docker images built by `docker-publish.yml` now include **semver tags** in
+addition to the SHA and `latest` tags — `v<version>` and `<major>.<minor>` for
+pinned deployments.
+
+---
+
+## 8. Known Issues / Follow-up Items
 
 These are documented issues from code reviews. Severity is assigned per the review.
 
@@ -166,12 +240,10 @@ blockers are resolved and re-reviewed as PASS:
   **Fix:** resolve once, validate, then connect to the **validated IP** (e.g.
   pass an `URL` with the resolved address, or pin the resolved IP in the
   request).
-- **`ingestBuffer` concurrency race + unbounded live buffer.** `flush()` does a
-  synchronous `buffer.splice` then awaits `bulkCreate`; a re-queued failed batch
-  is `unshift`-ed back while another flush may run concurrently, and there is no
-  hard cap on live buffer growth between flushes.
-  **Fix:** add a flush **mutex** and a max live-buffer cap (drop/backpressure
-  beyond a threshold).
+- ✅ **`ingestBuffer` concurrency race + unbounded live buffer resolved.** A
+  `flushing` boolean mutex prevents concurrent flush executions, and a
+  `MAX_BUFFER_SIZE = 50000` hard cap drops oldest rows when exceeded (backpressure).
+  See `services/ingestBuffer.js`.
 - **Torque PID keys `kc`/`kd` are hardcoded.** `UploadController` promotes
   `values.kc` → `engine_rpm` and `values.kd` → `vehicle_speed`, but PIDs are
   user-configurable. A `torque-keys` mapping table should drive which PIDs map
@@ -240,7 +312,7 @@ blockers are resolved and re-reviewed as PASS:
 
 ---
 
-## 8. Status
+## 9. Status
 
 - **Core features complete:** ingestion, TimescaleDB migration, paged telemetry,
   React replay dashboard (overlay chart + imperative Leaflet marker), CSV export,
@@ -271,12 +343,15 @@ blockers are resolved and re-reviewed as PASS:
   - **SSRF guard** (`lib/ssrfGuard.js`) validates custom LLM endpoints.
   - Docker-based deployment with GHCR images (`docker-compose.yml`).
   - Non-root backend container (`appuser`), unprivileged nginx frontend.
-- **Remaining open issues:** SSRF TOCTOU, ingestBuffer race (both documented
-  in section 7 above).
+- **Dev tooling:** ESLint 8 (`.eslintrc.js`), husky 9 + lint-staged 17
+  (pre-commit lint + syntax check), CI pipeline (`.github/workflows/ci.yml`)
+  running on push/PR to `development`, and automated semver version bump
+  (`.github/workflows/version-bump.yml`) on push to `master`.
+- **Remaining open issues:** SSRF TOCTOU (documented in section 8 above).
 
 ---
 
-## 9. Alternative Setup Methods
+## 10. Alternative Setup Methods
 
 The sections below cover building from source and manual (non-Docker) setup. For
 most users, the Docker quick start in the README or the full deployment guide
