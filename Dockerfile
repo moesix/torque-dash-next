@@ -9,6 +9,8 @@ RUN apt-get update \
 WORKDIR /app
 
 COPY package.json package-lock.json ./
+# Skip husky prepare script in Docker (devDependency not installed with --omit=dev)
+ENV HUSKY=0
 RUN npm ci --omit=dev
 
 COPY . .

@@ -3,6 +3,7 @@ name: Build and Publish Docker Images
 on:
   push:
     branches: [master]
+    tags: ['v*']
   workflow_dispatch:
 
 # Cancel in-progress runs for the same branch — saves runner minutes.
