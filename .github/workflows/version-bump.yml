@@ -11,9 +11,9 @@ on:
 
 # ── GITHUB_TOKEN LIMITATION ─────────────────────────────────────
 # Pushes made with GITHUB_TOKEN do NOT trigger downstream
-# workflows (docker-publish.yml). To chain version bump → Docker
-# build, store a PAT in secrets.GH_PAT with contents:write and
-# replace GITHUB_TOKEN references in the git push step below.
+# workflows. Instead of using a PAT, docker-publish.yml uses a
+# workflow_run trigger on "Version Bump" completion, which
+# bypasses the GITHUB_TOKEN limitation entirely.
 # See: https://docs.github.com/en/actions/security-guides/
 #      automatic-token-authentication#using-the-github_token
 # ────────────────────────────────────────────────────────────────
@@ -89,6 +89,13 @@ jobs:
             git add package.json package-lock.json
             git commit -m "chore: release v${NEW_VERSION}"
             git tag -a "v${NEW_VERSION}" -m "Release v${NEW_VERSION}"
-            # Push commit and tag (use secrets.GH_PAT instead of GITHUB_TOKEN to trigger docker-publish.yml)
+            # Push commit and tag (GITHUB_TOKEN is fine; docker-publish uses workflow_run trigger)
             git push origin master --follow-tags
           fi
+
+      # ── Outputs for downstream workflows (docker-publish.yml) ──
+      - name: Output version and commit SHA
+        id: output
+        run: |
+          echo "version=${{ steps.version.outputs.version }}" >> $GITHUB_OUTPUT
+          echo "commit_sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
