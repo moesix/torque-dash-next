@@ -42,10 +42,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
         with:
-          # For workflow_run triggers: checkout the commit that version-bump pushed
-          # (which has the bumped version in package.json). For tag/manual triggers:
+          # For workflow_run triggers: checkout master (version-bump has already pushed
+          # the bumped commit by the time this runs). For tag/manual triggers:
           # checkout the default ref.
-          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || '' }}
+          ref: ${{ github.event_name == 'workflow_run' && 'master' || '' }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
