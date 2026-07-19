@@ -67,15 +67,49 @@ This pulls three images and starts the services:
 | Service | Image | Port |
 |---------|-------|------|
 | `db` | `timescale/timescaledb:2.15.3-pg16` | internal only |
-| `backend` | `ghcr.io/moesix/torque-dash-next-backend:latest` | `3000` |
-| `frontend` | `ghcr.io/moesix/torque-dash-next-frontend:latest` | `8080` |
+| `backend` | `ghcr.io/moesix/torque-dash-next-backend` | `3000` |
+| `frontend` | `ghcr.io/moesix/torque-dash-next-frontend` | `8080` |
+
+Images are tagged with:
+- `latest` — most recent build from `master`.
+- `sha-<hash>` — immutable per-commit identifier.
+- `v<semver>` — pinned release version (e.g. `v1.2.3`).
+- `<major>.<minor>` — minor-version channel (e.g. `1.2`).
 
 The database waits for the healthcheck (`pg_isready`) before the backend
 starts. The backend waits for the database to be healthy.
 
 ---
 
-## 4. First-time setup
+## 4. CI/CD Pipeline
+
+The project uses three GitHub Actions workflows that form a continuous delivery
+chain:
+
+| Workflow | Trigger | Actions |
+|----------|---------|---------|
+| **CI** (`.github/workflows/ci.yml`) | Push / PR to `development` | Runs `npm test` + `npm run lint` (backend), `tsc --noEmit` + `npm run build` (frontend) |
+| **Version Bump** (`.github/workflows/version-bump.yml`) | Push to `master` | Analyses commits since last tag, bumps `package.json` semver, commits and tags as `chore: release v<version>` |
+| **Docker Publish** (`.github/workflows/docker-publish.yml`) | Push to `master` | Builds and pushes `backend` and `frontend` images to GHCR with SHA, `latest`, and semver tags |
+
+### Workflow chain
+
+1. A PR merges into `development` → **CI** validates the code.
+2. `development` is merged into `master` → **Version Bump** increments the
+   semver, commits, and pushes a new tag.
+3. The version bump push to `master` triggers **Docker Publish**, which builds
+   images and pushes them to GHCR with the new version tags.
+
+> **PAT requirement:** pushes made with the default `GITHUB_TOKEN` do **not**
+> trigger downstream workflows. The version-bump workflow includes instructions
+> to configure a personal access token (`secrets.GH_PAT`) with `contents:write`
+> scope so the version bump commit triggers the Docker publish workflow. Without
+> this, the version bump and Docker build are decoupled and must be triggered
+> manually.
+
+---
+
+## 5. First-time setup
 
 1. Open **http://localhost:8080** in your browser.
 2. Register the first account at the sign-up page.
@@ -106,7 +140,7 @@ Ollama, or any OpenAI-compatible endpoint). Set `LLM_ENCRYPTION_KEY` in your
 
 ---
 
-## 5. Upgrading
+## 6. Upgrading
 
 ```bash
 cd ~/torquedash  # or wherever you deployed
@@ -123,7 +157,7 @@ recreations. The TimescaleDB migration runs automatically on startup if needed.
 
 ---
 
-## 6. Backup and restore
+## 7. Backup and restore
 
 ### Backup the database
 
@@ -141,7 +175,7 @@ cat backup_20260717.sql | docker compose exec -T db \
 
 ---
 
-## 7. Troubleshooting
+## 8. Troubleshooting
 
 ### App won't start
 
@@ -192,7 +226,7 @@ docker compose down -v
 
 ---
 
-## 8. Architecture overview
+## 9. Architecture overview
 
 ```
 ┌────────────┐     ┌──────────────────┐     ┌──────────────────────────┐

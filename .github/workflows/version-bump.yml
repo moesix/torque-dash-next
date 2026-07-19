@@ -1,0 +1,71 @@
+name: Version Bump
+
+on:
+  push:
+    branches: [master]
+
+# ── INFINITE LOOP PREVENTION ────────────────────────────────────
+# The workflow checks if the triggering commit starts with
+# "chore: release" and skips itself.
+# ────────────────────────────────────────────────────────────────
+
+# ── GITHUB_TOKEN LIMITATION ─────────────────────────────────────
+# Pushes made with GITHUB_TOKEN do NOT trigger downstream
+# workflows (docker-publish.yml). To chain version bump → Docker
+# build, store a PAT in secrets.GH_PAT with contents:write and
+# replace GITHUB_TOKEN references in the git push step below.
+# See: https://docs.github.com/en/actions/security-guides/
+#      automatic-token-authentication#using-the-github_token
+# ────────────────────────────────────────────────────────────────
+
+jobs:
+  version-bump:
+    runs-on: ubuntu-latest
+    if: "${{ !startsWith(github.event.head_commit.message, 'chore: release') }}"
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0  # full history for commit message analysis
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '20'
+
+      - name: Determine version bump
+        id: bump
+        run: |
+          # Analyze commits since last tag (includes body for BREAKING CHANGE detection)
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          COMMITS=$(git log "${LAST_TAG}"..HEAD --format="%s%n%b")
+
+          # Determine bump type from conventional commits
+          # Major: any type with ! (feat!, fix!, refactor!, etc.) or BREAKING CHANGE: in body
+          if echo "$COMMITS" | grep -qE "^[a-f0-9]+\s+\S+!|BREAKING CHANGE:"; then
+            echo "bump=major" >> $GITHUB_OUTPUT
+          elif echo "$COMMITS" | grep -qE "^[a-f0-9]+\s+feat(\([^)]+\))?:"; then
+            echo "bump=minor" >> $GITHUB_OUTPUT
+          else
+            echo "bump=patch" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Bump version
+        id: version
+        run: |
+          # Install deps to keep package-lock.json pristine
+          npm ci
+
+          # Use npm version to bump package.json and package-lock.json
+          npm version ${{ steps.bump.outputs.bump }} --no-git-tag-version
+          NEW_VERSION=$(node -p "require('./package.json').version")
+          echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+
+          # Commit and tag (annotated tag so --follow-tags pushes it)
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json
+          git commit -m "chore: release v${NEW_VERSION}"
+          git tag -a "v${NEW_VERSION}" -m "Release v${NEW_VERSION}"
+          # Push commit and tag (use secrets.GH_PAT instead of GITHUB_TOKEN to trigger docker-publish.yml)
+          git push origin master --follow-tags

@@ -94,8 +94,11 @@ which enforces ownership (or `?shareId=` for shared sessions) and returns
   counter) up to `MAX_RETRIES = 3`, after which rows are dropped and an error is
   logged. This bounds memory at the cost of possible telemetry loss on a
   persistently failing DB.
-- ⚠️ See Known Issues (MEDIUM) — there is no flush mutex and the live buffer is
-  not hard-capped between flushes.
+- **Buffer cap:** the live buffer is hard-capped at `MAX_BUFFER_SIZE = 50000`
+  rows. If the buffer exceeds the cap the oldest rows are dropped (backpressure).
+- **Flush mutex:** a `flushing` boolean prevents concurrent flush executions,
+  eliminating the race condition where a re-queued failed batch could be flushed
+  simultaneously with a fresh batch.
 
 ### 2.3 `TelemetryController.range` (`controllers/TelemetryController.js`)
 - `GET /api/sessions/:id/telemetry?from&to&limit[&shareId]`.
@@ -142,6 +145,22 @@ which enforces ownership (or `?shareId=` for shared sessions) and returns
 - **Frontend trigger** — a "↓ CSV" button in the `ReplayDashboard` header calls
   this endpoint, prompting a file download in the browser.
 - Returns `404` if the session doesn't exist or doesn't belong to the user.
+
+---
+
+### 2.6 `lib/pidRegistry.js` — Unified PID Metadata
+
+- **Shared metadata source** — `lib/pidRegistry.js` holds the canonical PID
+  metadata (fullName, shortName, unit) for all known OBD-II PIDs. It replaces
+  the previous hardcoded `PID_NAME_MAP` in `lib/llmPrompt.js`.
+- **Backend usage** — `lib/llmPrompt.js` imports `PID_REGISTRY` to resolve
+  human-readable names in AI analysis prompts and telemetry CSV context.
+- **Frontend sync** — the frontend's `lib/pidDecode.ts` maintains its own
+  `FALLBACK_MAP` with the same keys. The comment at the top of `pidDecode.ts`
+  instructs developers to update `pidRegistry.js` first, then sync the frontend
+  copy.
+- **Key format** — Torque hex keys **without leading zeros** (e.g. `k5`, `kc`,
+  `kd`, `kf`, `kff1007`). No entries use zero-padded variants.
 
 ---
 
@@ -368,7 +387,8 @@ See `docs/deployment.md` for the full deployment guide.
 | `POST /api/users/register` | none | register |
 | `POST /api/users/login` | none | login (sets cookie) |
 | `POST /api/users/change-password` | cookie | change password (requires currentPassword + newPassword; regenerates session) |
-| `GET /api/users/logout` | cookie | logout |
+| `POST /api/users/logout` | cookie | logout |
+| `GET /api/version` | none | returns `{ version: string }` from package.json |
 | `GET /api/sessions` | cookie | list sessions (summary) |
 | `GET /api/sessions/:id` | cookie + owner | session metadata (no full logs) |
 | `GET /api/sessions/:id/telemetry?from&to&limit` | cookie + owner | paged telemetry frames |

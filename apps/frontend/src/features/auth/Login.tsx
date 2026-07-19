@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import type { FormEvent } from 'react';
 import { useNavigate, Navigate } from 'react-router-dom';
 import { Button } from '@tremor/react';
-import { login, getSettings } from '@/lib/api';
+import { login, getSettings, getVersion } from '@/lib/api';
 import { useAuth } from './useAuth';
 
 export default function Login() {
@@ -11,6 +11,7 @@ export default function Login() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [registrationDisabled, setRegistrationDisabled] = useState(false);
+  const [version, setVersion] = useState<string>('');
   const navigate = useNavigate();
   const { isAuthenticated } = useAuth();
 
@@ -18,6 +19,10 @@ export default function Login() {
     getSettings()
       .then((s) => setRegistrationDisabled(s.disableRegistration))
       .catch(() => setRegistrationDisabled(false));
+  }, []);
+
+  useEffect(() => {
+    getVersion().then((v) => setVersion(v.version)).catch(() => {});
   }, []);
 
   if (isAuthenticated) return <Navigate to="/" replace />;
@@ -131,6 +136,11 @@ export default function Login() {
               </>
             )}
           </p>
+          {version && (
+            <p className="mt-4 text-center text-sm text-gray-500 dark:text-gray-400">
+              torqueDASH-Next v{version}
+            </p>
+          )}
         </div>
       </div>
     </div>

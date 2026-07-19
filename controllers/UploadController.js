@@ -1,6 +1,6 @@
+const crypto = require('crypto');
 const User = require('../models').User;
 const Session = require('../models').Session;
-const _ = require('lodash');
 const userCache = require('../lib/userCache');
 const ssrfGuard = require('../lib/ssrfGuard');
 const moment = require('moment');
@@ -34,22 +34,21 @@ class UploadController {
                     });
                 }
                 const token = authHeader.slice(7);
-                if (token !== configuredToken) {
+                const tokenBuf = Buffer.from(token, 'utf8');
+                const expectedBuf = Buffer.from(configuredToken, 'utf8');
+                if (tokenBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(tokenBuf, expectedBuf)) {
                     return res.status(401).json({ error: 'Invalid upload token' });
                 }
             }
             // ── END AUTHENTICATION ─────────────────────────────────────────
 
-            let { eml, session, time } = req.query;
-            let lon = req.query.kff1005;
-            let lat = req.query.kff1006;
+            let { eml, v, session, id, time, kff1005, kff1006, ...values } = req.query;
+            let lon = kff1005;
+            let lat = kff1006;
 
             // Torque may send repeated query params as arrays
             if (Array.isArray(lon)) lon = lon[0];
             if (Array.isArray(lat)) lat = lat[0];
-
-            // Build the values object by stripping non-PID query params
-            let values = _.omit(req.query, ['eml', 'v', 'session', 'id', 'time', 'kff1005', 'kff1006']);
 
             // Resolve user (positive + negative cache). Keep the 403 gate:
             // unknown emails are NEVER buffered or forwarded.

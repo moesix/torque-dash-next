@@ -10,6 +10,10 @@
 import type { TelemetryFrame, PidMeta, ColumnMeta, SeriesSource } from './types';
 
 // ── Curated Torque OBD-II fallback map ───────────────────────────────────
+/**
+ * Frontend PID fallback map. Keep in sync with backend lib/pidRegistry.js.
+ * When adding new PIDs, update pidRegistry.js first, then add the same entry here.
+ */
 
 const FALLBACK_MAP: Record<string, { full: string; short: string; unit: string }> = {
   k10:     { full: 'MAF Air Flow Rate',           short: 'MAF',       unit: 'g/s' },

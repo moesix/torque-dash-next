@@ -115,7 +115,7 @@ class AnalysisController {
       let fullReasoning = '';
       let buffer = '';
 
-      while (true) {
+      while (true) { // eslint-disable-line no-constant-condition
         const { done, value } = await reader.read();
         if (done) break;
 
@@ -174,11 +174,11 @@ class AnalysisController {
       res.write('data: [DONE]\n\n');
       res.end();
     } catch (err) {
-      console.error('[AnalysisController.analyzeSession]', err);
+      console.error('[AnalysisController] analyzeSession error:', err);
       if (!res.headersSent) {
-        res.status(500).json({ error: err.message || 'Analysis failed' });
+        res.status(500).json({ error: 'Analysis failed' });
       } else {
-        res.write(`data: ${JSON.stringify({ error: err.message })}\n\n`);
+        res.write(`data: ${JSON.stringify({ error: 'Analysis failed' })}\n\n`);
         res.end();
       }
     }
@@ -233,7 +233,7 @@ class AnalysisController {
       let text = '';
       let buffer = '';
 
-      while (true) {
+      while (true) { // eslint-disable-line no-constant-condition
         const { done, value } = await reader.read();
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
@@ -249,14 +249,16 @@ class AnalysisController {
             const reasoning = parsed.choices?.[0]?.delta?.reasoning_content;
             const chunk = delta || reasoning || parsed.delta?.text;
             if (chunk) text += chunk;
-          } catch {}
+          } catch {
+            // partial chunk during streaming — skip unparseable fragments
+          }
         }
       }
 
       res.json({ ok: true, response: text.trim(), provider: settings.llmProvider });
     } catch (err) {
-      console.error('[AnalysisController.testConnection]', err);
-      res.status(500).json({ ok: false, error: err.message });
+      console.error('[AnalysisController] testConnection error:', err);
+      res.status(500).json({ ok: false, error: 'LLM connection test failed' });
     }
   }
 }

@@ -62,6 +62,18 @@ router.get('/settings', UserController.getSettings);
 // redundancy). Must come before the global limiter below.
 router.put('/settings', writeLimiter, authenticate, UserController.updateSettings);
 router.post('/settings/upload-token', writeLimiter, authenticate, UserController.generateUploadToken);
+
+// ── VERSION ─────────────────────────────────────────────────────────
+router.get('/version', (req, res) => {
+  try {
+    const { version } = require('../package.json');
+    res.json({ version });
+  } catch (err) {
+    console.warn('[routes/api] version lookup failed:', err.message);
+    res.json({ version: 'unknown' });
+  }
+});
+
 // Catch-all limiter for every remaining /api route (reads, session queries).
 // Registered here so it covers all routes declared below (but NOT /upload
 // or /settings, which have their own limiters above).
@@ -69,7 +81,7 @@ router.use(makeLimiter(rateLimits.global));
 
 router.post('/users/register', authLimiter, UserController.register);
 router.post('/users/login', authLimiter, UserController.login);
-router.get('/users/logout', UserController.logout);
+router.post('/users/logout', UserController.logout);
 router.get('/users/shareid', authenticate, UserController.getShareId);
 router.get('/users/forwardurls', authenticate, UserController.getForwardUrls);
 router.put('/users/forwardurls', writeLimiter, authenticate, UserController.updateForwardUrls);
