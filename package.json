@@ -1,6 +1,6 @@
 {
   "name": "torque-dash-next",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Modernization of torque-dash: Express/Sequelize/Postgres + TimescaleDB + React SPA",
   "main": "app.js",
   "scripts": {
