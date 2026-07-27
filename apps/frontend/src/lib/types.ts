@@ -75,6 +75,9 @@ export interface Settings {
   engineCc: number | null;
   llmThinkingMode?: boolean;
   llmReasoningEffort?: string;
+
+  /** Timezone offset in minutes from UTC (e.g. 480 for UTC+8). */
+  timezoneOffset?: number;
 }
 
 /** Response from POST /api/settings/upload-token (token generation). The full
@@ -132,6 +135,7 @@ export interface UpdateLlmSettings {
   engineCc?: number | null;
   llmThinkingMode?: boolean;
   llmReasoningEffort?: string;
+  timezoneOffset?: number;
 }
 
 /** Response from POST /api/settings/test-llm. */
