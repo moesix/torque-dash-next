@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const User = require('../models').User;
 const Session = require('../models').Session;
+const Settings = require('../models').Settings;
 const userCache = require('../lib/userCache');
 const ssrfGuard = require('../lib/ssrfGuard');
 const moment = require('moment');
@@ -64,7 +65,10 @@ class UploadController {
 
             // After findOrCreate, if this is a new session, give it a default name
             if (currentSession[1] && time) {
-                const ts = moment(Number(time));
+                // Fetch the user's timezone offset (minutes from UTC, e.g. 480 for UTC+8)
+                const settings = await Settings.getSingleton();
+                const offsetMinutes = settings?.timezoneOffset ?? 0;
+                const ts = moment(Number(time)).utcOffset(offsetMinutes);
                 const name = `Trip ${ts.format('DDMMYYYY h:mmA')}`;
                 await sess.update({ name });
             }

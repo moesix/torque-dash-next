@@ -152,6 +152,7 @@ class UserController {
                 engineCc: settings.engineCc || null,
                 llmThinkingMode: settings.llmThinkingMode ?? true,
                 llmReasoningEffort: settings.llmReasoningEffort || 'high',
+                timezoneOffset: settings.timezoneOffset ?? 0,
             });
         } catch (err) {
             console.error(err.message || err);
@@ -231,7 +232,7 @@ class UserController {
             }
 
             // DeepSeek thinking mode fields
-            const { llmThinkingMode, llmReasoningEffort } = req.body;
+            const { llmThinkingMode, llmReasoningEffort, timezoneOffset } = req.body;
 
             if (llmThinkingMode !== undefined) {
               if (typeof llmThinkingMode !== 'boolean') {
@@ -244,6 +245,15 @@ class UserController {
                 return res.status(400).json({ error: 'llmReasoningEffort must be low, medium, high, or max.' });
               }
               updateData.llmReasoningEffort = llmReasoningEffort;
+            }
+
+            // Timezone offset (minutes from UTC, e.g. 480 for UTC+8)
+            if (timezoneOffset !== undefined) {
+              const off = Number(timezoneOffset);
+              if (!Number.isInteger(off) || off < -720 || off > 840) {
+                return res.status(400).json({ error: 'timezoneOffset must be an integer between -720 and 840 (minutes from UTC).' });
+              }
+              updateData.timezoneOffset = off;
             }
 
             // API key requires encryption
@@ -280,6 +290,7 @@ class UserController {
                 engineCc: current.engineCc || null,
                 llmThinkingMode: current.llmThinkingMode ?? true,
                 llmReasoningEffort: current.llmReasoningEffort || 'high',
+                timezoneOffset: current.timezoneOffset ?? 0,
             });
         } catch (err) {
             console.error(err.message || err);

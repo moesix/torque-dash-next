@@ -36,6 +36,7 @@ export default function SettingsPage() {
     engineCc: null,
     llmThinkingMode: true,
     llmReasoningEffort: 'high',
+    timezoneOffset: 0,
   });
 
   useEffect(() => {
@@ -228,6 +229,48 @@ export default function SettingsPage() {
 
       <AiProviderCard settings={llmSettings} onUpdate={setLlmSettings} />
       <VehicleCard settings={llmSettings} onUpdate={setLlmSettings} />
+
+      <Card>
+        <div className="space-y-4">
+          <div>
+            <Text className="font-medium">Timezone</Text>
+            <Text className="mt-1 text-sm text-gray-500 dark:text-[var(--text-muted)]">
+              Your UTC offset in minutes. Used to format session names with your
+              local time. For example, UTC+8 (Malaysia) = 480, UTC-5 (EST) = -300.
+            </Text>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <label htmlFor="tz-offset" className="text-sm text-gray-700 dark:text-[var(--text-secondary)]">
+              UTC offset (minutes):
+            </label>
+            <input
+              id="tz-offset"
+              type="number"
+              min={-720}
+              max={840}
+              step={15}
+              value={llmSettings.timezoneOffset ?? 0}
+              onChange={(e) => {
+                const next = { ...llmSettings, timezoneOffset: Number(e.target.value) };
+                setLlmSettings(next);
+              }}
+              onBlur={async () => {
+                try {
+                  await updateSettings({ timezoneOffset: llmSettings.timezoneOffset ?? 0 });
+                  setSaved(true);
+                } catch {
+                  setError('Failed to save timezone.');
+                }
+              }}
+              className="w-24 rounded border bg-white px-3 py-1.5 text-sm font-mono dark:border-[var(--border-default)] dark:bg-[var(--bg-surface)] dark:text-[var(--text-primary)]"
+            />
+            <span className="text-sm text-gray-500 dark:text-[var(--text-muted)]">
+              {((llmSettings.timezoneOffset ?? 0) === 0) ? '(UTC)' : `(${((llmSettings.timezoneOffset ?? 0) >= 0 ? '+' : '')}${((llmSettings.timezoneOffset ?? 0) / 60).toFixed(1)}h)`}
+            </span>
+          </div>
+        </div>
+      </Card>
     </div>
   );
 }

@@ -128,7 +128,7 @@ export async function getSettings(): Promise<Settings> {
 }
 
 export async function updateSettings(
-  body: { disableRegistration?: boolean; uploadApiToken?: string | null },
+  body: Partial<Pick<Settings, 'disableRegistration' | 'uploadApiToken' | 'timezoneOffset'>>,
 ): Promise<Settings> {
   return request<Settings>('/api/settings', {
     method: 'PUT',

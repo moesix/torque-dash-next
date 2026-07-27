@@ -75,6 +75,13 @@ module.exports = (sequelize, DataTypes) => {
             type: DataTypes.TEXT,
             defaultValue: 'high',
         },
+
+        // ── Timezone offset (migration 007) ──────────────────────────
+        timezoneOffset: {
+            type: DataTypes.INTEGER,
+            allowNull: false,
+            defaultValue: 0,
+        },
     });
 
     // Resolve the singleton row, creating it on first access.
@@ -94,6 +101,7 @@ module.exports = (sequelize, DataTypes) => {
                 engineCc: null,
                 llmThinkingMode: true,
                 llmReasoningEffort: 'high',
+                timezoneOffset: 0,
             },
         });
         return row;
