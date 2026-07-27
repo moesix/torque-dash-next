@@ -33,7 +33,14 @@ cd apps/frontend
 npm install
 ```
 Installs React 18, Vite 5, TypeScript 5, Tailwind v4, Tremor 3, ECharts 5,
-react-leaflet 4, TanStack Query 5, zustand 4, react-router-dom 6.
+react-leaflet 4, TanStack Query 5, zustand 4, react-router-dom 6.30.1 (exact
+pin).
+
+> **react-router-dom version:** Pinned to **6.30.1** (not `^6.30.1`) to avoid
+> CVE-2026-53668, an open redirect vulnerability in `resolvePath` present in
+> 6.30.2+. Do **not** upgrade to 6.30.2+ without first confirming the CVE has
+> been patched upstream. The next major upgrade path is react-router v7, which is
+> a separate migration effort (full rewrite of routing internals).
 
 ---
 

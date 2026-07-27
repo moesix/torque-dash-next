@@ -27,6 +27,7 @@ import SessionSummaryCard from '@/components/charts/SessionSummaryCard';
 import GpsTrackMap from '@/components/map/GpsTrackMap';
 import PlaybackControls from './PlaybackControls';
 import OverlayChart from '@/components/charts/OverlayChart';
+import DiagnosticPanels from '@/components/charts/DiagnosticPanels';
 import PidTogglePanel from '@/components/telemetry/PidTogglePanel';
 import DecodedMetricsTable from '@/components/telemetry/DecodedMetricsTable';
 import { getAvailableSeries, getSeriesData, coerceScalar } from '@/lib/pidDecode';
@@ -389,6 +390,11 @@ export default function ReplayDashboard() {
             />
           </Card>
         </dialog>
+      </div>
+
+      {/* ── Pre-configured diagnostic panels ────────────── */}
+      <div className="animate-slide-up-delay-3">
+        <DiagnosticPanels frames={frames} available={available} />
       </div>
 
       {/* GPS Track — full width */}

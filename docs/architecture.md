@@ -318,6 +318,47 @@ The following modern CSS and UX enhancements were applied in the UI refinement p
 - **Sidebar depth** — AppShell sidebar uses layered `box-shadow` for subtle inset depth (1px border + 4px shadow).
 - **Reduced motion** — All new animations (scroll-driven, view transitions, card hover) are gated behind `prefers-reduced-motion: reduce` which sets `animation: none !important` and `transition: none !important`.
 
+### 3.10 Diagnostic Graph Panels
+
+The session replay dashboard includes six pre-configured collapsible diagnostic
+panels rendered below the overlay chart. Each panel is a self-contained ECharts
+chart wrapped in a card with a header (title, row count, expand/collapse chevron).
+
+**Components:**
+- `DiagnosticPanel` — generic collapsible panel: lazy ECharts initialization
+  (chart is only created when first expanded), dual Y-axis support, series-level
+  markLine/markArea, and computed series overlay.
+- `DiagnosticPanels` — container that instantiates the six panels with their
+  specific PID configurations and layout options.
+
+**Panel configurations:**
+
+| # | Title | PIDs | Axes | Notes |
+|---|-------|------|------|-------|
+| 1 | Engine RPM & Vehicle Speed | `engineRpm`, `vehicleSpeed` | Dual (left/right) | Core drivetrain metrics |
+| 2 | Fuel Trims | `k6` (STFT), `k7` (LTFT) | Single | Includes computed **Total Trim** series (STFT + LTFT), dashed 0-line markLine, ±10% reference band |
+| 3 | O2 Sensor & AFR | `kff1214`, `kff124d` | Dual (left/right) | O2 voltage and air-fuel ratio |
+| 4 | Engine Coolant Temp | `k5` | Single | Y-axis clamped to 60–95 °C |
+| 5 | Boost & MAF | `kff1278`, `k10` | Dual (left/right) | **Conditional** — only shown if both PIDs exist in session data |
+| 6 | Throttle & Pedal | `k11`, `k49` | Single | **Conditional** — only shown if both PIDs exist in session data |
+
+**Key design decisions:**
+- **Lazy initialization** — ECharts instances are created only on first expand,
+  avoiding the cost of rendering six charts when the user hasn't opened them.
+- **Dual Y-axis** — panels with metrics of different scales (e.g. RPM + Speed,
+  O2 voltage + AFR) use ECharts `yAxis: [{}, {}]` with the second axis offset
+  right and its split lines hidden.
+- **Computed series** — the Fuel Trims panel overlays a `Total Trim` line
+  computed from the sum of STFT and LTFT values.
+- **Conditional rendering** — panels 5 and 6 check PID availability via
+  `hasPids()` before mounting, keeping the UI clean for sessions that lack those
+  sensors.
+- **Dark mode compatible** — styling follows the same CSS custom properties and
+  `dark:` variants used by `OverlayChart`.
+
+The panels are imported in `ReplayDashboard.tsx` and rendered below the overlay
+chart, receiving the full `frames` array and the `available` series list.
+
 ---
 
 ## 4. Synchronized Replay Data Flow

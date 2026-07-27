@@ -277,3 +277,31 @@ export function computeStats(
 
   return { min, max, avg: sum / count, last };
 }
+
+// ── Computed series helpers ───────────────────────────────────────────────
+
+/**
+ * Compute Total Trim = STFT + LTFT for each frame.
+ * Both STFT (k6) and LTFT (k7) must be non-null for a result; if either
+ * is null at a timestamp, that point is null.
+ *
+ * Returns [timestamp_ms, value | null][] suitable for ECharts.
+ */
+export function computeTotalTrim(frames: TelemetryFrame[]): [number, number | null][] {
+  const data: [number, number | null][] = new Array(frames.length);
+
+  for (let i = 0; i < frames.length; i++) {
+    const f = frames[i];
+    const ts = new Date(f.timestamp).getTime();
+    const stft = coerceScalar(f.values?.k6);
+    const ltft = coerceScalar(f.values?.k7);
+
+    if (stft !== null && ltft !== null) {
+      data[i] = [ts, stft + ltft];
+    } else {
+      data[i] = [ts, null];
+    }
+  }
+
+  return data;
+}
