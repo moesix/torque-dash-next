@@ -4,6 +4,7 @@ const passport = require('passport');
 const { nanoid } = require('nanoid');
 const crypto = require('crypto');
 const runtime = require('../config/runtime');
+const Joi = require('joi');
 
 class UserController {
     static async login(req, res, next) {
@@ -73,7 +74,7 @@ class UserController {
         }
         catch(err) {
             console.error(err.message || err);
-            res.sendStatus(500);
+            res.status(500).json({ error: 'Internal server error' });
         }
     }
     static async updateForwardUrls(req, res) {
@@ -82,11 +83,23 @@ class UserController {
             let user = await User.findOne({
                 where: { id: req.user.id }
             });
+            if(!user) return res.status(404).json({ error: 'User not found' });
             if(!urls) {
                 await user.update({
                     forwardUrls: null
                 });
                 return res.sendStatus(200);
+            }
+            if(!Array.isArray(urls)) {
+                return res.status(400).json({ error: 'URLs must be an array.' });
+            }
+            if(urls.length > 10) {
+                return res.status(400).json({ error: 'Too many URLs. Maximum is 10.' });
+            }
+            const schema = Joi.array().items(Joi.string().uri());
+            const { error } = schema.validate(urls);
+            if(error) {
+                return res.status(400).json({ error: 'Invalid URL: ' + error.details[0].message });
             }
             await user.update({
                 forwardUrls: urls
@@ -95,7 +108,7 @@ class UserController {
         }
         catch(err) {
             console.error(err.message || err);
-            res.sendStatus(500);
+            res.status(500).json({ error: 'Internal server error' });
         }
     }
     static async getShareId(req, res) {
@@ -108,7 +121,7 @@ class UserController {
         }
         catch(err) {
             console.error(err.message || err);
-            res.sendStatus(500);
+            res.status(500).json({ error: 'Internal server error' });
         }
     }
     static async toggleShareId(req, res) {
@@ -127,7 +140,7 @@ class UserController {
         }
         catch(err) {
             console.error(err.message || err);
-            res.sendStatus(500);
+            res.status(500).json({ error: 'Internal server error' });
         }
     }
     // Public read of site settings (the register/login pages need this to
@@ -137,6 +150,7 @@ class UserController {
         try {
             const settings = await Settings.getSingleton();
             const envDisabled = process.env.DISABLE_REGISTRATION === 'true';
+            res.set('Cache-Control', 'private, max-age=30');
             res.json({
                 disableRegistration: settings.disableRegistration || envDisabled,
                 hasUploadApiToken: Boolean(settings.uploadApiToken || runtime.isFromEnv()),
@@ -156,7 +170,7 @@ class UserController {
             });
         } catch (err) {
             console.error(err.message || err);
-            res.sendStatus(500);
+            res.status(500).json({ error: 'Internal server error' });
         }
     }
     // Authenticated toggle of site settings. NOTE: the app is single-operator,
@@ -267,6 +281,7 @@ class UserController {
             }
 
             await Settings.upsert(updateData);
+            Settings.invalidateCache();
 
             // Keep the runtime holder in sync
             if (uploadApiToken !== undefined) {
@@ -294,7 +309,7 @@ class UserController {
             });
         } catch (err) {
             console.error(err.message || err);
-            res.sendStatus(500);
+            res.status(500).json({ error: 'Internal server error' });
         }
     }
     // Generate a new upload API token (64 hex chars). Returns the full token
@@ -316,7 +331,7 @@ class UserController {
             res.json({ uploadApiToken: token });
         } catch (err) {
             console.error(err.message || err);
-            res.sendStatus(500);
+            res.status(500).json({ error: 'Internal server error' });
         }
     }
 
@@ -363,7 +378,7 @@ class UserController {
             });
         } catch (err) {
             console.error('[UserController]', err.message || err);
-            res.sendStatus(500);
+            res.status(500).json({ error: 'Internal server error' });
         }
     }
 }

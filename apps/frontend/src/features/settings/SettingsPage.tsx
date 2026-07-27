@@ -46,6 +46,7 @@ export default function SettingsPage() {
   useEffect(() => {
     getSettings()
       .then((s) => {
+        if (!s) return;
         setDisableRegistration(s.disableRegistration);
         setHasUploadApiToken(s.hasUploadApiToken);
         setTokenFromEnv(s.tokenFromEnv);
@@ -60,7 +61,7 @@ export default function SettingsPage() {
     setSaved(false);
     try {
       const s = await updateSettings({ disableRegistration: next });
-      setDisableRegistration(s.disableRegistration);
+      if (s) setDisableRegistration(s.disableRegistration);
       setSaved(true);
     } catch {
       setError('Failed to save settings.');
@@ -75,8 +76,10 @@ export default function SettingsPage() {
     setTokenInput('');
     try {
       const res = await generateUploadToken();
-      setTokenInput(res.uploadApiToken);
-      setHasUploadApiToken(true);
+      if (res) {
+        setTokenInput(res.uploadApiToken);
+        setHasUploadApiToken(true);
+      }
     } catch {
       setTokenError('Failed to generate token.');
     } finally {
@@ -89,7 +92,7 @@ export default function SettingsPage() {
     setTokenError(null);
     try {
       const s = await updateSettings({ uploadApiToken: null });
-      setHasUploadApiToken(s.hasUploadApiToken);
+      if (s) setHasUploadApiToken(s.hasUploadApiToken);
       setTokenInput('');
     } catch {
       setTokenError('Failed to clear token.');

@@ -46,20 +46,20 @@ const AnalysisPanel = forwardRef<AnalysisPanelHandle, Props>(
 
     useEffect(() => {
       getSettings()
-        .then((s) => setLlmSettings(s))
+        .then((s) => setLlmSettings(s ?? null))
         .catch(() => {});
     }, []);
 
     useEffect(() => {
       listAnalyses(sessionId)
-        .then(setPastAnalyses)
+        .then((rows) => setPastAnalyses(rows ?? []))
         .catch(() => {});
     }, [sessionId]);
 
     function handleDone(fullText: string) {
       setAnalyzing(false);
       latestResponseRef.current = fullText;
-      listAnalyses(sessionId).then(setPastAnalyses).catch(() => {});
+      listAnalyses(sessionId).then((rows) => setPastAnalyses(rows ?? [])).catch(() => {});
     }
 
     async function copyAsPlainText(text: string, id?: number) {

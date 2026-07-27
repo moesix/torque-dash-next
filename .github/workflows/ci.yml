@@ -34,7 +34,6 @@ jobs:
 
       - name: Run ESLint
         run: npm run lint
-        continue-on-error: true  # Remove this line once Plan 017 fixes ESLint config
 
   frontend-checks:
     runs-on: ubuntu-latest

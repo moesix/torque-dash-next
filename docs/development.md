@@ -24,7 +24,7 @@ the React/Vite frontend (`apps/frontend/`).
 npm install
 ```
 Installs Express 4, Sequelize 6, `pg`, Passport, Joi, bcrypt, express-session,
-connect-pg-simple, cors, connect-flash, lodash, moment, nanoid, plus dev tooling
+connect-pg-simple, cors, connect-flash, helmet, lodash, nanoid, plus dev tooling
 (eslint, morgan, nodemon).
 
 ### Frontend (`apps/frontend/`)
@@ -177,8 +177,8 @@ or pull request to the `development` branch:
 - **Frontend checks:** `npm ci` → `npx tsc --noEmit` (typecheck) → `npm run build`.
 
 The workflow uses `actions/checkout@v7` and `actions/setup-node@v7` with npm
-caching. The lint step currently has `continue-on-error: true` as a transitional
-measure.
+caching. The lint step is now **enforced** — the previous `continue-on-error: true`
+has been removed, so ESLint failures correctly block the build.
 
 ### 7.4 Versioning
 
@@ -278,9 +278,11 @@ blockers are resolved and re-reviewed as PASS:
   aggregate exists but no endpoint reads from it. Consider serving dashboard
   overviews from it to reduce load on the raw hypertable.
 - ✅ **`duration` now formatted + stale comments swept.** `SessionController`
-  formats `duration` into a compact human string (e.g. `"1h 02m 05s"`) via
-  `moment-duration-format`; the legacy `addStartEndData` mutation path is gone and
-  stale `302`/`addStartEndData` comments were removed from backend + frontend.
+  formats `duration` into a compact human string (e.g. `"1h 2m 5s"`) via a
+  native `formatDuration()` helper that replaces the removed
+  `moment-duration-format` dependency; the legacy `addStartEndData` mutation path
+  is gone and stale `302`/`addStartEndData` comments were removed from backend +
+  frontend.
 
 ### Follow-up features (post-MVP)
 
@@ -350,6 +352,7 @@ blockers are resolved and re-reviewed as PASS:
   - **SSRF guard** (`lib/ssrfGuard.js`) validates custom LLM endpoints.
   - Docker-based deployment with GHCR images (`docker-compose.yml`).
   - Non-root backend container (`appuser`), unprivileged nginx frontend.
+- **Session list pagination** — `GET /api/sessions` now accepts `limit` (default 50, max 200) and `offset` query params, returning `{ sessions, total, limit, offset }`. The frontend `SessionBrowser` paginates via a "Load More" button.
 - **Dev tooling:** ESLint 8 (`.eslintrc.js`), husky 9 + lint-staged 17
   (pre-commit lint + syntax check), CI pipeline (`.github/workflows/ci.yml`)
   running on push/PR to `development`, and automated semver version bump

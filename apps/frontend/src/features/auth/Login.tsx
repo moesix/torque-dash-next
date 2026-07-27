@@ -17,7 +17,7 @@ export default function Login() {
 
   useEffect(() => {
     getSettings()
-      .then((s) => setRegistrationDisabled(s.disableRegistration))
+      .then((s) => setRegistrationDisabled(s?.disableRegistration ?? false))
       .catch(() => setRegistrationDisabled(false));
   }, []);
 

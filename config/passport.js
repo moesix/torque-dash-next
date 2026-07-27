@@ -22,7 +22,7 @@ module.exports = function(passport){
                 }
             }
             catch(err){ 
-                console.log(err);
+                console.error(err);
                 return done(err, false);
             }
         })
@@ -44,7 +44,7 @@ module.exports = function(passport){
                 done(null, false);
             }
         }catch(err) {
-            console.log(err);
+            console.error(err);
             done(err, false);
         }
     });

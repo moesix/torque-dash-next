@@ -84,8 +84,17 @@ module.exports = (sequelize, DataTypes) => {
         },
     });
 
+    // ── In-memory TTL cache ─────────────────────────────────────────────
+    let _settingsCache = null;
+    let _cacheTimestamp = 0;
+    const CACHE_TTL_MS = 30000; // 30 seconds
+
     // Resolve the singleton row, creating it on first access.
     Settings.getSingleton = async function () {
+        const now = Date.now();
+        if (_settingsCache && (now - _cacheTimestamp) < CACHE_TTL_MS) {
+            return _settingsCache;
+        }
         const [row] = await Settings.findOrCreate({
             where: { id: 1 },
             defaults: {
@@ -104,7 +113,14 @@ module.exports = (sequelize, DataTypes) => {
                 timezoneOffset: 0,
             },
         });
+        _settingsCache = row;
+        _cacheTimestamp = now;
         return row;
+    };
+
+    Settings.invalidateCache = function () {
+        _settingsCache = null;
+        _cacheTimestamp = 0;
     };
 
     return Settings;

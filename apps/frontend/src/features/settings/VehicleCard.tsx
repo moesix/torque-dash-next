@@ -49,7 +49,7 @@ export default function VehicleCard({ settings, onUpdate }: Props) {
         vehicleYear: year ? parseInt(year) : null,
         engineCc: cc ? parseInt(cc) : null,
       });
-      onUpdate(updated);
+      if (updated) onUpdate(updated);
       setSaved(true);
     } catch {
       setError('Failed to save vehicle info.');
