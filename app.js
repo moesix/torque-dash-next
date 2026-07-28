@@ -10,10 +10,20 @@ const app = express();
 // This avoids the unmaintained `csurf` dependency. The js/missing-csrf-protection
 // CodeQL alert is suppressed on the express-session registration below.
 app.set('trust proxy', 1);
-// Security hardening headers via helmet. CSP is disabled for now because the
-// React SPA uses inline scripts/styles — enable in a future plan with nonces.
+// Security hardening headers via helmet. CSP uses 'unsafe-inline' for scripts
+// and styles because the React SPA uses inline scripts/styles from Vite bundling.
 const helmet = require('helmet');
-app.use(helmet({ contentSecurityPolicy: false }));
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", 'data:', 'https:'],
+      connectSrc: ["'self'"],
+    },
+  },
+}));
 const cors = require('cors');
 // const logger = require('morgan');
 const { sequelize } = require('./models');
