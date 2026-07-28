@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Card, Text, Title } from '@tremor/react';
-import { getSessions } from '@/lib/api';
+import { getSessions, getVehicles } from '@/lib/api';
+import type { Vehicle } from '@/lib/types';
 import Skeleton from '@/components/ui/Skeleton';
 import ErrorAlert from '@/components/ui/ErrorAlert';
 import SessionTable from '@/components/tables/SessionTable';
@@ -9,10 +10,16 @@ import SessionTable from '@/components/tables/SessionTable';
 export default function SessionBrowser() {
   const [offset, setOffset] = useState(0);
   const limit = 50;
+  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [selectedVehicleId, setSelectedVehicleId] = useState<number | 'all'>('all');
+
+  useEffect(() => {
+    getVehicles().then((v) => setVehicles(v ?? [])).catch(() => {});
+  }, []);
 
   const { data, isLoading, isError } = useQuery({
-    queryKey: ['sessions', offset],
-    queryFn: () => getSessions(limit, offset),
+    queryKey: ['sessions', offset, selectedVehicleId],
+    queryFn: () => getSessions(limit, offset, selectedVehicleId === 'all' ? null : selectedVehicleId),
   });
 
   const sessions = data?.sessions ?? [];
@@ -56,6 +63,28 @@ export default function SessionBrowser() {
     <Card className="session-card">
       <Title>Your Sessions</Title>
       <Text>Select a session to replay its telemetry.</Text>
+      {vehicles.length > 0 && (
+        <div className="mt-4 flex items-center gap-2">
+          <label htmlFor="vehicle-filter" className="text-sm text-gray-600 dark:text-[var(--text-secondary)]">
+            Filter by vehicle:
+          </label>
+          <select
+            id="vehicle-filter"
+            value={selectedVehicleId}
+            onChange={(e) => {
+              setSelectedVehicleId(e.target.value === 'all' ? 'all' : Number(e.target.value));
+              setOffset(0);
+            }}
+            className="rounded border bg-white px-3 py-1.5 text-sm dark:border-[var(--border-default)] dark:bg-[var(--bg-surface)] dark:text-[var(--text-primary)]"
+          >
+            <option value="all">All vehicles</option>
+            {vehicles.map((v) => (
+              <option key={v.id} value={v.id}>{v.name}</option>
+            ))}
+            <option value="none">Unassigned</option>
+          </select>
+        </div>
+      )}
       {sessions.length > 0 ? (
         <div className="mt-4">
           <SessionTable sessions={sessions} />

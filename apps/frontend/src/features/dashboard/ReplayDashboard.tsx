@@ -17,8 +17,10 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
 import { Card, Title } from '@tremor/react';
-import { getSession, getTelemetry, exportSessionCsv } from '@/lib/api';
+import { getSession, getTelemetry, exportSessionCsv, updateSessionNotes, getVehicles, reassignSessionVehicle } from '@/lib/api';
 import type { AnalysisPanelHandle } from '@/components/ai/AnalysisPanel';
+import type { Vehicle } from '@/lib/types';
+import VehicleReassignDialog from '@/components/vehicles/VehicleReassignDialog';
 import Skeleton from '@/components/ui/Skeleton';
 import ErrorAlert from '@/components/ui/ErrorAlert';
 import { usePlaybackStore } from '@/app/playbackStore';
@@ -89,6 +91,17 @@ export default function ReplayDashboard() {
   const analysisDialogRef = useRef<HTMLDialogElement | null>(null);
   const analysisPanelRef = useRef<AnalysisPanelHandle>(null);
   const [showAnalysisConfirm, setShowAnalysisConfirm] = useState(false);
+  const [notes, setNotes] = useState<string>('');
+  const [notesSaving, setNotesSaving] = useState(false);
+  const [showReassign, setShowReassign] = useState(false);
+  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+
+  // Sync notes state when session data loads
+  useEffect(() => {
+    if (sessionQuery.data) {
+      setNotes(sessionQuery.data.notes ?? '');
+    }
+  }, [sessionQuery.data]);
 
   // Safari fallback for closedby="any" (light-dismiss)
   useEffect(() => {
@@ -264,6 +277,11 @@ export default function ReplayDashboard() {
           <div className="min-w-0">
             <h1 className="text-lg font-semibold text-gray-900 dark:text-white font-display">
               {sessionQuery.data.name || 'Session Replay'}
+              {sessionQuery.data.vehicleName && (
+                <span className="ml-2 inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 dark:bg-gray-700 dark:text-gray-300">
+                  {sessionQuery.data.vehicleName}
+                </span>
+              )}
             </h1>
             <p className="text-sm text-gray-500 dark:text-[var(--text-secondary)]">
               {sessionQuery.data.startDate
@@ -307,11 +325,52 @@ export default function ReplayDashboard() {
                 '↓ CSV'
               )}
             </button>
+            <button
+              type="button"
+              onClick={async () => {
+                const v = await getVehicles();
+                setVehicles(v ?? []);
+                setShowReassign(true);
+              }}
+              className="rounded p-1.5 text-xs font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+              title="Reassign to a different vehicle"
+            >
+              🚗
+            </button>
             {exportError && (
               <span className="text-xs text-red-500">{exportError}</span>
             )}
           </div>
         </div>
+      </div>
+
+      {/* Session notes */}
+      <div className="animate-slide-up rounded-lg bg-white px-4 py-3 shadow-xs dark:bg-[var(--bg-card)]">
+        <label htmlFor="session-notes" className="mb-1 block text-sm font-medium text-gray-700 dark:text-[var(--text-secondary)]">
+          Notes
+        </label>
+        <textarea
+          id="session-notes"
+          rows={3}
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          onBlur={async () => {
+            if (!id) return;
+            setNotesSaving(true);
+            try {
+              await updateSessionNotes(id, notes.trim() || null);
+            } catch {
+              // Silently ignore
+            } finally {
+              setNotesSaving(false);
+            }
+          }}
+          placeholder="Add notes about this session..."
+          className="w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm shadow-xs focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500 dark:border-[var(--border-default)] dark:bg-[var(--bg-surface)] dark:text-[var(--text-primary)] dark:focus:border-teal-400"
+        />
+        {notesSaving && (
+          <span className="text-xs text-gray-400 dark:text-[var(--text-muted)]">Saving...</span>
+        )}
       </div>
 
       {/* Playback controls — full width */}
@@ -447,6 +506,21 @@ export default function ReplayDashboard() {
           </div>
         </div>
       </dialog>
+
+      {/* Vehcile reassign dialog */}
+      {showReassign && (
+        <VehicleReassignDialog
+          vehicles={vehicles}
+          currentVehicleId={sessionQuery.data.vehicleId}
+          onReassign={async (vehicleId) => {
+            if (!id) return;
+            await reassignSessionVehicle(id, vehicleId);
+            await sessionQuery.refetch();
+            setShowReassign(false);
+          }}
+          onClose={() => setShowReassign(false)}
+        />
+      )}
 
       {/* AI Analysis panel — at the bottom */}
       <div id="ai-analysis-panel" className="animate-slide-up-delay-5">

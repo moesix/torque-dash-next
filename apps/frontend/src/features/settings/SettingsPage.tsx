@@ -3,7 +3,7 @@ import { Card, Text, Title, Switch } from '@tremor/react';
 import { getSettings, updateSettings, generateUploadToken, getVersion } from '@/lib/api';
 import type { Settings } from '@/lib/types';
 import AiProviderCard from './AiProviderCard';
-import VehicleCard from './VehicleCard';
+import VehicleManager from './VehicleManager';
 
 export default function SettingsPage() {
   const [disableRegistration, setDisableRegistration] = useState(false);
@@ -231,7 +231,7 @@ export default function SettingsPage() {
       </Card>
 
       <AiProviderCard settings={llmSettings} onUpdate={setLlmSettings} />
-      <VehicleCard settings={llmSettings} onUpdate={setLlmSettings} />
+      <VehicleManager />
 
       <Card>
         <div className="space-y-4">

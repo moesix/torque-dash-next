@@ -75,6 +75,7 @@ export default function SessionTable({ sessions }: Props) {
       <TableHead>
         <TableRow>
           <TableHeaderCell>Vehicle / Name</TableHeaderCell>
+          <TableHeaderCell>Vehicle</TableHeaderCell>
           <TableHeaderCell>Start</TableHeaderCell>
           <TableHeaderCell>Duration</TableHeaderCell>
           <TableHeaderCell>Max Speed</TableHeaderCell>
@@ -84,7 +85,7 @@ export default function SessionTable({ sessions }: Props) {
       <TableBody>
         {sessions.length === 0 ? (
           <TableRow>
-            <TableCell colSpan={5}>
+            <TableCell colSpan={6}>
               <Text>No sessions yet.</Text>
             </TableCell>
           </TableRow>
@@ -139,6 +140,9 @@ export default function SessionTable({ sessions }: Props) {
                       </button>
                     </span>
                   )}
+                </TableCell>
+                <TableCell>
+                  {s.vehicleName || <span className="text-gray-400 dark:text-[var(--text-muted)] italic">Unassigned</span>}
                 </TableCell>
                 <TableCell>
                   {s.startDate
