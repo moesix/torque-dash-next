@@ -12,9 +12,9 @@ const app = express();
 app.set('trust proxy', 1);
 // Security hardening headers via helmet. CSP is disabled for now because the
 // React SPA uses inline scripts/styles — enable in a future plan with nonces.
+const helmet = require('helmet');
 app.use(helmet({ contentSecurityPolicy: false }));
 const cors = require('cors');
-const helmet = require('helmet');
 // const logger = require('morgan');
 const { sequelize } = require('./models');
 const config = require('./config/config');
