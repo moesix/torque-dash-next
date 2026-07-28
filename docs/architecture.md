@@ -82,6 +82,11 @@ which enforces ownership (or `?shareId=` for shared sessions) and returns
   (12-hour clock with AM/PM) using `Date` arithmetic adjusted by the user's
   `timezoneOffset` from the `Settings` singleton (stored in minutes, e.g. `480`
   for UTC+8). The `moment` dependency previously used here has been removed.
+- **Vehicle resolution (`v` param):** Torque Pro's optional `v` query param
+  (vehicle profile name) is matched to a `Vehicle` record by name and userId.
+  When `v` is absent or no match is found, the controller falls back to the
+  user's default vehicle (`isDefault: true`). The resolved `vehicleId` is stored
+  on the `Session` and returned in session metadata.
 - **SSRF-guarded `forwardUrls`:** each URL is checked with `lib/ssrfGuard.isSafeUrl`
   before a fire-and-forget `fetch`.
 - Responds `200 OK` immediately; the DB flush is asynchronous.
@@ -176,6 +181,57 @@ which enforces ownership (or `?shareId=` for shared sessions) and returns
   `Strict-Transport-Security: max-age=31536000; includeSubDomains` to enforce
   HTTPS for one year.
 
+### 2.8 Session Notes
+
+- **Schema:** a nullable `notes` TEXT column on the `Sessions` table, added by
+  migration `infra/timescale/008_add_session_notes.sql`.
+- **API:** `PATCH /api/sessions/notes/:sessionId` accepts `{ notes: string|null }`
+  and updates the session's freeform notes field. Only the session owner may
+  update notes.
+- **Frontend:** the `ReplayDashboard` renders a `<textarea>` for session notes
+  with auto-save on blur. A `Saving...` indicator shows during the async save.
+  The notes are synced from the session query data when the page loads.
+- **Contract:** notes are returned as part of the session metadata in
+  `GET /api/sessions/:id` and `GET /api/sessions` (included in `notes` field).
+
+### 2.9 Vehicle Model
+
+- **Purpose:** the `Vehicle` model (Sequelize, `models/Vehicle.js`) lets users
+  define named vehicle profiles (make, model, year, engine displacement) and
+  assign sessions to them. This replaces the earlier approach of storing vehicle
+  fields in `Settings` — the legacy Settings vehicle fields remain for backward
+  compatibility.
+
+- **Schema (`infra/timescale/009_add_vehicles.sql`):**
+  - `Vehicles` table: `id` (PK), `name` (VARCHAR 255, NOT NULL, default
+    `'My Vehicle'`), `make` (TEXT), `model` (TEXT), `year` (INTEGER),
+    `engineCc` (INTEGER), `isDefault` (BOOLEAN, NOT NULL, default false),
+    `userId` (FK → `Users.id`, ON DELETE CASCADE), `createdAt`, `updatedAt`.
+  - `Sessions.vehicleId` — nullable FK (`Vehicles.id`, ON DELETE SET NULL),
+    added by migration 009.
+  - Indexes on `Sessions(vehicleId)` and `Vehicles(userId)` for fast lookups.
+
+- **Associations:**
+  - `Vehicle.belongsTo(User)` via `userId`.
+  - `Vehicle.hasMany(Session)` via `vehicleId` (ON DELETE SET NULL).
+  - `Session.belongsTo(Vehicle)` returns `vehicleId` and resolved `vehicleName`
+    in session metadata. Both `GET /api/sessions/:id` and `GET /api/sessions`
+    include the `Vehicle` association.
+
+- **Upload path integration:** `UploadController` resolves Torque Pro's `v` query
+  param to a `Vehicle` by name, falling back to the user's default vehicle.
+  The resolved `vehicleId` is stored on `findOrCreate` of the session.
+
+- **Frontend:**
+  - `VehicleManager` (in Settings, `features/settings/VehicleManager.tsx`) —
+    full CRUD UI for vehicle profiles: add, edit, delete, set default. Replaces
+    the old `VehicleCard` component.
+  - Vehicle filter in `SessionBrowser` — a `<select>` dropdown filters the
+    session list by vehicle (`All vehicles`, specific vehicle, or `Unassigned`).
+  - Vehicle column in `SessionTable` — displays `vehicleName` or `(Unassigned)`.
+  - `VehicleReassignDialog` (in ReplayDashboard) — native `<dialog>` that lets
+    users reassign a session to a different vehicle or unassign it.
+
 ---
 
 ## 3. Frontend Internals (`apps/frontend/`)
@@ -197,11 +253,12 @@ src/
     tables/  SessionTable.tsx
     telemetry/ PidTogglePanel.tsx, DecodedMetricsTable.tsx
     ui/      Skeleton.tsx, ErrorAlert.tsx
+    vehicles/ VehicleReassignDialog.tsx
   features/
     auth/    Login.tsx, Register.tsx, useAuth.ts
     dashboard/ ReplayDashboard.tsx, PlaybackControls.tsx
     sessions/  SessionBrowser.tsx
-    settings/  SettingsPage.tsx
+    settings/  SettingsPage.tsx, VehicleManager.tsx
   lib/
     api.ts    # fetch wrapper, credentials:'include'
     types.ts
@@ -211,7 +268,9 @@ src/
 
 ### 3.2 Data fetching
 - **TanStack Query** drives all reads: `getSessions`, `getSession`,
-  `getTelemetry`.
+  `getTelemetry`, `getVehicles`.
+- **Mutations** use direct `fetch` via the `request()` wrapper: notes updates,
+  vehicle CRUD, session reassignment, and all settings changes.
 - **Auth** is cookie-based: every `fetch` uses `credentials: 'include'`. The
   SPA expects **401 JSON** from protected endpoints and redirects to `/login`
   on 401 (unless already on an auth page).
@@ -449,6 +508,8 @@ See `docs/deployment.md` for the full deployment guide.
 | `GET /api/sessions/:id/telemetry?from&to&limit` | cookie + owner | paged telemetry frames |
 | `GET /api/sessions/:id/export/csv` | cookie + owner | stream all telemetry as CSV with dynamic PID column discovery |
 | `PATCH /api/sessions/rename/:id` | cookie + owner | rename session (body: `{ name }`) |
+| `PATCH /api/sessions/notes/:sessionId` | cookie + owner | update session notes (body: `{ notes: string\|null }`) |
+| `PATCH /api/sessions/:sessionId/vehicle` | cookie + owner | reassign session to a vehicle or unassign (body: `{ vehicleId: number\|null }`) |
 | `DELETE /api/sessions/:id` | cookie + owner | delete a session |
 | `GET /api/sessions/:id/shared/:shareId` | shareId | shared view |
 | `POST /api/sessions/:id/analyze` | cookie + owner | trigger AI analysis for a session (SSE stream) |
@@ -458,6 +519,12 @@ See `docs/deployment.md` for the full deployment guide.
 | `PUT /api/settings` | cookie | update settings (disableRegistration, uploadApiToken, llmProvider, llmApiKey, llmModel, llmEndpoint, llmThinkingMode, llmReasoningEffort, vehicle fields) |
 | `POST /api/settings/upload-token` | cookie | generate a new upload API token (shown once) |
 | `POST /api/settings/test-llm` | cookie | test LLM connection (returns streaming response) |
+| `GET /api/vehicles` | cookie | list all vehicles for authenticated user |
+| `GET /api/vehicles/:vehicleId` | cookie | get a single vehicle |
+| `POST /api/vehicles` | cookie | create a new vehicle (body: `{ name, make?, model?, year?, engineCc? }`) |
+| `PUT /api/vehicles/:vehicleId` | cookie | update a vehicle (body: partial fields) |
+| `DELETE /api/vehicles/:vehicleId` | cookie | delete a vehicle (sessions unassigned via SET NULL) |
+| `PATCH /api/vehicles/:vehicleId/default` | cookie | set a vehicle as the user's default (unsets all others) |
 | `POST /api/upload` (`/upload` from Torque) | email-gated + **Bearer token required when `UPLOAD_API_TOKEN` is set** | ingest (401 without token) |
 | `GET /health` | none | probe |
 
@@ -465,10 +532,13 @@ See `docs/deployment.md` for the full deployment guide.
 > is now **resolved** — all endpoints return JSON/401 over `/api`. See
 > `docs/development.md → Known Issues` for history.
 
-**Session list pagination:** `GET /api/sessions` accepts `limit` (default 50,
-max 200) and `offset` query parameters. The response shape is
-`{ sessions: Session[], total: number, limit: number, offset: number }`. The
-frontend `SessionBrowser` paginates with a "Load More" button; `SessionTable`
+**Session list pagination and filtering:** `GET /api/sessions` accepts `limit`
+(default 50, max 200) and `offset` query parameters, plus an optional `vehicleId`
+filter (a numeric vehicle ID or `none` for unassigned sessions). The response
+shape is `{ sessions: Session[], total: number, limit: number, offset: number }`,
+with each session including `vehicleId` and `vehicleName` (resolved from the
+`Vehicle` association) plus `notes`. The frontend `SessionBrowser` paginates with
+a "Load More" button and provides a vehicle filter dropdown; `SessionTable`
 receives only the current page.
 
 **HTTP caching headers:** `GET /api/settings` and `GET /api/sessions` set

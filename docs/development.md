@@ -71,20 +71,33 @@ Set these at the backend repo root (`.env` or exported in the shell).
 
 ## 4. Running the Database Migration
 
-The TimescaleDB schema (`infra/timescale/log_hypertable.sql`) is applied
-manually, **not** on server boot:
+The migration script (`scripts/migrate.js`) loads **every `.sql` file** in
+`infra/timescale/` in lexicographic order and executes each statement via `pg`.
+It is run manually, **not** on server boot:
 
 ```sh
 node scripts/migrate.js
 ```
 
-It:
-1. Loads the SQL and splits it into individual statements.
-2. Runs each statement via `pg`; benign "already exists" / "does not exist"
+The script:
+1. Reads all `.sql` files from `infra/timescale/`, sorted by filename.
+2. Strips SQL comments and splits each file into individual statements on `;`.
+3. Runs each statement via `pg`; benign "already exists" / "does not exist"
    errors are tolerated (idempotent re-runs).
-3. Creates the `Logs` hypertable, promoted columns, the unique index on id (with
-   the `timestamp` partition column — required by TimescaleDB), and the `log_1min`
-   continuous aggregate.
+
+**Current migration files** (in execution order):
+
+| File | Purpose |
+| --- | --- |
+| `log_hypertable.sql` | Creates the `Logs` hypertable, promoted columns `engine_rpm` / `vehicle_speed`, unique index on `id`, and the `log_1min` continuous aggregate |
+| `settings.sql` | Seeds the `Settings` singleton row (misc global configuration) |
+| `003_add_llm_settings.sql` | Adds `llmProvider`, `llmModel`, `llmEndpoint`, `llmApiKey` columns to Settings |
+| `004_add_analyses_table.sql` | Creates the `Analyses` table for cached AI analysis results |
+| `005_add_analysis_reasoning.sql` | Adds `reasoning` column to `Analyses` (stores LLM chain-of-thought) |
+| `006_add_deepseek_settings.sql` | Adds `llmThinkingMode` and `llmReasoningEffort` columns to Settings |
+| `007_add_timezone_offset.sql` | Adds `timezoneOffset` column to Settings for session name formatting |
+| `008_add_session_notes.sql` | Adds nullable `notes` TEXT column to Sessions |
+| `009_add_vehicles.sql` | Creates the `Vehicles` table and adds `vehicleId` FK to Sessions |
 
 Run this against a **TimescaleDB-enabled** database (the `timescaledb` extension
 must exist). For large existing datasets, run in a maintenance window
@@ -105,7 +118,60 @@ node app.js
 
 ---
 
-## 6. Running the Frontend
+## 6. Model & Controller Patterns
+
+The Vehicle model (`models/Vehicle.js`) and controller
+(`controllers/VehicleController.js`) serve as the reference pattern for adding
+new entities. Key conventions:
+
+### 6.1 Model (`models/Vehicle.js`)
+- Sequelize model with explicit field types, `allowNull`, and `defaultValue`.
+- **Associations** defined in an `associate` function — projects `belongsTo`/`hasMany`
+  from both sides so Sequelize resolves foreign keys correctly.
+- Dynamically loaded by `models/index.js` (auto-reads all files in the `models/`
+  directory), no registration step needed.
+- Example from `Vehicle`:
+  ```js
+  Vehicle.associate = function (models) {
+      Vehicle.belongsTo(models.User, { as: 'User', foreignKey: 'userId' });
+      Vehicle.hasMany(models.Session, {
+          as: 'Sessions',
+          foreignKey: { name: 'vehicleId', allowNull: true },
+          onDelete: 'set null',
+      });
+  };
+  ```
+
+### 6.2 Controller (`controllers/VehicleController.js`)
+- Static methods on a class, one per action: `getAll`, `getOne`, `create`,
+  `update`, `delete`, plus domain-specific actions like `setDefault`.
+- **Ownership scoping** — every query includes `where: { userId: req.user.id }`
+  so users can only access their own data.
+- **Validation** — early returns with `4xx` JSON errors before database writes.
+- **Error handling** — try/catch with `console.error` + `500` JSON response.
+- No Express `router` registration in the controller — routes are defined in
+  `routes/api.js`.
+
+### 6.3 Routes (`routes/api.js`)
+- Route → controller mapping is explicit in `routes/api.js`:
+  ```js
+  const VehicleController = require('../controllers/VehicleController');
+  // ── Vehicle CRUD ──
+  router.get('/vehicles', authenticate, VehicleController.getAll);
+  router.post('/vehicles', writeLimiter, authenticate, VehicleController.create);
+  router.put('/vehicles/:vehicleId', writeLimiter, authenticate, VehicleController.update);
+  router.delete('/vehicles/:vehicleId', writeLimiter, authenticate, VehicleController.delete);
+  router.patch('/vehicles/:vehicleId/default', authenticate, VehicleController.setDefault);
+  ```
+- Write operations use `writeLimiter` rate limiter; reads use `authenticate` only.
+
+### 6.4 Migration SQL (`infra/timescale/009_add_vehicles.sql`)
+- Raw SQL with `IF NOT EXISTS` / idempotent guards. Lexicographic filename
+  ordering determines execution order (e.g. `008_` runs before `009_`).
+
+---
+
+## 7. Running the Frontend
 
 ### Dev server (Vite)
 ```sh
@@ -128,11 +194,31 @@ npm run build      # runs `tsc --noEmit && vite build` → apps/frontend/dist
 > origin/CDN or an nginx layer that proxies `/api` to the backend. See Known
 > Issues (LOW).
 
+### Frontend API client (`lib/api.ts`)
+
+The API client at `apps/frontend/src/lib/api.ts` provides typed fetch wrappers
+for all backend endpoints. New functions added in Plans 040–041:
+
+| Function | Endpoint | Purpose |
+| --- | --- | --- |
+| `getVehicles()` | `GET /api/vehicles` | List all vehicles |
+| `getVehicle(id)` | `GET /api/vehicles/:id` | Get a single vehicle |
+| `createVehicle(body)` | `POST /api/vehicles` | Create a new vehicle |
+| `updateVehicle(id, body)` | `PUT /api/vehicles/:id` | Update a vehicle |
+| `deleteVehicle(id)` | `DELETE /api/vehicles/:id` | Delete a vehicle |
+| `setDefaultVehicle(id)` | `PATCH /api/vehicles/:id/default` | Set as default vehicle |
+| `reassignSessionVehicle(sessionId, vehicleId)` | `PATCH /api/sessions/:sessionId/vehicle` | Reassign session to a vehicle |
+| `updateSessionNotes(sessionId, notes)` | `PATCH /api/sessions/notes/:sessionId` | Update session notes |
+
+All functions use `request()` with `credentials: 'include'` for cookie-based
+auth. Vehicle types (`Vehicle`, `UpdateVehicle`) and the extended `Session`
+type (with `notes`, `vehicleId`, `vehicleName`) are defined in `lib/types.ts`.
+
 ---
 
-## 7. Development Tooling
+## 8. Development Tooling
 
-### 7.1 ESLint
+### 8.1 ESLint
 
 The project uses **ESLint 8** for backend code with a project-local `.eslintrc.js`
 configuration:
@@ -148,7 +234,7 @@ The config (`node` env, `es2022`, `eslint:recommended`) ignores
 - `no-console` is **off** — the server intentionally uses `console.log`/`console.error`.
 - `no-empty` is `error` — empty catch blocks are forbidden.
 
-### 7.2 Pre-commit Hooks (husky + lint-staged)
+### 8.2 Pre-commit Hooks (husky + lint-staged)
 
 The project uses **husky 9** and **lint-staged 17** to run lint and syntax checks
 on every commit:
@@ -168,7 +254,7 @@ on every commit:
 > First-time setup: run `npm install` (or `npm run prepare`) to initialise the
 > husky hooks directory (`.husky/`).
 
-### 7.3 CI Pipeline
+### 8.3 CI Pipeline
 
 A **GitHub Actions** workflow (`.github/workflows/ci.yml`) runs on every push
 or pull request to the `development` branch:
@@ -180,7 +266,7 @@ The workflow uses `actions/checkout@v7` and `actions/setup-node@v7` with npm
 caching. The lint step is now **enforced** — the previous `continue-on-error: true`
 has been removed, so ESLint failures correctly block the build.
 
-### 7.4 Versioning
+### 8.4 Versioning
 
 A **Version Bump** workflow (`.github/workflows/version-bump.yml`) runs on every
 push to `master`. It:
@@ -204,7 +290,7 @@ pinned deployments.
 
 ---
 
-## 8. Known Issues / Follow-up Items
+## 9. Known Issues / Follow-up Items
 
 These are documented issues from code reviews. Severity is assigned per the review.
 
@@ -321,7 +407,7 @@ blockers are resolved and re-reviewed as PASS:
 
 ---
 
-## 9. Status
+## 10. Status
 
 - **Core features complete:** ingestion, TimescaleDB migration, paged telemetry,
   React replay dashboard (overlay chart + imperative Leaflet marker), CSV export,
@@ -352,16 +438,18 @@ blockers are resolved and re-reviewed as PASS:
   - **SSRF guard** (`lib/ssrfGuard.js`) validates custom LLM endpoints.
   - Docker-based deployment with GHCR images (`docker-compose.yml`).
   - Non-root backend container (`appuser`), unprivileged nginx frontend.
-- **Session list pagination** — `GET /api/sessions` now accepts `limit` (default 50, max 200) and `offset` query params, returning `{ sessions, total, limit, offset }`. The frontend `SessionBrowser` paginates via a "Load More" button.
+- **Session list pagination + vehicle filtering** — `GET /api/sessions` accepts `limit`, `offset`, and `vehicleId` query params (returns `{ sessions, total, limit, offset }` with `vehicleId`/`vehicleName` per session). The frontend `SessionBrowser` paginates via a "Load More" button and provides a vehicle filter dropdown.
 - **Dev tooling:** ESLint 8 (`.eslintrc.js`), husky 9 + lint-staged 17
   (pre-commit lint + syntax check), CI pipeline (`.github/workflows/ci.yml`)
   running on push/PR to `development`, and automated semver version bump
   (`.github/workflows/version-bump.yml`) on push to `master`.
-- **Remaining open issues:** SSRF TOCTOU (documented in section 8 above).
+- **Session Notes (Plan 040)** — `notes` TEXT column on Sessions, `PATCH /api/sessions/notes/:sessionId` endpoint, auto-save textarea in the replay dashboard. Migration: `008_add_session_notes.sql`.
+- **Multi-Vehicle Support (Plan 041)** — full `Vehicle` model (name, make, model, year, engineCc, isDefault) with userId FK. Sessions gain nullable `vehicleId` FK. CRUD endpoints at `/api/vehicles/*`, session reassign via `PATCH /api/sessions/:sessionId/vehicle`. UploadController resolves Torque's `v` param to a vehicle. Frontend: `VehicleManager` in Settings with add/edit/delete/default, vehicle filter in session list, vehicle column in session table, reassign dialog in replay dashboard. Migration: `009_add_vehicles.sql`.
+- **Remaining open issues:** SSRF TOCTOU (documented in section 9 above — Known Issues / Follow-up Items).
 
 ---
 
-## 10. Alternative Setup Methods
+## 11. Alternative Setup Methods
 
 The sections below cover building from source and manual (non-Docker) setup. For
 most users, the Docker quick start in the README or the full deployment guide
