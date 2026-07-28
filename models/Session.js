@@ -16,6 +16,11 @@ module.exports = (sequelize, DataTypes) => {
         endLocation: {
             type: DataTypes.STRING,
             defaultValue: '-'
+        },
+        notes: {
+            type: DataTypes.TEXT,
+            allowNull: true,
+            defaultValue: null,
         }
     }, {});
 

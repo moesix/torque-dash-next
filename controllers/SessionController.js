@@ -170,6 +170,23 @@ class SessionController {
             res.status(500).json({ error: 'Internal server error' });
         }
     }
+    static async updateNotes(req, res) {
+        try {
+            const { notes } = req.body;
+            if (notes !== undefined && notes !== null && typeof notes !== 'string') {
+                return res.status(400).json({ error: 'notes must be a string or null.' });
+            }
+            const session = await Session.findOne({
+                where: { id: req.params.sessionId, userId: req.user.id }
+            });
+            if (!session) return res.status(404).json({ error: 'Session not found' });
+            await session.update({ notes: notes || null });
+            res.json({ ok: true, notes: session.notes });
+        } catch (err) {
+            console.error('[SessionController]', err);
+            res.status(500).json({ error: 'Internal server error' });
+        }
+    }
     static async addLocation(req, res) {
         try {
             let session = await Session.findOne({

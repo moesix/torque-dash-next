@@ -100,6 +100,7 @@ router.get('/sessions/:id/telemetry', authenticate, TelemetryController.range);
 
 router.patch('/sessions/rename/:sessionId', authenticate, SessionController.rename);
 router.patch('/sessions/addlocation/:sessionId', authenticate, SessionController.addLocation);
+router.patch('/sessions/notes/:sessionId', authenticate, SessionController.updateNotes);
 router.patch('/sessions/filter/:sessionId', authenticate, SessionController.filter);
 router.patch('/sessions/cut/:sessionId', authenticate, SessionController.cut);
 router.post('/sessions/copy/:sessionId', authenticate, SessionController.copy);

@@ -41,6 +41,8 @@ export interface Session {
   userId: number;
   startLocation?: string | null;
   endLocation?: string | null;
+  /** Freeform user notes attached to this session. */
+  notes?: string | null;
   /** Populated by the backend's aggregateSummaries() query. */
   startDate?: string;
   endDate?: string;

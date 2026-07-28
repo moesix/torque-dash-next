@@ -17,7 +17,7 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
 import { Card, Title } from '@tremor/react';
-import { getSession, getTelemetry, exportSessionCsv } from '@/lib/api';
+import { getSession, getTelemetry, exportSessionCsv, updateSessionNotes } from '@/lib/api';
 import type { AnalysisPanelHandle } from '@/components/ai/AnalysisPanel';
 import Skeleton from '@/components/ui/Skeleton';
 import ErrorAlert from '@/components/ui/ErrorAlert';
@@ -89,6 +89,15 @@ export default function ReplayDashboard() {
   const analysisDialogRef = useRef<HTMLDialogElement | null>(null);
   const analysisPanelRef = useRef<AnalysisPanelHandle>(null);
   const [showAnalysisConfirm, setShowAnalysisConfirm] = useState(false);
+  const [notes, setNotes] = useState<string>('');
+  const [notesSaving, setNotesSaving] = useState(false);
+
+  // Sync notes state when session data loads
+  useEffect(() => {
+    if (sessionQuery.data) {
+      setNotes(sessionQuery.data.notes ?? '');
+    }
+  }, [sessionQuery.data]);
 
   // Safari fallback for closedby="any" (light-dismiss)
   useEffect(() => {
@@ -312,6 +321,35 @@ export default function ReplayDashboard() {
             )}
           </div>
         </div>
+      </div>
+
+      {/* Session notes */}
+      <div className="animate-slide-up rounded-lg bg-white px-4 py-3 shadow-xs dark:bg-[var(--bg-card)]">
+        <label htmlFor="session-notes" className="mb-1 block text-sm font-medium text-gray-700 dark:text-[var(--text-secondary)]">
+          Notes
+        </label>
+        <textarea
+          id="session-notes"
+          rows={3}
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          onBlur={async () => {
+            if (!id) return;
+            setNotesSaving(true);
+            try {
+              await updateSessionNotes(id, notes.trim() || null);
+            } catch {
+              // Silently ignore
+            } finally {
+              setNotesSaving(false);
+            }
+          }}
+          placeholder="Add notes about this session..."
+          className="w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm shadow-xs focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500 dark:border-[var(--border-default)] dark:bg-[var(--bg-surface)] dark:text-[var(--text-primary)] dark:focus:border-teal-400"
+        />
+        {notesSaving && (
+          <span className="text-xs text-gray-400 dark:text-[var(--text-muted)]">Saving...</span>
+        )}
       </div>
 
       {/* Playback controls — full width */}

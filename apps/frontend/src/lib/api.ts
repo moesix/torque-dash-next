@@ -162,6 +162,17 @@ export async function renameSession(
   });
 }
 
+/** Update session notes. */
+export async function updateSessionNotes(
+  sessionId: string,
+  notes: string | null,
+): Promise<void> {
+  await request(`/api/sessions/notes/${sessionId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ notes }),
+  });
+}
+
 // ── BYOK LLM Analysis ─────────────────────────────────────────────────
 
 /** Update LLM provider and vehicle settings. */
