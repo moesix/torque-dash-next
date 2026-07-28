@@ -79,8 +79,9 @@ which enforces ownership (or `?shareId=` for shared sessions) and returns
   null lat/lon (no longer dropped).
 - **Promoted columns:** `engineRpm` ← `values.kc` (PID 0x0C), `vehicleSpeed` ← `values.kd` (PID 0x0D). Torque stores hex keys **without leading zeros**, so the key is `kc`, not `k0c`. Values are extracted with a zero‑safe pattern: `values.kc != null ? Number(values.kc) : null` (preserves legitimate `0` values).
 - **Auto-naming:** new sessions are automatically named `Trip DDMMYYYY h:mmA`
-  using `moment(Number(time))` (local time from the Torque `time` param).
-  The format uses 12-hour clock with AM/PM for human-readable session names.
+  (12-hour clock with AM/PM) using `Date` arithmetic adjusted by the user's
+  `timezoneOffset` from the `Settings` singleton (stored in minutes, e.g. `480`
+  for UTC+8). The `moment` dependency previously used here has been removed.
 - **SSRF-guarded `forwardUrls`:** each URL is checked with `lib/ssrfGuard.isSafeUrl`
   before a fire-and-forget `fetch`.
 - Responds `200 OK` immediately; the DB flush is asynchronous.
@@ -161,6 +162,19 @@ which enforces ownership (or `?shareId=` for shared sessions) and returns
   copy.
 - **Key format** — Torque hex keys **without leading zeros** (e.g. `k5`, `kc`,
   `kd`, `kf`, `kff1007`). No entries use zero-padded variants.
+
+### 2.7 Security Headers (Helmet)
+
+- **Helmet middleware** (`app.js`) applies a standard set of HTTP security headers
+  to all responses: `X-Content-Type-Options: nosniff`, `X-Frame-Options:
+  SAMEORIGIN`, `X-XSS-Protection: 0` (modern browsers ignore this, but it's kept
+  for safety), `Strict-Transport-Security` (set at the nginx layer), and others.
+- **CSP disabled** — `contentSecurityPolicy: false` is passed to Helmet because
+  the React SPA relies on inline scripts and styles. A future plan should enable
+  CSP via nonces or hashes.
+- **nginx HSTS** — the frontend nginx config (`apps/frontend/nginx.conf`) adds
+  `Strict-Transport-Security: max-age=31536000; includeSubDomains` to enforce
+  HTTPS for one year.
 
 ---
 
@@ -430,7 +444,7 @@ See `docs/deployment.md` for the full deployment guide.
 | `POST /api/users/change-password` | cookie | change password (requires currentPassword + newPassword; regenerates session) |
 | `POST /api/users/logout` | cookie | logout |
 | `GET /api/version` | none | returns `{ version: string }` from package.json |
-| `GET /api/sessions` | cookie | list sessions (summary) |
+| `GET /api/sessions?limit&offset` | cookie | list sessions (paginated: `{ sessions, total, limit, offset }`) |
 | `GET /api/sessions/:id` | cookie + owner | session metadata (no full logs) |
 | `GET /api/sessions/:id/telemetry?from&to&limit` | cookie + owner | paged telemetry frames |
 | `GET /api/sessions/:id/export/csv` | cookie + owner | stream all telemetry as CSV with dynamic PID column discovery |
@@ -450,3 +464,13 @@ See `docs/deployment.md` for the full deployment guide.
 > See `routes/api.js` for the authoritative route table. The SPA auth contract
 > is now **resolved** — all endpoints return JSON/401 over `/api`. See
 > `docs/development.md → Known Issues` for history.
+
+**Session list pagination:** `GET /api/sessions` accepts `limit` (default 50,
+max 200) and `offset` query parameters. The response shape is
+`{ sessions: Session[], total: number, limit: number, offset: number }`. The
+frontend `SessionBrowser` paginates with a "Load More" button; `SessionTable`
+receives only the current page.
+
+**HTTP caching headers:** `GET /api/settings` and `GET /api/sessions` set
+`Cache-Control: private, max-age=30` to reduce redundant requests on the fast
+read paths without risking stale data for more than 30 seconds.

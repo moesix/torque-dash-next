@@ -18,4 +18,14 @@ export default defineConfig({
       },
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'react-markdown': ['react-markdown'],
+          'rehype-highlight': ['rehype-highlight'],
+        },
+      },
+    },
+  },
 });

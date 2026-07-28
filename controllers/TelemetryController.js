@@ -39,7 +39,7 @@ class TelemetryController {
             res.json(rows);
         } catch (err) {
             console.error('[TelemetryController.range]', err);
-            res.sendStatus(500);
+            res.status(500).json({ error: 'Internal server error' });
         }
     }
 }

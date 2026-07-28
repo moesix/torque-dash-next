@@ -43,7 +43,7 @@ export default function AiProviderCard({ settings, onUpdate }: Props) {
         body.llmReasoningEffort = reasoningEffort;
       }
       const updated = await updateLlmSettings(body);
-      onUpdate(updated);
+      if (updated) onUpdate(updated);
       setApiKey('');
       setTestResult(null);
     } catch {
@@ -59,7 +59,9 @@ export default function AiProviderCard({ settings, onUpdate }: Props) {
     setError(null);
     try {
       const res = await testLlmConnection();
-      if (res.ok) {
+      if (!res) {
+        setError('Connection test returned no response.');
+      } else if (res.ok) {
         setTestResult(`Connected! Response: "${res.response}"`);
       } else {
         setError(res.error || 'Test failed');

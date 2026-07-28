@@ -16,7 +16,7 @@ export default function Register() {
 
   useEffect(() => {
     getSettings()
-      .then((s) => setDisabled(s.disableRegistration))
+      .then((s) => setDisabled(s?.disableRegistration ?? false))
       .catch(() => setDisabled(false));
   }, []);
 

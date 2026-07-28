@@ -4,7 +4,6 @@ const Session = require('../models').Session;
 const Settings = require('../models').Settings;
 const userCache = require('../lib/userCache');
 const ssrfGuard = require('../lib/ssrfGuard');
-const moment = require('moment');
 const ingestBuffer = require('../services/ingestBuffer');
 const runtime = require('../config/runtime');
 
@@ -68,8 +67,10 @@ class UploadController {
                 // Fetch the user's timezone offset (minutes from UTC, e.g. 480 for UTC+8)
                 const settings = await Settings.getSingleton();
                 const offsetMinutes = settings?.timezoneOffset ?? 0;
-                const ts = moment(Number(time)).utcOffset(offsetMinutes);
-                const name = `Trip ${ts.format('DDMMYYYY h:mmA')}`;
+                const d = new Date(Number(time));
+                const ts = new Date(d.getTime() + offsetMinutes * 60000);
+                const pad = (n) => String(n).padStart(2, '0');
+                const name = `Trip ${pad(ts.getDate())}${pad(ts.getMonth() + 1)}${ts.getFullYear()} ${ts.getHours() % 12 || 12}:${pad(ts.getMinutes())}${ts.getHours() >= 12 ? 'PM' : 'AM'}`;
                 await sess.update({ name });
             }
 
@@ -108,7 +109,7 @@ class UploadController {
                 });
             }
         } catch (err) {
-            res.sendStatus(500);
+            res.status(500).json({ error: 'Internal server error' });
             console.error(err.message || err);
         }
     }

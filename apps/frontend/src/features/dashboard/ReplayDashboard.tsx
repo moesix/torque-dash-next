@@ -13,12 +13,11 @@
  *   pattern that threw RangeError on large datasets.
  */
 
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
 import { Card, Title } from '@tremor/react';
 import { getSession, getTelemetry, exportSessionCsv } from '@/lib/api';
-import AnalysisPanel from '@/components/ai/AnalysisPanel';
 import type { AnalysisPanelHandle } from '@/components/ai/AnalysisPanel';
 import Skeleton from '@/components/ui/Skeleton';
 import ErrorAlert from '@/components/ui/ErrorAlert';
@@ -32,6 +31,8 @@ import PidTogglePanel from '@/components/telemetry/PidTogglePanel';
 import DecodedMetricsTable from '@/components/telemetry/DecodedMetricsTable';
 import { getAvailableSeries, getSeriesData, coerceScalar } from '@/lib/pidDecode';
 import type { SeriesSource } from '@/lib/types';
+
+const AnalysisPanel = React.lazy(() => import('@/components/ai/AnalysisPanel'));
 
 // ── Constants ────────────────────────────────────────────────────────────
 
@@ -449,7 +450,9 @@ export default function ReplayDashboard() {
 
       {/* AI Analysis panel — at the bottom */}
       <div id="ai-analysis-panel" className="animate-slide-up-delay-5">
-        <AnalysisPanel ref={analysisPanelRef} sessionId={id as string} />
+        <React.Suspense fallback={<div className="text-sm text-gray-400 p-4">Loading analysis panel...</div>}>
+          <AnalysisPanel ref={analysisPanelRef} sessionId={id as string} />
+        </React.Suspense>
       </div>
     </div>
   );
