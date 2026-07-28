@@ -232,6 +232,49 @@ which enforces ownership (or `?shareId=` for shared sessions) and returns
   - `VehicleReassignDialog` (in ReplayDashboard) — native `<dialog>` that lets
     users reassign a session to a different vehicle or unassign it.
 
+### 2.10 `lib/llmPrompt.js` — AI Analysis Prompt Builder
+
+The AI analysis prompt is assembled in `lib/llmPrompt.js`, which exports five
+functions used by `controllers/AnalysisController.js` to build the LLM prompt
+from session telemetry:
+
+- **`buildContext(session, settings, telemetrySample, pidKeys)`** — Generates the
+  vehicle/session context block (vehicle make/model/year, engine displacement,
+  session name, location, duration, data point count, discovered PID keys).
+- **`computeSummaryStats(telemetrySample, pidKeys)`** — Pre-computes min, max,
+  mean, and median for every numeric PID across the full telemetry sample.
+  Also computes Combined Fuel Trim (STFT + LTFT) per-row to prevent index
+  misalignment from dropped packets. Filters null/empty values before `Number()`
+  conversion to avoid data corruption (`Number(null) === 0`).
+- **`resampleTelemetry(telemetrySample, maxRows = 80)`** — Uniformly resamples
+  telemetry across the full timeline rather than taking a head/tail slice.
+  Ensures the LLM receives data from the start, middle cruising phase, and end
+  of every drive.
+- **`buildTelemetryCsv(telemetrySample, pidKeys)`** — Outputs raw CSV instead of
+  Markdown tables, saving ~30% on LLM tokens. Strips lat/lon columns and
+  extracts `HH:mm:ss` from timestamps via regex. Uses `resampleTelemetry()`
+  internally.
+- **`buildAnalysisPrompt(session, settings, telemetrySample, pidKeys)`** —
+  Assembles the full analysis prompt by composing all of the above. Includes
+  pre-calculated statistical aggregates with units, four diagnostic guardrails
+  (fuel trim physics, A/C idle behaviour, ECU torque management, deceleration
+  fuel cut-off), dynamic engine size injection, and five specific analysis
+  categories.
+
+**Key architectural decisions:**
+
+- **Statistics computed in JS, not by the LLM.** Summary statistics are
+  pre-computed server-side so the LLM works from exact values rather than having
+  to estimate from sampled rows. This eliminates hallucinated min/max figures.
+- **Diagnostic guardrails encoded in the prompt.** Domain-specific rules (e.g.
+  "combined fuel trim within ±10% is normal closed-loop operation") prevent the
+  LLM from over-diagnosing standard OBD-II operating quirks as mechanical faults.
+- **Uniform resampling.** The resampler picks evenly-spaced rows across the
+  entire timeline, ensuring the LLM sees data from every phase of the drive
+  rather than just the start and end.
+- **CSV over Markdown.** CSV is more token-efficient than Markdown tables for
+  the same telemetry data, reducing per-analysis cost.
+
 ---
 
 ## 3. Frontend Internals (`apps/frontend/`)

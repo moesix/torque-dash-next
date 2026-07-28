@@ -216,9 +216,57 @@ type (with `notes`, `vehicleId`, `vehicleName`) are defined in `lib/types.ts`.
 
 ---
 
-## 8. Development Tooling
+## 8. AI Analysis — Prompt Pipeline
 
-### 8.1 ESLint
+The AI analysis feature (`POST /api/sessions/:id/analyze`) streams diagnostic
+insights from an OpenAI-compatible LLM. The prompt is built by
+`lib/llmPrompt.js`, which after Plan 042 exports five functions instead of the
+previous two.
+
+### 8.1 Prompt Assembly Flow
+
+```
+POST /api/sessions/:id/analyze
+  → controllers/AnalysisController.js
+  → lib/llmPrompt.buildAnalysisPrompt(session, settings, telemetrySample, pidKeys)
+      ├── buildContext(...)         → vehicle info, session metadata
+      ├── computeSummaryStats(...)  → min/max/mean/median per PID
+      ├── buildTelemetryCsv(...)    → resampled CSV telemetry data
+      └── returns full prompt text → sent to LLM provider
+```
+
+### 8.2 Key Functions
+
+| Function | Purpose |
+|----------|---------|
+| `computeSummaryStats(telemetrySample, pidKeys)` | Pre-computes min, max, mean, median for every PID. Filters null/empty values before numeric conversion to avoid `Number(null) === 0` corruption. Also computes Combined Fuel Trim (STFT + LTFT) per-row. |
+| `resampleTelemetry(telemetrySample, maxRows = 80)` | Uniform resampling across the full timeline (replaces the older head/tail slicing approach). Ensures the LLM sees data from start, middle, and end of every drive. |
+| `buildTelemetryCsv(telemetrySample, pidKeys)` | Outputs raw CSV instead of Markdown tables (~30% token savings). Removes lat/lon columns. Extracts `HH:mm:ss` via regex. Calls `resampleTelemetry()` internally. |
+| `buildContext(session, settings, telemetrySample, pidKeys)` | Builds the vehicle/session context block with cleaner formatting and a "Data points in sample" label. |
+| `buildAnalysisPrompt(session, settings, telemetrySample, pidKeys)` | Assembles the complete prompt from all of the above. Includes pre-calculated stats, four diagnostic guardrails, dynamic engine size, and five analysis categories. |
+
+### 8.3 Design Notes
+
+- **Statistics pre-computed in JS** — exact min/max/mean/median values are
+  calculated server-side, so the LLM does not need to estimate them from sampled
+  rows. This eliminates hallucinated figures in the analysis.
+- **Uniform resampling** — evenly-spaced rows across the full telemetry range
+  (start, middle cruising, end) replace the older approach of keeping only the
+  first and last N rows.
+- **CSV format** — saves approximately 30% of tokens compared to Markdown tables
+  for the same telemetry sample, reducing per-analysis cost.
+- **Diagnostic guardrails** — four domain-specific rules encoded in the prompt
+  prevent the LLM from flagging normal OBD-II behaviour (negative fuel trims
+  within ±10%, A/C idle load, ECU torque management timing, deceleration fuel
+  cut-off) as mechanical faults.
+- **`lib/pidRegistry.js`** is imported to resolve PID short keys to human-readable
+  names and units in both CSV column headers and the stats display.
+
+---
+
+## 9. Development Tooling
+
+### 9.1 ESLint
 
 The project uses **ESLint 8** for backend code with a project-local `.eslintrc.js`
 configuration:
@@ -234,7 +282,7 @@ The config (`node` env, `es2022`, `eslint:recommended`) ignores
 - `no-console` is **off** — the server intentionally uses `console.log`/`console.error`.
 - `no-empty` is `error` — empty catch blocks are forbidden.
 
-### 8.2 Pre-commit Hooks (husky + lint-staged)
+### 9.2 Pre-commit Hooks (husky + lint-staged)
 
 The project uses **husky 9** and **lint-staged 17** to run lint and syntax checks
 on every commit:
@@ -254,7 +302,7 @@ on every commit:
 > First-time setup: run `npm install` (or `npm run prepare`) to initialise the
 > husky hooks directory (`.husky/`).
 
-### 8.3 CI Pipeline
+### 9.3 CI Pipeline
 
 A **GitHub Actions** workflow (`.github/workflows/ci.yml`) runs on every push
 or pull request to the `development` branch:
@@ -266,7 +314,7 @@ The workflow uses `actions/checkout@v7` and `actions/setup-node@v7` with npm
 caching. The lint step is now **enforced** — the previous `continue-on-error: true`
 has been removed, so ESLint failures correctly block the build.
 
-### 8.4 Versioning
+### 9.4 Versioning
 
 A **Version Bump** workflow (`.github/workflows/version-bump.yml`) runs on every
 push to `master`. It:
@@ -290,7 +338,7 @@ pinned deployments.
 
 ---
 
-## 9. Known Issues / Follow-up Items
+## 10. Known Issues / Follow-up Items
 
 These are documented issues from code reviews. Severity is assigned per the review.
 
@@ -407,7 +455,7 @@ blockers are resolved and re-reviewed as PASS:
 
 ---
 
-## 10. Status
+## 11. Status
 
 - **Core features complete:** ingestion, TimescaleDB migration, paged telemetry,
   React replay dashboard (overlay chart + imperative Leaflet marker), CSV export,
@@ -445,11 +493,12 @@ blockers are resolved and re-reviewed as PASS:
   (`.github/workflows/version-bump.yml`) on push to `master`.
 - **Session Notes (Plan 040)** — `notes` TEXT column on Sessions, `PATCH /api/sessions/notes/:sessionId` endpoint, auto-save textarea in the replay dashboard. Migration: `008_add_session_notes.sql`.
 - **Multi-Vehicle Support (Plan 041)** — full `Vehicle` model (name, make, model, year, engineCc, isDefault) with userId FK. Sessions gain nullable `vehicleId` FK. CRUD endpoints at `/api/vehicles/*`, session reassign via `PATCH /api/sessions/:sessionId/vehicle`. UploadController resolves Torque's `v` param to a vehicle. Frontend: `VehicleManager` in Settings with add/edit/delete/default, vehicle filter in session list, vehicle column in session table, reassign dialog in replay dashboard. Migration: `009_add_vehicles.sql`.
-- **Remaining open issues:** SSRF TOCTOU (documented in section 9 above — Known Issues / Follow-up Items).
+- **Improved LLM Analysis Prompt (Plan 042)** — `lib/llmPrompt.js` was rewritten with five exported functions (up from two): `computeSummaryStats()` pre-computes min/max/mean/median per PID with null-safe filtering; `resampleTelemetry()` uniformly resamples across the full timeline replacing head/tail slicing; `buildTelemetryCsv()` outputs token-efficient CSV instead of Markdown tables; `buildContext()` and `buildAnalysisPrompt()` were cleaned up and now include pre-calculated statistical aggregates, four diagnostic guardrails, dynamic engine size injection, and five specific analysis categories. See section 8 for full details.
+- **Remaining open issues:** SSRF TOCTOU (documented in section 10 above — Known Issues / Follow-up Items).
 
 ---
 
-## 11. Alternative Setup Methods
+## 12. Alternative Setup Methods
 
 The sections below cover building from source and manual (non-Docker) setup. For
 most users, the Docker quick start in the README or the full deployment guide
