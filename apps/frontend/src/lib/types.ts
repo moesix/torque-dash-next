@@ -43,6 +43,10 @@ export interface Session {
   endLocation?: string | null;
   /** Freeform user notes attached to this session. */
   notes?: string | null;
+  /** The vehicle this session is assigned to. */
+  vehicleId?: number | null;
+  /** Resolved vehicle name from the Vehicle model. */
+  vehicleName?: string | null;
   /** Populated by the backend's aggregateSummaries() query. */
   startDate?: string;
   endDate?: string;
@@ -52,6 +56,29 @@ export interface Session {
   maxSpeed?: number | null;
   /** Pre-computed summary: peak engine RPM (from `engine_rpm`). */
   maxRpm?: number | null;
+}
+
+/** A vehicle profile. */
+export interface Vehicle {
+  id: number;
+  name: string;
+  make: string | null;
+  model: string | null;
+  year: number | null;
+  engineCc: number | null;
+  isDefault: boolean;
+  userId: number;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+/** Request body for creating/updating a vehicle. */
+export interface UpdateVehicle {
+  name?: string;
+  make?: string | null;
+  model?: string | null;
+  year?: number | null;
+  engineCc?: number | null;
 }
 
 /** Global site settings, read via GET /api/settings. */

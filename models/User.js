@@ -34,6 +34,11 @@ module.exports = (sequelize, DataTypes) => {
             foreignKey: 'userId',
             onDelete: 'cascade'
         });
+        User.hasMany(models.Vehicle, {
+            as: 'Vehicles',
+            foreignKey: 'userId',
+            onDelete: 'cascade'
+        });
     };
 
     // Static method for user data validation

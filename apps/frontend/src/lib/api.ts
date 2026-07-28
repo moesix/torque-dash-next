@@ -7,6 +7,8 @@ import type {
   Analysis,
   UpdateLlmSettings,
   TestLlmResponse,
+  Vehicle,
+  UpdateVehicle,
 } from './types';
 
 /**
@@ -109,8 +111,15 @@ export interface PaginatedSessions {
   offset: number;
 }
 
-export async function getSessions(limit = 50, offset = 0): Promise<PaginatedSessions | undefined> {
-  return request<PaginatedSessions>(`/api/sessions?limit=${limit}&offset=${offset}`);
+export async function getSessions(
+  limit = 50,
+  offset = 0,
+  vehicleId?: number | 'none' | null,
+): Promise<PaginatedSessions | undefined> {
+  let url = `/api/sessions?limit=${limit}&offset=${offset}`;
+  if (vehicleId === 'none') url += '&vehicleId=none';
+  else if (vehicleId != null) url += `&vehicleId=${vehicleId}`;
+  return request<PaginatedSessions>(url);
 }
 
 export async function getSession(id: string): Promise<Session | undefined> {
@@ -259,6 +268,58 @@ export async function exportSessionCsv(sessionId: string): Promise<void> {
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
+}
+
+// ── Vehicle CRUD ──────────────────────────────────────────────────────
+
+/** List all vehicles for the current user. */
+export async function getVehicles(): Promise<Vehicle[] | undefined> {
+  return request<Vehicle[]>('/api/vehicles');
+}
+
+/** Get a single vehicle. */
+export async function getVehicle(id: number): Promise<Vehicle | undefined> {
+  return request<Vehicle>(`/api/vehicles/${id}`);
+}
+
+/** Create a new vehicle. */
+export async function createVehicle(body: UpdateVehicle): Promise<Vehicle | undefined> {
+  return request<Vehicle>('/api/vehicles', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+/** Update a vehicle. */
+export async function updateVehicle(
+  id: number,
+  body: UpdateVehicle,
+): Promise<Vehicle | undefined> {
+  return request<Vehicle>(`/api/vehicles/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+}
+
+/** Delete a vehicle. */
+export async function deleteVehicle(id: number): Promise<void> {
+  await request(`/api/vehicles/${id}`, { method: 'DELETE' });
+}
+
+/** Set a vehicle as default. */
+export async function setDefaultVehicle(id: number): Promise<Vehicle | undefined> {
+  return request<Vehicle>(`/api/vehicles/${id}/default`, { method: 'PATCH' });
+}
+
+/** Reassign a session to a different vehicle. */
+export async function reassignSessionVehicle(
+  sessionId: string,
+  vehicleId: number | null,
+): Promise<void> {
+  await request(`/api/sessions/${sessionId}/vehicle`, {
+    method: 'PATCH',
+    body: JSON.stringify({ vehicleId }),
+  });
 }
 
 // ── Version ─────────────────────────────────────────────────────────────

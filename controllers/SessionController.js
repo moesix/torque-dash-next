@@ -1,6 +1,7 @@
 const Session = require('../models').Session;
 const Log = require('../models').Log;
 const User = require('../models').User;
+const Vehicle = require('../models').Vehicle;
 const sequelize = require('../models').sequelize;
 const Op = require('../models').Sequelize.Op;
 const { nanoid } = require('nanoid');
@@ -26,7 +27,13 @@ class SessionController {
                 where: { 
                     userId: req.user.id ,
                     id: req.params.sessionId
-                }
+                },
+                include: [{
+                    model: Vehicle,
+                    as: 'Vehicle',
+                    attributes: ['id', 'name', 'make', 'model', 'year'],
+                    required: false,
+                }]
             });
             if(!session) return res.status(404).send('Resource not found');
 
@@ -39,6 +46,8 @@ class SessionController {
             out.duration = formatDuration(s.start, s.end);
             out.maxSpeed = (s.maxSpeed != null) ? s.maxSpeed : null;
             out.maxRpm = (s.maxRpm != null) ? s.maxRpm : null;
+            out.vehicleId = session.vehicleId || null;
+            out.vehicleName = session.Vehicle?.name || null;
             res.json(out);
         }
         catch (err) {
@@ -50,6 +59,7 @@ class SessionController {
         try {
             const limit = Math.min(parseInt(req.query.limit, 10) || 50, 200);
             const offset = parseInt(req.query.offset, 10) || 0;
+            const vehicleId = req.query.vehicleId ? Number(req.query.vehicleId) : null;
 
             // Check if user exists
             let user = await User.findOne({
@@ -57,15 +67,26 @@ class SessionController {
             });
             if(!user) return res.status(401).json({ error: 'User not found' });
 
+            // Build where clause with optional vehicleId filter
+            const where = { userId: user.id };
+            if (vehicleId) where.vehicleId = vehicleId;
+            else if (req.query.vehicleId === 'none') where.vehicleId = null;
+
             // Get paginated sessions for user (no eager Log load)
             let sessions = await Session.findAll({
-                where: { userId: user.id },
+                where,
+                include: [{
+                    model: Vehicle,
+                    as: 'Vehicle',
+                    attributes: ['id', 'name', 'make', 'model', 'year'],
+                    required: false,
+                }],
                 limit,
                 offset,
                 order: [['createdAt', 'DESC']]
             });
 
-            const total = await Session.count({ where: { userId: user.id } });
+            const total = await Session.count({ where });
 
             // ONE grouped aggregate query across fetched session ids — never per-session.
             const summaries = await aggregateSummaries(sessions.map(s => s.id));
@@ -77,6 +98,8 @@ class SessionController {
                 json.duration = formatDuration(s.start, s.end);
                 json.maxSpeed = (s.maxSpeed != null) ? s.maxSpeed : null;
                 json.maxRpm = (s.maxRpm != null) ? s.maxRpm : null;
+                json.vehicleId = session.vehicleId || null;
+                json.vehicleName = session.Vehicle?.name || null;
                 return json;
             });
             res.set('Cache-Control', 'private, max-age=30');
@@ -486,6 +509,37 @@ class SessionController {
             } else {
                 res.end();
             }
+        }
+    }
+
+    static async reassignVehicle(req, res) {
+        try {
+            const { vehicleId } = req.body;
+            // vehicleId can be a number (assign) or null (unassign)
+            if (vehicleId !== null && vehicleId !== undefined) {
+                const v = Number(vehicleId);
+                if (!Number.isInteger(v) || v < 1) {
+                    return res.status(400).json({ error: 'vehicleId must be a positive integer or null.' });
+                }
+                // Verify vehicle belongs to this user
+                const vehicle = await Vehicle.findOne({
+                    where: { id: v, userId: req.user.id },
+                });
+                if (!vehicle) {
+                    return res.status(404).json({ error: 'Vehicle not found.' });
+                }
+            }
+
+            const session = await Session.findOne({
+                where: { id: req.params.sessionId, userId: req.user.id },
+            });
+            if (!session) return res.status(404).json({ error: 'Session not found' });
+
+            await session.update({ vehicleId: vehicleId || null });
+            res.json({ ok: true, vehicleId: session.vehicleId });
+        } catch (err) {
+            console.error('[SessionController]', err);
+            res.status(500).json({ error: 'Internal server error' });
         }
     }
 }

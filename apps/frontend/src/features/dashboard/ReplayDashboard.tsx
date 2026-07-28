@@ -17,8 +17,10 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
 import { Card, Title } from '@tremor/react';
-import { getSession, getTelemetry, exportSessionCsv, updateSessionNotes } from '@/lib/api';
+import { getSession, getTelemetry, exportSessionCsv, updateSessionNotes, getVehicles, reassignSessionVehicle } from '@/lib/api';
 import type { AnalysisPanelHandle } from '@/components/ai/AnalysisPanel';
+import type { Vehicle } from '@/lib/types';
+import VehicleReassignDialog from '@/components/vehicles/VehicleReassignDialog';
 import Skeleton from '@/components/ui/Skeleton';
 import ErrorAlert from '@/components/ui/ErrorAlert';
 import { usePlaybackStore } from '@/app/playbackStore';
@@ -91,6 +93,8 @@ export default function ReplayDashboard() {
   const [showAnalysisConfirm, setShowAnalysisConfirm] = useState(false);
   const [notes, setNotes] = useState<string>('');
   const [notesSaving, setNotesSaving] = useState(false);
+  const [showReassign, setShowReassign] = useState(false);
+  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
 
   // Sync notes state when session data loads
   useEffect(() => {
@@ -273,6 +277,11 @@ export default function ReplayDashboard() {
           <div className="min-w-0">
             <h1 className="text-lg font-semibold text-gray-900 dark:text-white font-display">
               {sessionQuery.data.name || 'Session Replay'}
+              {sessionQuery.data.vehicleName && (
+                <span className="ml-2 inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 dark:bg-gray-700 dark:text-gray-300">
+                  {sessionQuery.data.vehicleName}
+                </span>
+              )}
             </h1>
             <p className="text-sm text-gray-500 dark:text-[var(--text-secondary)]">
               {sessionQuery.data.startDate
@@ -315,6 +324,18 @@ export default function ReplayDashboard() {
               ) : (
                 '↓ CSV'
               )}
+            </button>
+            <button
+              type="button"
+              onClick={async () => {
+                const v = await getVehicles();
+                setVehicles(v ?? []);
+                setShowReassign(true);
+              }}
+              className="rounded p-1.5 text-xs font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+              title="Reassign to a different vehicle"
+            >
+              🚗
             </button>
             {exportError && (
               <span className="text-xs text-red-500">{exportError}</span>
@@ -485,6 +506,21 @@ export default function ReplayDashboard() {
           </div>
         </div>
       </dialog>
+
+      {/* Vehcile reassign dialog */}
+      {showReassign && (
+        <VehicleReassignDialog
+          vehicles={vehicles}
+          currentVehicleId={sessionQuery.data.vehicleId}
+          onReassign={async (vehicleId) => {
+            if (!id) return;
+            await reassignSessionVehicle(id, vehicleId);
+            await sessionQuery.refetch();
+            setShowReassign(false);
+          }}
+          onClose={() => setShowReassign(false)}
+        />
+      )}
 
       {/* AI Analysis panel — at the bottom */}
       <div id="ai-analysis-panel" className="animate-slide-up-delay-5">

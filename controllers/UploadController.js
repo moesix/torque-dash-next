@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const User = require('../models').User;
 const Session = require('../models').Session;
+const Vehicle = require('../models').Vehicle;
 const Settings = require('../models').Settings;
 const userCache = require('../lib/userCache');
 const ssrfGuard = require('../lib/ssrfGuard');
@@ -55,10 +56,28 @@ class UploadController {
             let user = await resolveUser(eml);
             if (!user) return res.status(403).send('Invalid user account.');
 
+            // Resolve vehicle from Torque's `v` param (vehicle profile name).
+            // Falls back to the user's default vehicle when `v` is missing or
+            // doesn't match any known vehicle name.
+            let vehicle = null;
+            if (v) {
+                vehicle = await Vehicle.findOne({
+                    where: { userId: user.id, name: v },
+                });
+            }
+            if (!vehicle) {
+                vehicle = await Vehicle.findOne({
+                    where: { userId: user.id, isDefault: true },
+                });
+            }
+
             // Resolve session (find-or-create) — caches the resolved numeric FK.
             let currentSession = await Session.findOrCreate({
                 where: { sessionId: session },
-                defaults: { userId: user.id }
+                defaults: {
+                    userId: user.id,
+                    vehicleId: vehicle ? vehicle.id : null,
+                }
             });
             let sess = currentSession[0];
 

@@ -21,6 +21,11 @@ module.exports = (sequelize, DataTypes) => {
             type: DataTypes.TEXT,
             allowNull: true,
             defaultValue: null,
+        },
+        vehicleId: {
+            type: DataTypes.INTEGER,
+            allowNull: true,
+            defaultValue: null,
         }
     }, {});
 
@@ -29,6 +34,14 @@ module.exports = (sequelize, DataTypes) => {
             as: 'Logs',
             foreignKey: { name: 'sessionId'},
             onDelete: 'cascade'
+        });
+        Session.belongsTo(models.User, {
+            foreignKey: 'userId',
+        });
+        Session.belongsTo(models.Vehicle, {
+            as: 'Vehicle',
+            foreignKey: { name: 'vehicleId', allowNull: true },
+            onDelete: 'set null',
         });
     };
 

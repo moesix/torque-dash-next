@@ -6,6 +6,7 @@ const { rateLimits } = require('../config/config');
 const SessionController = require('../controllers/SessionController');
 const UploadController = require('../controllers/UploadController');
 const UserController = require('../controllers/UserController');
+const VehicleController = require('../controllers/VehicleController');
 const TelemetryController = require('../controllers/TelemetryController');
 const AnalysisController = require('../controllers/AnalysisController');
 const runtime = require('../config/runtime');
@@ -105,6 +106,15 @@ router.patch('/sessions/filter/:sessionId', authenticate, SessionController.filt
 router.patch('/sessions/cut/:sessionId', authenticate, SessionController.cut);
 router.post('/sessions/copy/:sessionId', authenticate, SessionController.copy);
 router.post('/sessions/join/:sessionId', authenticate, SessionController.join);
+router.patch('/sessions/:sessionId/vehicle', authenticate, SessionController.reassignVehicle);
+
+// ── Vehicle CRUD ──────────────────────────────────────────────────────
+router.get('/vehicles', authenticate, VehicleController.getAll);
+router.get('/vehicles/:vehicleId', authenticate, VehicleController.getOne);
+router.post('/vehicles', writeLimiter, authenticate, VehicleController.create);
+router.put('/vehicles/:vehicleId', writeLimiter, authenticate, VehicleController.update);
+router.delete('/vehicles/:vehicleId', writeLimiter, authenticate, VehicleController.delete);
+router.patch('/vehicles/:vehicleId/default', authenticate, VehicleController.setDefault);
 
 // ── BYOK LLM Analysis ─────────────────────────────────────────────────
 router.post('/settings/test-llm', aiLimiter, authenticate, AnalysisController.testConnection);
