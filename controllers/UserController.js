@@ -166,6 +166,7 @@ class UserController {
                 engineCc: settings.engineCc || null,
                 llmThinkingMode: settings.llmThinkingMode ?? true,
                 llmReasoningEffort: settings.llmReasoningEffort || 'high',
+                llmMaxTokens: settings.llmMaxTokens || 16384,
                 timezoneOffset: settings.timezoneOffset ?? 0,
             });
         } catch (err) {
@@ -246,7 +247,7 @@ class UserController {
             }
 
             // DeepSeek thinking mode fields
-            const { llmThinkingMode, llmReasoningEffort, timezoneOffset } = req.body;
+            const { llmThinkingMode, llmReasoningEffort, llmMaxTokens, timezoneOffset } = req.body;
 
             if (llmThinkingMode !== undefined) {
               if (typeof llmThinkingMode !== 'boolean') {
@@ -259,6 +260,13 @@ class UserController {
                 return res.status(400).json({ error: 'llmReasoningEffort must be low, medium, high, or max.' });
               }
               updateData.llmReasoningEffort = llmReasoningEffort;
+            }
+            if (llmMaxTokens !== undefined) {
+              const t = Number(llmMaxTokens);
+              if (!Number.isInteger(t) || t < 2048 || t > 32768) {
+                return res.status(400).json({ error: 'llmMaxTokens must be an integer between 2048 and 32768.' });
+              }
+              updateData.llmMaxTokens = t;
             }
 
             // Timezone offset (minutes from UTC, e.g. 480 for UTC+8)
@@ -305,6 +313,7 @@ class UserController {
                 engineCc: current.engineCc || null,
                 llmThinkingMode: current.llmThinkingMode ?? true,
                 llmReasoningEffort: current.llmReasoningEffort || 'high',
+                llmMaxTokens: current.llmMaxTokens || 16384,
                 timezoneOffset: current.timezoneOffset ?? 0,
             });
         } catch (err) {

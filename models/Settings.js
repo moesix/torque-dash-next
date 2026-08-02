@@ -76,6 +76,13 @@ module.exports = (sequelize, DataTypes) => {
             defaultValue: 'high',
         },
 
+        // ── Max output tokens (migration 010) ────────────────────────
+        llmMaxTokens: {
+            type: DataTypes.INTEGER,
+            allowNull: false,
+            defaultValue: 16384,
+        },
+
         // ── Timezone offset (migration 007) ──────────────────────────
         timezoneOffset: {
             type: DataTypes.INTEGER,
@@ -110,6 +117,7 @@ module.exports = (sequelize, DataTypes) => {
                 engineCc: null,
                 llmThinkingMode: true,
                 llmReasoningEffort: 'high',
+                llmMaxTokens: 16384,
                 timezoneOffset: 0,
             },
         });

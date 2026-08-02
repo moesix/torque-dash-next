@@ -32,15 +32,19 @@ connect-pg-simple, cors, connect-flash, helmet, lodash, nanoid, plus dev tooling
 cd apps/frontend
 npm install
 ```
-Installs React 18, Vite 5, TypeScript 5, Tailwind v4, Tremor 3, ECharts 5,
-react-leaflet 4, TanStack Query 5, zustand 4, react-router-dom 6.30.1 (exact
+Installs React 18, Vite 6, TypeScript 5, Tailwind v4, Tremor 3, ECharts 6,
+react-leaflet 4, TanStack Query 5, zustand 4, react-router-dom 6.30.4 (exact
 pin).
 
-> **react-router-dom version:** Pinned to **6.30.1** (not `^6.30.1`) to avoid
-> CVE-2026-53668, an open redirect vulnerability in `resolvePath` present in
-> 6.30.2+. Do **not** upgrade to 6.30.2+ without first confirming the CVE has
-> been patched upstream. The next major upgrade path is react-router v7, which is
-> a separate migration effort (full rewrite of routing internals).
+> **react-router-dom version:** Exact-pinned to **6.30.4** (not `^6.30.4`).
+> Plan 044 bumped it from 6.30.1 to resolve the Dependabot alerts — the
+> transitive `react-router` → 6.30.4 and `@remix-run/router` → 1.23.3, and the
+> build toolchain's transitive `postcss` → 8.5.25 (a Vite devDependency), fixing
+> 4 of 6 alerts. **Residual advisories:** two moderate react-router advisories
+> remain (GHSA-wrjc-x8rr-h8h6, GHSA-337j-9hxr-rhxg) that are only fixed in
+> v7.18.2 (a breaking major). They are assessed **low-risk** for this SPA (no
+> server-side rendering, no user-controlled navigation targets); a react-router
+> v7 migration is planned as a follow-up.
 
 ---
 
@@ -98,6 +102,7 @@ The script:
 | `007_add_timezone_offset.sql` | Adds `timezoneOffset` column to Settings for session name formatting |
 | `008_add_session_notes.sql` | Adds nullable `notes` TEXT column to Sessions |
 | `009_add_vehicles.sql` | Creates the `Vehicles` table and adds `vehicleId` FK to Sessions |
+| `010_add_llm_max_tokens.sql` | Adds `llmMaxTokens` INTEGER column to Settings (NOT NULL, default 16384) |
 
 Run this against a **TimescaleDB-enabled** database (the `timescaledb` extension
 must exist). For large existing datasets, run in a maintenance window
@@ -261,6 +266,25 @@ POST /api/sessions/:id/analyze
   cut-off) as mechanical faults.
 - **`lib/pidRegistry.js`** is imported to resolve PID short keys to human-readable
   names and units in both CSV column headers and the stats display.
+
+### 8.4 LLM Token Budget & Provider Status (Plan 043)
+
+- **`llmMaxTokens` setting** — the `Settings` singleton gains an INTEGER
+  `llmMaxTokens` field (migration `010_add_llm_max_tokens.sql`, NOT NULL,
+  default **16384**, validated range **2048–32768**). `PUT /api/settings`
+  rejects out-of-range values with `400`; both the GET and PUT responses
+  include the field. Covered by `test/settingsValidation.test.js` (7 cases).
+- **Provider token budget** — `lib/llmProviders.js` now sends
+  `max_tokens: options.maxTokens || settings.llmMaxTokens || 16384` for **all**
+  providers (OpenAI, Anthropic, DeepSeek, Ollama, Custom), replacing the old
+  hardcoded 8192. Explicit caller options take precedence — e.g. the connection
+  test passes `maxTokens: 20` to keep probes cheap, while production analyses
+  use the configured budget. This matters for DeepSeek thinking mode, where
+  reasoning and content share the same budget.
+- **Settings UI** — `AiProviderCard.tsx` adds a general "Max Output Tokens"
+  input (min 2048, max 32768, step 1024) with a cost warning, and the provider
+  status badge now shows the human-readable provider name plus chips for Model,
+  DeepSeek Thinking / Effort, and Max tokens.
 
 ---
 
@@ -449,9 +473,14 @@ blockers are resolved and re-reviewed as PASS:
   category, and toggle metrics on/off. A collapsible `DecodedMetricsTable` shows
   min/max/avg/last for every PID. The `pidDecode.ts` engine auto-discovers PID
   sources from the `values` JSONB column using embedded Torque metadata
-  (`userFullName*`/`userUnit*`/`defaultUnit*`) with a curated fallback map for
+  (  `userFullName*`/`userUnit*`/`defaultUnit*`) with a curated fallback map for
   standard OBD-II PIDs. A pre-existing `RangeError` from spread-into-`Math.max`
   at ~10k frames has also been fixed. The old `TimeSeriesChart.tsx` was deleted.
+- **react-router v7 migration (Plan 044 follow-up).** Two moderate advisories on
+  react-router 6.x remain (GHSA-wrjc-x8rr-h8h6, GHSA-337j-9hxr-rhxg); they are
+  only patched in v7.18.2, a breaking major. Assessed low-risk for this SPA (no
+  SSR, no user-controlled navigation targets), so the upgrade is tracked here
+  rather than rushed.
 
 ---
 
@@ -494,6 +523,8 @@ blockers are resolved and re-reviewed as PASS:
 - **Session Notes (Plan 040)** — `notes` TEXT column on Sessions, `PATCH /api/sessions/notes/:sessionId` endpoint, auto-save textarea in the replay dashboard. Migration: `008_add_session_notes.sql`.
 - **Multi-Vehicle Support (Plan 041)** — full `Vehicle` model (name, make, model, year, engineCc, isDefault) with userId FK. Sessions gain nullable `vehicleId` FK. CRUD endpoints at `/api/vehicles/*`, session reassign via `PATCH /api/sessions/:sessionId/vehicle`. UploadController resolves Torque's `v` param to a vehicle. Frontend: `VehicleManager` in Settings with add/edit/delete/default, vehicle filter in session list, vehicle column in session table, reassign dialog in replay dashboard. Migration: `009_add_vehicles.sql`.
 - **Improved LLM Analysis Prompt (Plan 042)** — `lib/llmPrompt.js` was rewritten with five exported functions (up from two): `computeSummaryStats()` pre-computes min/max/mean/median per PID with null-safe filtering; `resampleTelemetry()` uniformly resamples across the full timeline replacing head/tail slicing; `buildTelemetryCsv()` outputs token-efficient CSV instead of Markdown tables; `buildContext()` and `buildAnalysisPrompt()` were cleaned up and now include pre-calculated statistical aggregates, four diagnostic guardrails, dynamic engine size injection, and five specific analysis categories. See section 8 for full details.
+- **Configurable LLM token limit + provider status (Plan 043)** — `llmMaxTokens` setting (INTEGER, default 16384, range 2048–32768; migration `010_add_llm_max_tokens.sql`) replaces the hardcoded 8192 `max_tokens` across all LLM providers. Settings UI gains a general "Max Output Tokens" input and an expanded provider status display (human-readable provider name, Model, DeepSeek Thinking/Effort, Max tokens). Validation in `UserController.updateSettings` (400 on out-of-range); 7 new cases in `test/settingsValidation.test.js`. See section 8.4.
+- **Dependabot fixes (Plan 044)** — `react-router-dom` exact-pinned to 6.30.4 (transitive `react-router` 6.30.4, `@remix-run/router` 1.23.3) and `postcss` 8.5.25, resolving 4 of 6 alerts. Two moderate react-router advisories remain (GHSA-wrjc-x8rr-h8h6, GHSA-337j-9hxr-rhxg) — only fixed in v7.18.2; low-risk for this SPA, v7 migration planned.
 - **Remaining open issues:** SSRF TOCTOU (documented in section 10 above — Known Issues / Follow-up Items).
 
 ---
