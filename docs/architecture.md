@@ -275,6 +275,32 @@ from session telemetry:
 - **CSV over Markdown.** CSV is more token-efficient than Markdown tables for
   the same telemetry data, reducing per-analysis cost.
 
+### 2.11 `lib/llmProviders.js` — LLM Provider Routing & Token Budget
+
+- **Provider registry** — `PROVIDERS` maps `openai`, `anthropic`, `ollama`,
+  `deepseek`, and `custom` to display names, model lists, and default models.
+  The frontend `PROVIDERS` constant in `AiProviderCard.tsx` mirrors this list
+  exactly (verified in Plan 043 — no drift).
+- **Dispatch (`analyze()`)** — routes by `settings.llmProvider`: OpenAI /
+  Ollama / Custom → `analyzeOpenAICompatible` (OpenAI-compatible
+  `/chat/completions`), DeepSeek → `analyzeOpenAICompatible` with an
+  `extraBody` carrying DeepSeek's `thinking` / `reasoning_effort` fields,
+  Anthropic → `analyzeAnthropic` (Messages API). Custom endpoints are
+  SSRF-checked via `lib/ssrfGuard` before any request (localhost/127.0.0.1 is
+  allowed for Ollama).
+- **Configurable token budget** — `max_tokens` is no longer hardcoded. Every
+  provider resolves it as `options.maxTokens || settings.llmMaxTokens || 16384`:
+  an explicit caller option wins, then the `llmMaxTokens` setting (Settings
+  singleton, migration 010, default 16384, validated range 2048–32768), then
+  the 16384 fallback. `AnalysisController.testConnection` passes
+  `maxTokens: 20` so connection probes stay cheap, while production analyses
+  use the configured budget. This replaces the previous hardcoded 8192 that
+  starved DeepSeek thinking-mode responses (reasoning + content share one
+  budget).
+- **API keys** — stored encrypted at rest (`llmApiKeyEnc`, AES-256-GCM via
+  `lib/encryption.js`); `getApiKey()` decrypts on demand, `prepareApiKey()`
+  encrypts on save.
+
 ---
 
 ## 3. Frontend Internals (`apps/frontend/`)
@@ -301,7 +327,7 @@ src/
     auth/    Login.tsx, Register.tsx, useAuth.ts
     dashboard/ ReplayDashboard.tsx, PlaybackControls.tsx
     sessions/  SessionBrowser.tsx
-    settings/  SettingsPage.tsx, VehicleManager.tsx
+    settings/  SettingsPage.tsx, AiProviderCard.tsx, VehicleManager.tsx
   lib/
     api.ts    # fetch wrapper, credentials:'include'
     types.ts
@@ -475,6 +501,26 @@ chart wrapped in a card with a header (title, row count, expand/collapse chevron
 The panels are imported in `ReplayDashboard.tsx` and rendered below the overlay
 chart, receiving the full `frames` array and the `available` series list.
 
+### 3.11 AI Provider Settings Card (`AiProviderCard.tsx`)
+
+The Settings page's AI provider card (`features/settings/AiProviderCard.tsx`)
+manages the LLM connection and exposes the configurable token budget:
+
+- **Provider status display** — the status badge shows a human-readable
+  provider name (e.g. `Connected (DeepSeek)`) resolved from the `PROVIDERS`
+  list instead of the raw stored value. When a provider is configured, a row of
+  chips below the badge shows `Model`, `Thinking` (DeepSeek only), `Effort`
+  (DeepSeek only, when thinking mode is on), and `Max tokens`.
+- **Max Output Tokens input** — a **general** setting (applies to all
+  providers, not DeepSeek-specific) rendered after the Model selector, with
+  `min=2048`, `max=32768`, `step=1024`, defaulting to
+  `settings.llmMaxTokens ?? 16384`. Help text warns that higher values increase
+  API cost and that DeepSeek thinking mode shares the budget between reasoning
+  and content. Saved via `body.llmMaxTokens` in `PUT /api/settings`.
+- **Provider-specific fields** — DeepSeek shows Thinking Mode + Reasoning
+  Effort (High / Max); Ollama/Custom show a free-text model name and endpoint
+  URL (SSRF-checked server-side).
+
 ---
 
 ## 4. Synchronized Replay Data Flow
@@ -558,8 +604,8 @@ See `docs/deployment.md` for the full deployment guide.
 | `POST /api/sessions/:id/analyze` | cookie + owner | trigger AI analysis for a session (SSE stream) |
 | `GET /api/sessions/:id/analyses` | cookie + owner | list cached analyses for a session |
 | `DELETE /api/sessions/:id/analyses/:analysisId` | cookie + owner | delete a cached analysis |
-| `GET /api/settings` | none | public settings (disableRegistration, hasUploadApiToken, hasLlmProvider, vehicle fields) |
-| `PUT /api/settings` | cookie | update settings (disableRegistration, uploadApiToken, llmProvider, llmApiKey, llmModel, llmEndpoint, llmThinkingMode, llmReasoningEffort, vehicle fields) |
+| `GET /api/settings` | none | public settings (disableRegistration, hasUploadApiToken, hasLlmProvider, llmMaxTokens, vehicle fields) |
+| `PUT /api/settings` | cookie | update settings (disableRegistration, uploadApiToken, llmProvider, llmApiKey, llmModel, llmEndpoint, llmThinkingMode, llmReasoningEffort, llmMaxTokens, vehicle fields) |
 | `POST /api/settings/upload-token` | cookie | generate a new upload API token (shown once) |
 | `POST /api/settings/test-llm` | cookie | test LLM connection (returns streaming response) |
 | `GET /api/vehicles` | cookie | list all vehicles for authenticated user |

@@ -104,6 +104,7 @@ export interface Settings {
   engineCc: number | null;
   llmThinkingMode?: boolean;
   llmReasoningEffort?: string;
+  llmMaxTokens?: number;
 
   /** Timezone offset in minutes from UTC (e.g. 480 for UTC+8). */
   timezoneOffset?: number;
@@ -164,6 +165,7 @@ export interface UpdateLlmSettings {
   engineCc?: number | null;
   llmThinkingMode?: boolean;
   llmReasoningEffort?: string;
+  llmMaxTokens?: number;
   timezoneOffset?: number;
 }
 

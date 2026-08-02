@@ -23,6 +23,7 @@ export default function AiProviderCard({ settings, onUpdate }: Props) {
   const [endpoint, setEndpoint] = useState(settings.llmEndpoint || '');
   const [thinkingMode, setThinkingMode] = useState(settings.llmThinkingMode ?? true);
   const [reasoningEffort, setReasoningEffort] = useState(settings.llmReasoningEffort || 'high');
+  const [maxTokens, setMaxTokens] = useState(settings.llmMaxTokens ?? 16384);
   const [busy, setBusy] = useState(false);
   const [testResult, setTestResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -38,6 +39,7 @@ export default function AiProviderCard({ settings, onUpdate }: Props) {
       if (apiKey) body.llmApiKey = apiKey;
       if (model) body.llmModel = model;
       if (endpoint) body.llmEndpoint = endpoint;
+      body.llmMaxTokens = maxTokens; // general setting, applies to all providers
       if (provider === 'deepseek') {
         body.llmThinkingMode = thinkingMode;
         body.llmReasoningEffort = reasoningEffort;
@@ -91,9 +93,36 @@ export default function AiProviderCard({ settings, onUpdate }: Props) {
               : 'bg-gray-50 text-gray-600 ring-1 ring-gray-500/10 dark:bg-[var(--bg-surface)] dark:text-[var(--text-secondary)]'
           }`}>
             <span className={`h-1.5 w-1.5 rounded-full ${settings.hasLlmProvider ? 'bg-emerald-500' : 'bg-gray-400'}`} />
-            {settings.hasLlmProvider ? `Connected (${settings.llmProvider})` : 'Not configured'}
+            {settings.hasLlmProvider
+              ? `Connected (${PROVIDERS.find(p => p.value === settings.llmProvider)?.label || settings.llmProvider})`
+              : 'Not configured'}
           </span>
         </div>
+
+        {settings.hasLlmProvider && (
+          <div className="flex flex-wrap gap-3 text-xs text-gray-500 dark:text-[var(--text-muted)]">
+            {settings.llmModel && (
+              <span className="inline-flex items-center gap-1">
+                <span className="font-medium">Model:</span> {settings.llmModel}
+              </span>
+            )}
+            {settings.llmProvider === 'deepseek' && (
+              <>
+                <span className="inline-flex items-center gap-1">
+                  <span className="font-medium">Thinking:</span> {settings.llmThinkingMode ? 'On' : 'Off'}
+                </span>
+                {settings.llmThinkingMode && (
+                  <span className="inline-flex items-center gap-1">
+                    <span className="font-medium">Effort:</span> {settings.llmReasoningEffort || 'high'}
+                  </span>
+                )}
+              </>
+            )}
+            <span className="inline-flex items-center gap-1">
+              <span className="font-medium">Max tokens:</span> {settings.llmMaxTokens || 16384}
+            </span>
+          </div>
+        )}
 
         <div>
           <Text className="text-sm font-medium mb-1">Provider</Text>
@@ -133,6 +162,22 @@ export default function AiProviderCard({ settings, onUpdate }: Props) {
             </select>
           </div>
         )}
+
+        <div>
+          <Text className="text-sm font-medium mb-1">Max Output Tokens</Text>
+          <input
+            type="number"
+            min={2048}
+            max={32768}
+            step={1024}
+            value={maxTokens}
+            onChange={(e) => setMaxTokens(Number(e.target.value))}
+            className="w-full rounded border bg-white px-3 py-2 text-sm dark:border-[var(--border-default)] dark:bg-[var(--bg-surface)]"
+          />
+          <Text className="text-xs text-gray-500 dark:text-[var(--text-muted)] mt-1">
+            Maximum output tokens per analysis. DeepSeek thinking mode shares this budget between reasoning and content. Increase if analyses are truncated. Warning: higher values increase potential API costs (default: 16384).
+          </Text>
+        </div>
 
         {(provider === 'custom' || provider === 'ollama') && (
           <div>
