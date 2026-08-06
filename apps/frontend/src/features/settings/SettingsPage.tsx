@@ -19,6 +19,9 @@ export default function SettingsPage() {
   const [tokenError, setTokenError] = useState<string | null>(null);
   const [tokenBusy, setTokenBusy] = useState(false);
 
+  // Data retention card-local error state (rendered inside the retention card)
+  const [retentionError, setRetentionError] = useState<string | null>(null);
+
   const [version, setVersion] = useState<string>('');
 
   const [llmSettings, setLlmSettings] = useState<Settings>({
@@ -37,6 +40,8 @@ export default function SettingsPage() {
     llmThinkingMode: true,
     llmReasoningEffort: 'high',
     timezoneOffset: 0,
+    retentionEnabled: false,
+    retentionDays: 365,
   });
 
   useEffect(() => {
@@ -272,6 +277,80 @@ export default function SettingsPage() {
               {((llmSettings.timezoneOffset ?? 0) === 0) ? '(UTC)' : `(${((llmSettings.timezoneOffset ?? 0) >= 0 ? '+' : '')}${((llmSettings.timezoneOffset ?? 0) / 60).toFixed(1)}h)`}
             </span>
           </div>
+        </div>
+      </Card>
+
+      <Card>
+        <div className="space-y-4">
+          <div>
+            <Text className="font-medium">Data Retention</Text>
+            <Text className="mt-1 text-sm text-gray-500 dark:text-[var(--text-muted)]">
+              Automatically delete telemetry data older than the specified number
+              of days. This helps manage database size. When disabled, all data
+              is retained indefinitely.
+            </Text>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <div>
+              <Text className="text-sm">Enable auto-cleanup</Text>
+            </div>
+            <Switch
+              checked={llmSettings.retentionEnabled ?? false}
+              onChange={(checked: boolean) => {
+                const next = { ...llmSettings, retentionEnabled: checked };
+                setLlmSettings(next);
+                setRetentionError(null);
+                updateSettings({ retentionEnabled: checked }).catch(() => {
+                  setRetentionError('Failed to save retention setting.');
+                  getSettings().then((s) => {
+                    if (s) setLlmSettings(s);
+                  });
+                });
+              }}
+            />
+          </div>
+
+          {llmSettings.retentionEnabled && (
+            <div className="flex items-center gap-3">
+              <label htmlFor="retention-days" className="text-sm text-gray-700 dark:text-[var(--text-secondary)]">
+                Keep data for:
+              </label>
+              <select
+                id="retention-days"
+                value={
+                  [90, 120, 180, 365].includes(llmSettings.retentionDays ?? 365)
+                    ? (llmSettings.retentionDays ?? 365)
+                    : 365
+                }
+                onChange={(e) => {
+                  const days = Number(e.target.value);
+                  const next = { ...llmSettings, retentionDays: days };
+                  setLlmSettings(next);
+                  setRetentionError(null);
+                  updateSettings({ retentionDays: days }).catch(() => {
+                    setRetentionError('Failed to save retention days.');
+                    getSettings().then((s) => {
+                      if (s) setLlmSettings(s);
+                    });
+                  });
+                }}
+                className="rounded border bg-white px-3 py-1.5 text-sm dark:border-[var(--border-default)] dark:bg-[var(--bg-surface)] dark:text-[var(--text-primary)]"
+              >
+                <option value={90}>90 days</option>
+                <option value={120}>120 days</option>
+                <option value={180}>180 days</option>
+                <option value={365}>365 days</option>
+              </select>
+              <span className="text-sm text-gray-500 dark:text-[var(--text-muted)]">
+                (current: {llmSettings.retentionDays ?? 365} days)
+              </span>
+            </div>
+          )}
+
+          {retentionError ? (
+            <Text className="mt-2 text-sm text-rose-600 dark:text-rose-400">{retentionError}</Text>
+          ) : null}
         </div>
       </Card>
     </div>

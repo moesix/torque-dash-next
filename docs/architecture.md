@@ -301,12 +301,47 @@ from session telemetry:
   `lib/encryption.js`); `getApiKey()` decrypts on demand, `prepareApiKey()`
   encrypts on save.
 
+### 2.12 Data Retention Policy (Plan 046)
+
+The `Logs` hypertable grows unboundedly, so the Settings singleton exposes a
+configurable TimescaleDB retention policy for automatic cleanup:
+
+- **Settings fields** — added by migration `infra/timescale/011_add_retention_settings.sql`:
+  - `retentionEnabled` BOOLEAN NOT NULL default **false** (opt-in — off by
+    default, all data retained indefinitely).
+  - `retentionDays` INTEGER NOT NULL default **365**, validated range **90–365**.
+  - Both fields are exposed in `GET /api/settings` (defaulting to `false`/`365`
+    via `??` fallbacks) and mirrored in `models/Settings.js` + the singleton
+    defaults.
+- **`PUT /api/settings` validation** — `UserController.updateSettings` rejects
+  non-boolean `retentionEnabled` and non-integer `retentionDays` with `400`
+  (`retentionEnabled must be a boolean.` / `retentionDays must be an integer.`),
+  and rejects `retentionDays` outside 90–365 (`retentionDays must be between 90
+  and 365.`).
+- **TimescaleDB policy application** — when either retention field is present in
+  the update, the controller runs TimescaleDB's native retention policy API on
+  the `"Logs"` hypertable:
+  - **Remove-then-add (idempotent) pattern:** the existing policy is always
+    removed first with `remove_retention_policy('"Logs"', if_exists => true)`,
+    then — if retention is enabled — re-applied with
+    `add_retention_policy('"Logs"', make_interval(days => :days))` using a
+    parameterized `Number()`-cast replacement. Disabling retention runs removal
+    only. Failures are caught and logged rather than failing the settings save.
+  - **`retentionPolicyApplied`** — the `PUT /api/settings` response includes a
+    boolean flag reflecting whether the policy was (re)applied during the save.
+- **Frontend** — the Settings page renders a "Data Retention" card: an enable
+  `Switch` plus a 90/120/180/365-day `<select>` (visible when enabled). The card
+  keeps local error state and rolls the form back to the server-side settings on
+  save failure.
+
 ---
 
 ## 3. Frontend Internals (`apps/frontend/`)
 
 Stack: **React 18 + TypeScript + Vite + Tailwind v4 + Tremor + ECharts +
-react-leaflet + TanStack Query + zustand**.
+react-leaflet + TanStack Query + zustand + react-router 7** (migrated from
+`react-router-dom` 6 in Plan 045 — imports now come from the `react-router`
+package).
 
 ### 3.1 App structure
 ```
@@ -604,8 +639,8 @@ See `docs/deployment.md` for the full deployment guide.
 | `POST /api/sessions/:id/analyze` | cookie + owner | trigger AI analysis for a session (SSE stream) |
 | `GET /api/sessions/:id/analyses` | cookie + owner | list cached analyses for a session |
 | `DELETE /api/sessions/:id/analyses/:analysisId` | cookie + owner | delete a cached analysis |
-| `GET /api/settings` | none | public settings (disableRegistration, hasUploadApiToken, hasLlmProvider, llmMaxTokens, vehicle fields) |
-| `PUT /api/settings` | cookie | update settings (disableRegistration, uploadApiToken, llmProvider, llmApiKey, llmModel, llmEndpoint, llmThinkingMode, llmReasoningEffort, llmMaxTokens, vehicle fields) |
+| `GET /api/settings` | none | public settings (disableRegistration, hasUploadApiToken, hasLlmProvider, llmMaxTokens, retentionEnabled, retentionDays, vehicle fields) |
+| `PUT /api/settings` | cookie | update settings (disableRegistration, uploadApiToken, llmProvider, llmApiKey, llmModel, llmEndpoint, llmThinkingMode, llmReasoningEffort, llmMaxTokens, retentionEnabled, retentionDays, vehicle fields); response includes `retentionPolicyApplied` |
 | `POST /api/settings/upload-token` | cookie | generate a new upload API token (shown once) |
 | `POST /api/settings/test-llm` | cookie | test LLM connection (returns streaming response) |
 | `GET /api/vehicles` | cookie | list all vehicles for authenticated user |

@@ -144,7 +144,13 @@ export async function getSettings(): Promise<Settings | undefined> {
 }
 
 export async function updateSettings(
-  body: { disableRegistration?: boolean; uploadApiToken?: string | null; timezoneOffset?: number },
+  body: {
+    disableRegistration?: boolean;
+    uploadApiToken?: string | null;
+    timezoneOffset?: number;
+    retentionEnabled?: boolean;
+    retentionDays?: number;
+  },
 ): Promise<Settings | undefined> {
   return request<Settings>('/api/settings', {
     method: 'PUT',

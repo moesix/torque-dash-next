@@ -89,6 +89,18 @@ module.exports = (sequelize, DataTypes) => {
             allowNull: false,
             defaultValue: 0,
         },
+
+        // ── Data retention (migration 011) ────────────────────────
+        retentionEnabled: {
+            type: DataTypes.BOOLEAN,
+            allowNull: false,
+            defaultValue: false,
+        },
+        retentionDays: {
+            type: DataTypes.INTEGER,
+            allowNull: false,
+            defaultValue: 365,
+        },
     });
 
     // ── In-memory TTL cache ─────────────────────────────────────────────
@@ -119,6 +131,8 @@ module.exports = (sequelize, DataTypes) => {
                 llmReasoningEffort: 'high',
                 llmMaxTokens: 16384,
                 timezoneOffset: 0,
+                retentionEnabled: false,
+                retentionDays: 365,
             },
         });
         _settingsCache = row;

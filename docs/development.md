@@ -33,18 +33,20 @@ cd apps/frontend
 npm install
 ```
 Installs React 18, Vite 6, TypeScript 5, Tailwind v4, Tremor 3, ECharts 6,
-react-leaflet 4, TanStack Query 5, zustand 4, react-router-dom 6.30.4 (exact
+react-leaflet 4, TanStack Query 5, zustand 4, react-router 7.18.2 (exact
 pin).
 
-> **react-router-dom version:** Exact-pinned to **6.30.4** (not `^6.30.4`).
-> Plan 044 bumped it from 6.30.1 to resolve the Dependabot alerts — the
-> transitive `react-router` → 6.30.4 and `@remix-run/router` → 1.23.3, and the
-> build toolchain's transitive `postcss` → 8.5.25 (a Vite devDependency), fixing
-> 4 of 6 alerts. **Residual advisories:** two moderate react-router advisories
-> remain (GHSA-wrjc-x8rr-h8h6, GHSA-337j-9hxr-rhxg) that are only fixed in
-> v7.18.2 (a breaking major). They are assessed **low-risk** for this SPA (no
-> server-side rendering, no user-controlled navigation targets); a react-router
-> v7 migration is planned as a follow-up.
+> **react-router version:** Exact-pinned to **7.18.2** (not `^7.18.2`) as the
+> single `react-router` package — Plan 045 migrated from `react-router-dom`
+> 6.30.4, which resolves the two remaining 6.x Dependabot advisories
+> (GHSA-wrjc-x8rr-h8h6 backslash open redirect, GHSA-337j-9hxr-rhxg constructor
+> injection via SSR hydration). All frontend imports now come from
+> `react-router` (the v7-compatible `createBrowserRouter` + `RouterProvider`
+> pattern was already in use). **Known advisory:** `npm audit` reports
+> GHSA-qwww-vcr4-c8h2 (high, RSC-mode CSRF, affects react-router 7.12.0–8.2.0).
+> It is **not exploitable** in this pure client-side SPA (no SSR/RSC) and is
+> only fixed in v8.3.0 (a breaking major) — tracked as a known
+> non-exploitable advisory with a future v8 migration path.
 
 ---
 
@@ -103,6 +105,7 @@ The script:
 | `008_add_session_notes.sql` | Adds nullable `notes` TEXT column to Sessions |
 | `009_add_vehicles.sql` | Creates the `Vehicles` table and adds `vehicleId` FK to Sessions |
 | `010_add_llm_max_tokens.sql` | Adds `llmMaxTokens` INTEGER column to Settings (NOT NULL, default 16384) |
+| `011_add_retention_settings.sql` | Adds `retentionEnabled` BOOLEAN (NOT NULL, default false) and `retentionDays` INTEGER (NOT NULL, default 365) columns to Settings for the data retention policy |
 
 Run this against a **TimescaleDB-enabled** database (the `timescaledb` extension
 must exist). For large existing datasets, run in a maintenance window
@@ -476,11 +479,14 @@ blockers are resolved and re-reviewed as PASS:
   (  `userFullName*`/`userUnit*`/`defaultUnit*`) with a curated fallback map for
   standard OBD-II PIDs. A pre-existing `RangeError` from spread-into-`Math.max`
   at ~10k frames has also been fixed. The old `TimeSeriesChart.tsx` was deleted.
-- **react-router v7 migration (Plan 044 follow-up).** Two moderate advisories on
-  react-router 6.x remain (GHSA-wrjc-x8rr-h8h6, GHSA-337j-9hxr-rhxg); they are
-  only patched in v7.18.2, a breaking major. Assessed low-risk for this SPA (no
-  SSR, no user-controlled navigation targets), so the upgrade is tracked here
-  rather than rushed.
+- ✅ **react-router v7 migration (Plan 045).** The app is now on `react-router`
+  **7.18.2** (exact pin, imports from the `react-router` package instead of
+  `react-router-dom`), resolving the two remaining 6.x advisories
+  (GHSA-wrjc-x8rr-h8h6, GHSA-337j-9hxr-rhxg). **Next known advisory:**
+  GHSA-qwww-vcr4-c8h2 (high, RSC-mode CSRF, react-router 7.12.0–8.2.0) is
+  reported by `npm audit` but is **not exploitable** here — the app is a pure
+  client-side SPA with no SSR/RSC. It is only fixed in v8.3.0 (a breaking
+  major); a v8 migration is the tracked follow-up rather than an urgent fix.
 
 ---
 
@@ -524,7 +530,9 @@ blockers are resolved and re-reviewed as PASS:
 - **Multi-Vehicle Support (Plan 041)** — full `Vehicle` model (name, make, model, year, engineCc, isDefault) with userId FK. Sessions gain nullable `vehicleId` FK. CRUD endpoints at `/api/vehicles/*`, session reassign via `PATCH /api/sessions/:sessionId/vehicle`. UploadController resolves Torque's `v` param to a vehicle. Frontend: `VehicleManager` in Settings with add/edit/delete/default, vehicle filter in session list, vehicle column in session table, reassign dialog in replay dashboard. Migration: `009_add_vehicles.sql`.
 - **Improved LLM Analysis Prompt (Plan 042)** — `lib/llmPrompt.js` was rewritten with five exported functions (up from two): `computeSummaryStats()` pre-computes min/max/mean/median per PID with null-safe filtering; `resampleTelemetry()` uniformly resamples across the full timeline replacing head/tail slicing; `buildTelemetryCsv()` outputs token-efficient CSV instead of Markdown tables; `buildContext()` and `buildAnalysisPrompt()` were cleaned up and now include pre-calculated statistical aggregates, four diagnostic guardrails, dynamic engine size injection, and five specific analysis categories. See section 8 for full details.
 - **Configurable LLM token limit + provider status (Plan 043)** — `llmMaxTokens` setting (INTEGER, default 16384, range 2048–32768; migration `010_add_llm_max_tokens.sql`) replaces the hardcoded 8192 `max_tokens` across all LLM providers. Settings UI gains a general "Max Output Tokens" input and an expanded provider status display (human-readable provider name, Model, DeepSeek Thinking/Effort, Max tokens). Validation in `UserController.updateSettings` (400 on out-of-range); 7 new cases in `test/settingsValidation.test.js`. See section 8.4.
-- **Dependabot fixes (Plan 044)** — `react-router-dom` exact-pinned to 6.30.4 (transitive `react-router` 6.30.4, `@remix-run/router` 1.23.3) and `postcss` 8.5.25, resolving 4 of 6 alerts. Two moderate react-router advisories remain (GHSA-wrjc-x8rr-h8h6, GHSA-337j-9hxr-rhxg) — only fixed in v7.18.2; low-risk for this SPA, v7 migration planned.
+- **Dependabot fixes (Plan 044)** — `react-router-dom` exact-pinned to 6.30.4 (transitive `react-router` 6.30.4, `@remix-run/router` 1.23.3) and `postcss` 8.5.25, resolving 4 of 6 alerts. The remaining two react-router advisories were then resolved by the v7 migration (Plan 045).
+- **react-router v7 migration (Plan 045)** — `react-router-dom` 6.30.4 replaced with `react-router` 7.18.2 (exact pin); all 8 frontend files now import from `react-router`. Resolves GHSA-wrjc-x8rr-h8h6 and GHSA-337j-9hxr-rhxg. `npm audit` now reports GHSA-qwww-vcr4-c8h2 (high, RSC-mode CSRF, 7.12.0–8.2.0) — not exploitable in this pure client-side SPA (no SSR/RSC); only fixed in v8.3.0 (breaking), so a v8 migration is the tracked future path.
+- **Configurable Data Retention Policy (Plan 046)** — `retentionEnabled` (BOOLEAN, default false — opt-in) and `retentionDays` (INTEGER, default 365, range 90–365) on the Settings singleton (migration `011_add_retention_settings.sql`). `PUT /api/settings` validates both fields (400 on non-boolean / non-integer / out-of-range) and applies a TimescaleDB `add_retention_policy`/`remove_retention_policy` on the `Logs` hypertable using a remove-then-add idempotent pattern; the response includes `retentionPolicyApplied`. Frontend Settings page gains a "Data Retention" card (enable Switch + 90/120/180/365-day select, local error state, rollback on save failure). Validation mirrored in `test/settingsValidation.test.js` (10 new cases; suite now **61 tests**).
 - **Remaining open issues:** SSRF TOCTOU (documented in section 10 above — Known Issues / Follow-up Items).
 
 ---
