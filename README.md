@@ -23,7 +23,8 @@ A self-hosted dashboard for [Torque Pro](https://torque-bhp.com/) vehicle teleme
 | **PID decode engine** | Auto-discovers every OBD-II parameter from Torque's `values` JSONB — no schema changes when you add new PIDs. |
 | **Session management** | Auto-named trips (`Trip DDMMYYYY HH:MM AM/PM`), inline rename, shareable links. |
 | **Configurable data retention** | Opt-in TimescaleDB retention policy auto-deletes telemetry older than 90/120/180/365 days — off by default (all data kept indefinitely), toggled from the Settings page. |
-| **React Router v7** | Frontend routing upgraded from `react-router-dom` 6 to `react-router` 7.18.2 (exact pin), resolving the remaining react-router Dependabot advisories on the 6.x line. |
+| **API-key upload auth** | Optional `UPLOAD_API_TOKEN` Bearer authentication for Torque Pro uploads — requests presenting a matching token skip the per-IP rate limiter so reconnect bursts are never throttled. |
+| **React Router v8** | Frontend routing on `react-router` 8.3.0 (exact pin, replacing `react-router-dom`), resolving the remaining react-router Dependabot advisories including the v8-CSRF advisory fixed only in 8.3.0. |
 
 ## Quick start
 
@@ -135,8 +136,8 @@ After creating all user accounts, disable public registration via the Settings U
 
 | Layer | Stack |
 |-------|-------|
-| Backend | Node.js + Express 4, Sequelize 6, PostgreSQL / TimescaleDB |
-| Frontend | React 18 + Vite + TypeScript, ECharts, Leaflet |
+| Backend | Node.js + Express 4, Sequelize 6, PostgreSQL / TimescaleDB 2.29 |
+| Frontend | React 19 + Vite 8 + TypeScript 7, Tailwind CSS 4, react-router 8, ECharts, Leaflet |
 | Deploy | Docker Compose: `db` (TimescaleDB) + `backend` + `frontend` (nginx) |
 
 ## Configuration
@@ -173,7 +174,7 @@ For detailed deployment instructions, troubleshooting, and reverse proxy setup, 
 
 ## Security
 
-**Upload authentication:** When `UPLOAD_API_TOKEN` is set, all uploads must include `Authorization: Bearer <token>`. Email alone is no longer sufficient. If upgrading, add your token in Torque Pro → *Settings → Advanced → HTTP Auth Token*.
+**Upload authentication:** When `UPLOAD_API_TOKEN` is set, all uploads must include `Authorization: Bearer <token>`. Email alone is no longer sufficient. If upgrading, add your token in Torque Pro → *Settings → Advanced → HTTP Auth Token*. Requests presenting a matching token **bypass the upload rate limiter** — the known uploader's reconnect bursts are never `429`'d, and the exemption is keyed on the secret token, not a spoofable query param.
 
 **Password changes:** Users can change their password via `POST /api/users/change-password`. This validates the current password, enforces a minimum length of 8 characters, and invalidates all other sessions. Bcrypt salt factor is 10.
 

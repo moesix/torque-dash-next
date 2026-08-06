@@ -19,11 +19,38 @@ export default defineConfig({
     },
   },
   build: {
-    rollupOptions: {
+    rolldownOptions: {
       output: {
-        manualChunks: {
-          'react-markdown': ['react-markdown'],
-          'rehype-highlight': ['rehype-highlight'],
+        // Vite 8 (Rolldown) dropped object-literal manualChunks; use
+        // output.codeSplitting.groups (the native Rolldown API) to keep
+        // vendor chunk splitting.
+        codeSplitting: {
+          groups: [
+            {
+              name: 'react-markdown',
+              test: /node_modules[\\/]react-markdown/,
+            },
+            {
+              name: 'rehype-highlight',
+              test: /node_modules[\\/]rehype-highlight/,
+            },
+            {
+              // zrender (echarts' renderer) is only imported by echarts, so
+              // it would otherwise be absorbed back into the echarts chunk;
+              // minShareCount: 0 keeps it as its own chunk.
+              name: 'zrender',
+              test: /node_modules[\\/]zrender/,
+              minShareCount: 0,
+            },
+            {
+              name: 'echarts',
+              test: /node_modules[\\/]echarts/,
+            },
+            {
+              name: 'react',
+              test: /node_modules[\\/](react[\\/]|react-dom|scheduler)/,
+            },
+          ],
         },
       },
     },

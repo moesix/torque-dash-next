@@ -27,7 +27,7 @@ const FALLBACK_MAP: Record<string, { full: string; short: string; unit: string }
   k5:      { full: 'Engine Coolant Temperature',  short: 'Coolant',   unit: '°C' },
   k6:      { full: 'Fuel Trim (Short Term Bank 1)',  short: 'STFT B1',   unit: '%' },
   k7:      { full: 'Fuel Trim (Long Term Bank 1)',   short: 'LTFT B1',   unit: '%' },
-  kb:      { full: 'Intake Manifold Pressure',    short: 'MAP',       unit: 'psi' },
+  kb:      { full: 'Intake Manifold Pressure',    short: 'MAP',       unit: 'kPa' },
   kc:      { full: 'Engine RPM',                  short: 'Revs',      unit: 'rpm' },
   kd:      { full: 'Vehicle Speed (OBD)',         short: 'Speed',     unit: 'km/h' },
   ke:      { full: 'Timing Advance',              short: 'Timing',    unit: '°' },

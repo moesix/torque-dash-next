@@ -1,5 +1,4 @@
 import { useMemo } from 'react';
-import { Card, Text, Title } from '@tremor/react';
 import type { TelemetryFrame } from '@/lib/types';
 import { getSeriesData } from '@/lib/pidDecode';
 import { usePlaybackStore } from '@/app/playbackStore';
@@ -81,7 +80,7 @@ function RingGauge({ label, value, max, unit, color }: GaugeProps) {
           {unit.trim()}
         </text>
       </svg>
-      <Text className="mt-1 text-xs text-center">{label}</Text>
+      <p className="mt-1 text-xs leading-relaxed text-center">{label}</p>
     </div>
   );
 }
@@ -185,8 +184,8 @@ export default function SessionSummaryCard({
   }, [cursorTime, sortedTimestamps, rpmData, coolantData, speedData, frames.length]);
 
   return (
-    <Card>
-      <Title>Session Summary</Title>
+    <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-6 shadow-xs">
+      <h3 className="text-lg font-semibold leading-relaxed">Session Summary</h3>
 
       {/* Top: 3 SVG ring gauges */}
       <div className="flex items-center justify-around py-4 flex-wrap gap-2" aria-live="polite">
@@ -229,6 +228,6 @@ export default function SessionSummaryCard({
           <strong>{maxCoolant != null ? `${Math.round(maxCoolant)}°C` : '—'}</strong>
         </span>
       </div>
-    </Card>
+    </div>
   );
 }

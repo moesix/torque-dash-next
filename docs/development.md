@@ -10,7 +10,9 @@ the React/Vite frontend (`apps/frontend/`).
 
 ## 1. Prerequisites
 
-- **Node.js 18+** and npm
+- **Node.js 22** (LTS) and npm — the Docker images are built on
+  `node:22-bookworm-slim` and CI runs on Node 22. Vite 8 requires Node
+  **20.19+ / 22.12+**, so Node 22 is the supported floor.
 - **PostgreSQL** with the **TimescaleDB** extension (`CREATE EXTENSION timescaledb;`)
 - A Torque Pro device/app (or a scripted `GET /api/upload`) to generate data
 - (Frontend only) a modern browser
@@ -32,21 +34,18 @@ connect-pg-simple, cors, connect-flash, helmet, lodash, nanoid, plus dev tooling
 cd apps/frontend
 npm install
 ```
-Installs React 18, Vite 6, TypeScript 5, Tailwind v4, Tremor 3, ECharts 6,
-react-leaflet 4, TanStack Query 5, zustand 4, react-router 7.18.2 (exact
-pin).
+Installs React 19, Vite 8, TypeScript 7, Tailwind CSS 4, ECharts 6,
+react-leaflet 5, TanStack Query 5, zustand 5, react-router 8.3.0 (exact
+pin). No Tremor — all UI uses native Tailwind utilities (Plan 049).
 
-> **react-router version:** Exact-pinned to **7.18.2** (not `^7.18.2`) as the
-> single `react-router` package — Plan 045 migrated from `react-router-dom`
-> 6.30.4, which resolves the two remaining 6.x Dependabot advisories
+> **react-router version:** Exact-pinned to **8.3.0** (not `^8.3.0`) as the
+> single `react-router` package. Plan 045 migrated from `react-router-dom`
+> 6.30.4 to `react-router` 7.18.2, resolving the two 6.x Dependabot advisories
 > (GHSA-wrjc-x8rr-h8h6 backslash open redirect, GHSA-337j-9hxr-rhxg constructor
-> injection via SSR hydration). All frontend imports now come from
-> `react-router` (the v7-compatible `createBrowserRouter` + `RouterProvider`
-> pattern was already in use). **Known advisory:** `npm audit` reports
-> GHSA-qwww-vcr4-c8h2 (high, RSC-mode CSRF, affects react-router 7.12.0–8.2.0).
-> It is **not exploitable** in this pure client-side SPA (no SSR/RSC) and is
-> only fixed in v8.3.0 (a breaking major) — tracked as a known
-> non-exploitable advisory with a future v8 migration path.
+> injection via SSR hydration); Plan 047 then upgraded to **8.3.0**, which also
+> resolves the previously tracked GHSA-qwww-vcr4-c8h2 advisory (high, RSC-mode
+> CSRF, affected react-router 7.12.0–8.2.0). All frontend imports come from
+> `react-router` (the `createBrowserRouter` + `RouterProvider` pattern).
 
 ---
 
@@ -79,7 +78,12 @@ Set these at the backend repo root (`.env` or exported in the shell).
 
 The migration script (`scripts/migrate.js`) loads **every `.sql` file** in
 `infra/timescale/` in lexicographic order and executes each statement via `pg`.
-It is run manually, **not** on server boot:
+
+**In Docker, migrations run automatically.** The backend container's CMD
+(`Dockerfile`) executes `node scripts/migrate.js` at every container start
+(after `sequelize.sync()`), so `docker compose up -d` applies any pending
+migrations — no manual step needed for Docker deployments. A manual run is
+only required for **non-Docker (manual) setups**:
 
 ```sh
 node scripts/migrate.js
@@ -295,15 +299,16 @@ POST /api/sessions/:id/analyze
 
 ### 9.1 ESLint
 
-The project uses **ESLint 8** for backend code with a project-local `.eslintrc.js`
-configuration:
+The project uses **ESLint 10** (flat config) for backend code with a
+project-local `eslint.config.js` configuration (`@eslint/js` recommended presets
++ `globals` 17):
 
 ```sh
 npm run lint
 ```
 
 The config (`node` env, `es2022`, `eslint:recommended`) ignores
-`apps/frontend/dist/` (Vite build output). Custom rules include:
+`apps/frontend/dist/` (Vite build output) and `node_modules/`. Custom rules include:
 
 - `no-unused-vars` set to `warn` (ignoring args prefixed with `_`).
 - `no-console` is **off** — the server intentionally uses `console.log`/`console.error`.
@@ -338,7 +343,8 @@ or pull request to the `development` branch:
 - **Frontend checks:** `npm ci` → `npx tsc --noEmit` (typecheck) → `npm run build`.
 
 The workflow uses `actions/checkout@v7` and `actions/setup-node@v7` with npm
-caching. The lint step is now **enforced** — the previous `continue-on-error: true`
+caching and **Node 22** (`node-version: '22'`, matching the `node:22-bookworm-slim`
+runtime images). The lint step is now **enforced** — the previous `continue-on-error: true`
 has been removed, so ESLint failures correctly block the build.
 
 ### 9.4 Versioning
@@ -479,14 +485,12 @@ blockers are resolved and re-reviewed as PASS:
   (  `userFullName*`/`userUnit*`/`defaultUnit*`) with a curated fallback map for
   standard OBD-II PIDs. A pre-existing `RangeError` from spread-into-`Math.max`
   at ~10k frames has also been fixed. The old `TimeSeriesChart.tsx` was deleted.
-- ✅ **react-router v7 migration (Plan 045).** The app is now on `react-router`
-  **7.18.2** (exact pin, imports from the `react-router` package instead of
-  `react-router-dom`), resolving the two remaining 6.x advisories
-  (GHSA-wrjc-x8rr-h8h6, GHSA-337j-9hxr-rhxg). **Next known advisory:**
-  GHSA-qwww-vcr4-c8h2 (high, RSC-mode CSRF, react-router 7.12.0–8.2.0) is
-  reported by `npm audit` but is **not exploitable** here — the app is a pure
-  client-side SPA with no SSR/RSC. It is only fixed in v8.3.0 (a breaking
-  major); a v8 migration is the tracked follow-up rather than an urgent fix.
+- ✅ **react-router v8 upgrade (Plans 045 + 047).** The app is on `react-router`
+  **8.3.0** (exact pin, imports from the `react-router` package). Plan 045
+  migrated from `react-router-dom` 6 (resolving GHSA-wrjc-x8rr-h8h6 and
+  GHSA-337j-9hxr-rhxg on the 6.x line), and Plan 047 completed the v8 upgrade,
+  which also **resolves GHSA-qwww-vcr4-c8h2** (high, RSC-mode CSRF,
+  react-router 7.12.0–8.2.0 — fixed in 8.3.0).
 
 ---
 
@@ -522,17 +526,19 @@ blockers are resolved and re-reviewed as PASS:
   - Docker-based deployment with GHCR images (`docker-compose.yml`).
   - Non-root backend container (`appuser`), unprivileged nginx frontend.
 - **Session list pagination + vehicle filtering** — `GET /api/sessions` accepts `limit`, `offset`, and `vehicleId` query params (returns `{ sessions, total, limit, offset }` with `vehicleId`/`vehicleName` per session). The frontend `SessionBrowser` paginates via a "Load More" button and provides a vehicle filter dropdown.
-- **Dev tooling:** ESLint 8 (`.eslintrc.js`), husky 9 + lint-staged 17
+- **Dev tooling:** ESLint 10 (`eslint.config.js`), husky 9 + lint-staged 17
   (pre-commit lint + syntax check), CI pipeline (`.github/workflows/ci.yml`)
-  running on push/PR to `development`, and automated semver version bump
+  running on push/PR to `development` (Node 22), and automated semver version bump
   (`.github/workflows/version-bump.yml`) on push to `master`.
 - **Session Notes (Plan 040)** — `notes` TEXT column on Sessions, `PATCH /api/sessions/notes/:sessionId` endpoint, auto-save textarea in the replay dashboard. Migration: `008_add_session_notes.sql`.
 - **Multi-Vehicle Support (Plan 041)** — full `Vehicle` model (name, make, model, year, engineCc, isDefault) with userId FK. Sessions gain nullable `vehicleId` FK. CRUD endpoints at `/api/vehicles/*`, session reassign via `PATCH /api/sessions/:sessionId/vehicle`. UploadController resolves Torque's `v` param to a vehicle. Frontend: `VehicleManager` in Settings with add/edit/delete/default, vehicle filter in session list, vehicle column in session table, reassign dialog in replay dashboard. Migration: `009_add_vehicles.sql`.
 - **Improved LLM Analysis Prompt (Plan 042)** — `lib/llmPrompt.js` was rewritten with five exported functions (up from two): `computeSummaryStats()` pre-computes min/max/mean/median per PID with null-safe filtering; `resampleTelemetry()` uniformly resamples across the full timeline replacing head/tail slicing; `buildTelemetryCsv()` outputs token-efficient CSV instead of Markdown tables; `buildContext()` and `buildAnalysisPrompt()` were cleaned up and now include pre-calculated statistical aggregates, four diagnostic guardrails, dynamic engine size injection, and five specific analysis categories. See section 8 for full details.
 - **Configurable LLM token limit + provider status (Plan 043)** — `llmMaxTokens` setting (INTEGER, default 16384, range 2048–32768; migration `010_add_llm_max_tokens.sql`) replaces the hardcoded 8192 `max_tokens` across all LLM providers. Settings UI gains a general "Max Output Tokens" input and an expanded provider status display (human-readable provider name, Model, DeepSeek Thinking/Effort, Max tokens). Validation in `UserController.updateSettings` (400 on out-of-range); 7 new cases in `test/settingsValidation.test.js`. See section 8.4.
 - **Dependabot fixes (Plan 044)** — `react-router-dom` exact-pinned to 6.30.4 (transitive `react-router` 6.30.4, `@remix-run/router` 1.23.3) and `postcss` 8.5.25, resolving 4 of 6 alerts. The remaining two react-router advisories were then resolved by the v7 migration (Plan 045).
-- **react-router v7 migration (Plan 045)** — `react-router-dom` 6.30.4 replaced with `react-router` 7.18.2 (exact pin); all 8 frontend files now import from `react-router`. Resolves GHSA-wrjc-x8rr-h8h6 and GHSA-337j-9hxr-rhxg. `npm audit` now reports GHSA-qwww-vcr4-c8h2 (high, RSC-mode CSRF, 7.12.0–8.2.0) — not exploitable in this pure client-side SPA (no SSR/RSC); only fixed in v8.3.0 (breaking), so a v8 migration is the tracked future path.
+- **react-router v7 migration (Plan 045)** — `react-router-dom` 6.30.4 replaced with `react-router` 7.18.2 (exact pin); all 8 frontend files now import from `react-router`. Resolves GHSA-wrjc-x8rr-h8h6 and GHSA-337j-9hxr-rhxg. The v8 upgrade was completed in Plan 047.
 - **Configurable Data Retention Policy (Plan 046)** — `retentionEnabled` (BOOLEAN, default false — opt-in) and `retentionDays` (INTEGER, default 365, range 90–365) on the Settings singleton (migration `011_add_retention_settings.sql`). `PUT /api/settings` validates both fields (400 on non-boolean / non-integer / out-of-range) and applies a TimescaleDB `add_retention_policy`/`remove_retention_policy` on the `Logs` hypertable using a remove-then-add idempotent pattern; the response includes `retentionPolicyApplied`. Frontend Settings page gains a "Data Retention" card (enable Switch + 90/120/180/365-day select, local error state, rollback on save failure). Validation mirrored in `test/settingsValidation.test.js` (10 new cases; suite now **61 tests**).
+- **Bleeding-edge dependency upgrade (Plan 047)** — backend (root `package.json`): `joi` 18.2.3, `express-rate-limit` 8.6.2, `pg` 8.22.0, `cors` 2.8.6, `express-session` 1.19.0, `nodemon` 3.1.14, `globals` 17.9.0, `lint-staged` 17.3.0. Frontend: `react`/`react-dom` 19.2.8, `react-router` **8.3.0** (exact pin — replaces `react-router-dom`, resolves GHSA-qwww-vcr4-c8h2), `vite` 8.2.0, `@vitejs/plugin-react` 5.2.0, `typescript` 7.0.2, `tailwindcss` 4.3.3 + `@tailwindcss/vite` 4.3.3, `zustand` 5.0.14, `@tanstack/react-query` 5.101.4, `react-markdown` 10.1.0, `react-leaflet` 5.0.0, `@types/react` 19.2.18, `@types/react-dom` 19.2.4. Infra: both Dockerfiles on `node:22-bookworm-slim`, CI workflows on Node 22, `timescale/timescaledb:2.29.1-pg16` in compose.
+- **Tremor replaced with native Tailwind (Plan 049)** — the `@tremor/react` dependency was removed; every Tremor component was reimplemented with plain Tailwind utilities, including a new accessible `Toggle` switch (`components/ui/Toggle.tsx`, sr-only label). `index.css` dropped the Tremor safelist directives and typography tokens. Bundle shrunk ~65 kB; all chunks now <400 kB (largest ~380 kB echarts) via Rolldown `codeSplitting` groups in `vite.config.ts`. See `docs/architecture.md` §3.8.
 - **Remaining open issues:** SSRF TOCTOU (documented in section 10 above — Known Issues / Follow-up Items).
 
 ---

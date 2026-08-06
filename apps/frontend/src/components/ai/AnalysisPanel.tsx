@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef, useImperativeHandle, forwardRef, useCallback } from 'react';
-import { Card, Title, Text } from '@tremor/react';
+import { useState, useEffect, useRef, useImperativeHandle, useCallback } from 'react';
+import type { Ref } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
@@ -14,10 +14,11 @@ export interface AnalysisPanelHandle {
 
 interface Props {
   sessionId: string;
+  /** React 19: ref is a regular prop — no forwardRef wrapper needed. */
+  ref?: Ref<AnalysisPanelHandle>;
 }
 
-const AnalysisPanel = forwardRef<AnalysisPanelHandle, Props>(
-  ({ sessionId }, ref) => {
+export default function AnalysisPanel({ sessionId, ref }: Props) {
     const [llmSettings, setLlmSettings] = useState<Settings | null>(null);
     const [stream, setStream] = useState<ReadableStream<Uint8Array> | null>(null);
     const [analyzing, setAnalyzing] = useState(false);
@@ -89,28 +90,28 @@ const AnalysisPanel = forwardRef<AnalysisPanelHandle, Props>(
 
     if (llmSettings && !llmSettings.hasLlmProvider) {
       return (
-        <Card>
-          <Title>AI Analysis</Title>
-          <Text className="mt-2 text-sm text-gray-500 dark:text-[var(--text-muted)]">
+        <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-6 shadow-xs">
+          <h3 className="text-lg font-semibold leading-relaxed">AI Analysis</h3>
+          <p className="mt-2 text-sm leading-relaxed text-gray-500 dark:text-[var(--text-muted)]">
             Configure an AI provider in{' '}
             <a href="/settings" className="text-indigo-600 hover:underline dark:text-indigo-400">
               Settings
             </a>{' '}
             to enable session analysis.
-          </Text>
-        </Card>
+          </p>
+        </div>
       );
     }
 
     return (
-      <Card ref={panelRef}>
+      <div ref={panelRef} className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-6 shadow-xs">
         <div className="space-y-4">
           <div className="flex items-center justify-between">
-            <Title>AI Analysis</Title>
+            <h3 className="text-lg font-semibold leading-relaxed">AI Analysis</h3>
           </div>
 
           {error && (
-            <Text className="text-sm text-rose-600 dark:text-rose-400">{error}</Text>
+            <p className="text-sm leading-relaxed text-rose-600 dark:text-rose-400">{error}</p>
           )}
 
           {stream && (
@@ -134,7 +135,7 @@ const AnalysisPanel = forwardRef<AnalysisPanelHandle, Props>(
 
           {pastAnalyses.length > 0 && (
             <div className="space-y-2">
-              <Text className="text-sm font-medium">Past Analyses</Text>
+              <p className="text-sm leading-relaxed font-medium">Past Analyses</p>
               {pastAnalyses.map((a) => (
                 <details key={a.id} className="rounded border border-[var(--border-default)] p-3 dark:border-[var(--border-strong)]">
                   <summary className="cursor-pointer text-sm text-gray-600 dark:text-gray-400">
@@ -179,10 +180,7 @@ const AnalysisPanel = forwardRef<AnalysisPanelHandle, Props>(
             </div>
           )}
         </div>
-      </Card>
+      </div>
     );
-  }
-);
+}
 
-AnalysisPanel.displayName = 'AnalysisPanel';
-export default AnalysisPanel;

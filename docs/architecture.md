@@ -338,10 +338,13 @@ configurable TimescaleDB retention policy for automatic cleanup:
 
 ## 3. Frontend Internals (`apps/frontend/`)
 
-Stack: **React 18 + TypeScript + Vite + Tailwind v4 + Tremor + ECharts +
-react-leaflet + TanStack Query + zustand + react-router 7** (migrated from
-`react-router-dom` 6 in Plan 045 — imports now come from the `react-router`
-package).
+Stack: **React 19 + TypeScript 7 + Vite 8 + Tailwind CSS 4 + ECharts +
+react-leaflet 5 + TanStack Query 5 + zustand 5 + react-router 8.3.0** (exact
+pin). Routing migrated from `react-router-dom` 6 → `react-router` 7 in Plan 045
+and upgraded to `react-router` **8.3.0** in Plan 047 (imports come from the
+`react-router` package). All UI is styled with native Tailwind utilities —
+**@tremor/react was removed in Plan 049** and its components (cards, buttons,
+tables, switch, etc.) were reimplemented with plain Tailwind classes.
 
 ### 3.1 App structure
 ```
@@ -468,7 +471,16 @@ extracts `[timestamp_ms, value]` pairs via the safe `coerceScalar()` helper.
 
 - **CSS custom properties** — colors (bg-base, bg-card, text-primary, accent, etc.) defined as CSS variables in `index.css`, with `.dark` class overrides for dark mode. Tailwind v4 uses a CSS-first configuration approach: all design tokens are defined in the `@theme` block in `index.css`, referenced as `var()` tokens (`--color-surface-base`, `--color-fg`, `--color-brand-accent`). The `tailwind.config.ts` file is reduced to a minimal placeholder since the JS config is no longer the primary source of truth.
 - **PostCSS replaced** — the `postcss.config.js` file has been removed. Tailwind is loaded via the `@tailwindcss/vite` Vite plugin (in `vite.config.ts`), with `@import "tailwindcss"` in `index.css` replacing the old `@tailwind base/components/utilities` directives.
-- **Tremor v3 compatibility** — Tremor v3 uses class names like `bg-tremor-brand-emphasis` or `rounded-tremor-default` that Tailwind v4 does not detect by default from `node_modules`. These are safelisted via `@source inline()` pattern directives in `index.css`, which replace the v3 `safelist: [{pattern: /.../}]` JS config approach. The Tremor `node_modules` directory is also scanned with `@source "../node_modules/@tremor/react/dist/**/*.{js,ts,jsx,tsx}"` so any Tremor classes found in source are picked up automatically.
+- **Tremor removed (Plan 049)** — the `@tremor/react` dependency and all Tremor
+  components were replaced with native Tailwind utilities (cards, buttons,
+  tables, badges, and a new accessible `Toggle` switch at
+  `components/ui/Toggle.tsx` with an sr-only label). The `@source inline()`
+  safelist directives and the Tremor `node_modules` scan that Tailwind v4 needed
+  to detect `bg-tremor-*` classes were removed from `index.css`, and the
+  Tremor-specific `--text-tremor-*` typography tokens were replaced with plain
+  Tailwind text utilities. Bundle size dropped ~65 kB; all chunks are now
+  <400 kB (largest: echarts at ~380 kB, split via Rolldown `codeSplitting`
+  groups in `vite.config.ts`).
 - **Typography** — Google Fonts: Space Grotesk for display/body text, Martian Mono for monospace data. Font stacks are exposed as `--font-display`, `--font-body`, `--font-mono` CSS variables and mapped to Tailwind theme values (`--font-display`, `--font-body`, `--font-mono`) in the `@theme` block.
 - **Dark mode** — managed by `lib/theme.ts`: detects `prefers-color-scheme`, persists choice to localStorage, provides `getTheme()` / `setTheme()` / `toggleTheme()`. The theme toggle button (sun/moon icons) lives in `AppShell` and applies the `.dark` class on `<html>`. The custom variant `@custom-variant dark (&:where(.dark, .dark *));` in `index.css` enables `dark:` class-based Tailwind variants.
 - **Mobile drawer** — `MobileDrawer.tsx` renders a slide-out navigation panel with backdrop overlay, Escape-to-close, focus-on-open, and dark mode support. Triggered by a hamburger button visible below the `md` breakpoint.
@@ -479,12 +491,12 @@ extracts `[timestamp_ms, value]` pairs via the safe `coerceScalar()` helper.
 
 The following modern CSS and UX enhancements were applied in the UI refinement pass:
 
-- **Brand color shift** — Primary accent changed from amber (`#f59e0b`) to teal (`#009999` light / `#2ec4b6` dark). Tremor brand tokens, chart series colors (COLORS[0]), map polylines, gauge rings, sidebar logos, login/register panels, focus rings, and `accent-color` all use the teal palette.
+- **Brand color shift** — Primary accent changed from amber (`#f59e0b`) to teal (`#009999` light / `#2ec4b6` dark). Brand design tokens, chart series colors (COLORS[0]), map polylines, gauge rings, sidebar logos, login/register panels, focus rings, and `accent-color` all use the teal palette.
 - **`light-dark()` CSS function** — All color tokens (`--bg-base`, `--text-primary`, `--accent`, `--border-default`, etc.) are defined once in `:root` using `light-dark(lightValue, darkValue)`. This eliminates the need to redeclare every variable in `.dark {}`. The `.dark` class block is retained as a fallback for browsers that don't support `light-dark()` yet.
 - **`color-scheme` declaration** — `color-scheme: light dark` in CSS + `<meta name="color-scheme" content="light dark">` in `index.html`. Browser UI (scrollbars, form controls) automatically adapts to the system theme.
 - **`accent-color: var(--accent)`** — Checkboxes, radio buttons, range sliders, and other native form controls inherit the teal brand color.
 - **Custom scrollbar theming** — `scrollbar-color` + `scrollbar-width` set via CSS custom properties with `light-dark()` values, so scrollbars match the active theme.
-- **Fluid typography** — `--text-tremor-title: clamp(1rem, 1.5cqi, 1.125rem)` and `--text-tremor-metric: clamp(1.5rem, 2cqi, 1.875rem)` for responsive font sizing that scales with the container.
+- **Fluid typography** — responsive font sizing that scales with the container (e.g. `clamp()`-based sizes for section titles and metric values; the old Tremor-derived `--text-tremor-*` tokens were removed with the Tremor migration in Plan 049).
 - **Native `<dialog>` for fullscreen chart** — The expanded chart overlay in `ReplayDashboard` uses `<dialog closedby="any">` with `showModal()`/`close()` for proper modal behavior (focus trapping, Escape key, light-dismiss). Safari fallback adds a click-outside handler for browsers without `closedby` support.
 - **Scroll-driven animations** — Dashboard session cards use `animation-timeline: view()` with `animation-range` for entry reveals as cards scroll into the viewport, without JavaScript scroll listeners.
 - **View Transitions API** — Crossfade page navigation via `::view-transition-old(root)` and `::view-transition-new(root)` keyframe animations. The main content area carries `viewTransitionName: 'main-content'` in AppShell.

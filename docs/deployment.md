@@ -66,7 +66,7 @@ This pulls three images and starts the services:
 
 | Service | Image | Port |
 |---------|-------|------|
-| `db` | `timescale/timescaledb:2.15.3-pg16` | internal only |
+| `db` | `timescale/timescaledb:2.29.1-pg16` | internal only |
 | `backend` | `ghcr.io/moesix/torque-dash-next-backend` | `3000` |
 | `frontend` | `ghcr.io/moesix/torque-dash-next-frontend` | `8080` |
 
@@ -155,6 +155,42 @@ docker compose up -d
 Data is persisted in the `pgdata` Docker volume — it survives container
 recreations. The TimescaleDB migration runs automatically on startup if needed.
 
+### ⚠️ TimescaleDB extension upgrade (2.15.3 → 2.29.1)
+
+The TimescaleDB **extension does NOT auto-upgrade with the container image**.
+Pulling `timescale/timescaledb:2.29.1-pg16` and recreating the `db` container
+updates the TimescaleDB binaries, but the `timescaledb` extension inside your
+existing database stays on the old version (2.15.3) until an operator runs the
+SQL upgrade. Until then, newer extension features may be unavailable and
+`\dx timescaledb` still reports the old version.
+
+After the upgrade deploy, run this once per database (the `db` service user in
+compose is a superuser):
+
+```bash
+# Inside the db container, as the compose database user:
+docker compose exec db \
+  psql -U torquedash -d torquedash -c "ALTER EXTENSION timescaledb UPDATE;"
+```
+
+Verify the new version:
+
+```bash
+docker compose exec db \
+  psql -U torquedash -d torquedash -c "SELECT extversion FROM pg_extension WHERE extname = 'timescaledb';"
+# expect: 2.29.1
+```
+
+Notes:
+
+- `ALTER EXTENSION timescaledb UPDATE;` upgrades the extension in place without
+  downtime; existing hypertables and policies (compression, retention) are
+  preserved and upgraded automatically.
+- The default compose user is `torquedash` — substitute your `POSTGRES_USER` /
+  `POSTGRES_DB` if you changed them in `.env`.
+- Fresh deployments (no pre-existing `pgdata`) initialize the extension at the
+  image version on first start and need no manual step.
+
 ---
 
 ## 7. Backup and restore
@@ -238,7 +274,7 @@ docker compose down -v
                                             edge / public
 ```
 
-- **db** — TimescaleDB on PostgreSQL 16. Hypertable with compression (7-day
+- **db** — TimescaleDB 2.29 on PostgreSQL 16. Hypertable with compression (7-day
   policy). Data in `pgdata` volume.
 - **backend** — Node.js/Express API. Runs as non-root user (`appuser`).
   Handles telemetry ingestion, auth, session management.

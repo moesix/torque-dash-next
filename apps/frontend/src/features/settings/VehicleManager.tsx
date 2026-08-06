@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react';
-import { Card, Text, Title } from '@tremor/react';
 import {
   getVehicles,
   createVehicle,
@@ -84,18 +83,18 @@ export default function VehicleManager() {
   }
 
   if (loading) {
-    return <Card><Text>Loading vehicles...</Text></Card>;
+    return <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-6 shadow-xs"><p className="text-sm leading-relaxed">Loading vehicles...</p></div>;
   }
 
   return (
-    <Card>
+    <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-6 shadow-xs">
       <div className="flex items-center justify-between">
         <div>
-          <Title>Vehicles</Title>
-          <Text className="mt-1 text-sm text-gray-500 dark:text-[var(--text-muted)]">
+          <h3 className="text-lg font-semibold leading-relaxed">Vehicles</h3>
+          <p className="mt-1 text-sm leading-relaxed text-gray-500 dark:text-[var(--text-muted)]">
             Manage your vehicle profiles. The default vehicle is used when Torque
             Pro doesn&rsquo;t send vehicle metadata.
-          </Text>
+          </p>
         </div>
         <button
           type="button"
@@ -107,7 +106,7 @@ export default function VehicleManager() {
       </div>
 
       {error && (
-        <Text className="mt-3 text-sm text-rose-600 dark:text-rose-400">{error}</Text>
+        <p className="mt-3 text-sm leading-relaxed text-rose-600 dark:text-rose-400">{error}</p>
       )}
 
       {/* Add form */}
@@ -125,9 +124,9 @@ export default function VehicleManager() {
       {/* Vehicle list */}
       <div className="mt-4 space-y-3">
         {vehicles.length === 0 && (
-          <Text className="text-sm text-gray-500 dark:text-[var(--text-muted)]">
+          <p className="text-sm leading-relaxed text-gray-500 dark:text-[var(--text-muted)]">
             No vehicles yet. Add one to start organizing your sessions.
-          </Text>
+          </p>
         )}
         {vehicles.map((v) => (
           <div
@@ -154,10 +153,10 @@ export default function VehicleManager() {
                       </span>
                     )}
                   </div>
-                  <Text className="text-sm text-gray-500 dark:text-[var(--text-muted)]">
+                  <p className="text-sm leading-relaxed text-gray-500 dark:text-[var(--text-muted)]">
                     {[v.year, v.make, v.model].filter(Boolean).join(' ') || 'No details'}
                     {v.engineCc ? ` · ${v.engineCc}cc` : ''}
-                  </Text>
+                  </p>
                 </div>
                 <div className="flex items-center gap-1">
                   {!v.isDefault && (
@@ -199,7 +198,7 @@ export default function VehicleManager() {
           </div>
         ))}
       </div>
-    </Card>
+    </div>
   );
 }
 
