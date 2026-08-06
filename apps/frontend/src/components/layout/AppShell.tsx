@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { Outlet, useLocation, useNavigate } from 'react-router';
 import { logout } from '@/lib/api';
 import MobileDrawer from '@/components/layout/MobileDrawer';
 import { toggleTheme, getTheme } from '@/lib/theme';

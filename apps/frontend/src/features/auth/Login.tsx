@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import type { FormEvent } from 'react';
-import { useNavigate, Navigate } from 'react-router-dom';
+import { useNavigate, Navigate } from 'react-router';
 import { Button } from '@tremor/react';
 import { login, getSettings, getVersion } from '@/lib/api';
 import { useAuth } from './useAuth';
