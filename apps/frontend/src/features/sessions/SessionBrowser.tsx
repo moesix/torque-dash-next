@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Card, Text, Title } from '@tremor/react';
 import { getSessions, getVehicles } from '@/lib/api';
 import type { Vehicle } from '@/lib/types';
 import Skeleton from '@/components/ui/Skeleton';
@@ -28,9 +27,9 @@ export default function SessionBrowser() {
 
   if (isLoading) {
     return (
-      <Card>
-        <Title>Your Sessions</Title>
-        <Text>Select a session to replay its telemetry.</Text>
+      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-6 shadow-xs">
+        <h3 className="text-lg font-semibold leading-relaxed">Your Sessions</h3>
+        <p className="text-sm leading-relaxed">Select a session to replay its telemetry.</p>
         <div className="mt-4 space-y-3">
           {Array.from({ length: 5 }).map((_, i) => (
             <div key={i} className="flex items-center gap-4 p-2">
@@ -40,29 +39,29 @@ export default function SessionBrowser() {
             </div>
           ))}
         </div>
-      </Card>
+      </div>
     );
   }
 
   if (isError) {
     return (
-      <Card>
-        <Title>Your Sessions</Title>
-        <Text>Select a session to replay its telemetry.</Text>
+      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-6 shadow-xs">
+        <h3 className="text-lg font-semibold leading-relaxed">Your Sessions</h3>
+        <p className="text-sm leading-relaxed">Select a session to replay its telemetry.</p>
         <div className="mt-4">
           <ErrorAlert
             message="Failed to load sessions. You may need to sign in again."
             onRetry={() => window.location.reload()}
           />
         </div>
-      </Card>
+      </div>
     );
   }
 
   return (
-    <Card className="session-card">
-      <Title>Your Sessions</Title>
-      <Text>Select a session to replay its telemetry.</Text>
+    <div className="session-card rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-6 shadow-xs">
+      <h3 className="text-lg font-semibold leading-relaxed">Your Sessions</h3>
+      <p className="text-sm leading-relaxed">Select a session to replay its telemetry.</p>
       {vehicles.length > 0 && (
         <div className="mt-4 flex items-center gap-2">
           <label htmlFor="vehicle-filter" className="text-sm text-gray-600 dark:text-[var(--text-secondary)]">
@@ -99,8 +98,8 @@ export default function SessionBrowser() {
         </div>
       ) : null}
       {!isLoading && total === 0 ? (
-        <Text className="mt-4">No sessions yet.</Text>
+        <p className="mt-4 text-sm leading-relaxed">No sessions yet.</p>
       ) : null}
-    </Card>
+    </div>
   );
 }

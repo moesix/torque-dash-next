@@ -1,5 +1,3 @@
-import { Card, Text, Title } from '@tremor/react';
-
 interface Props {
   title: string;
   value: number;
@@ -8,7 +6,7 @@ interface Props {
 }
 
 /**
- * Lightweight SVG ring gauge wrapped in a Tremor Card. Implemented with raw SVG
+ * Lightweight SVG ring gauge wrapped in a card. Implemented with raw SVG
  * (instead of a charting lib) to keep the bundle small and avoid dependency on
  * a gauge component the design system may not ship.
  */
@@ -21,8 +19,8 @@ export default function GaugeTile({ title, value, max, unit = '' }: Props) {
   const display = Math.round(safeValue);
 
   return (
-    <Card>
-      <Title>{title}</Title>
+    <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-6 shadow-xs">
+      <h3 className="text-lg font-semibold leading-relaxed">{title}</h3>
       <div className="flex items-center justify-center py-2">
         <svg
           width="140"
@@ -71,7 +69,7 @@ export default function GaugeTile({ title, value, max, unit = '' }: Props) {
           </text>
         </svg>
       </div>
-      <Text className="text-center text-xs">of {Math.round(max)}{unit}</Text>
-    </Card>
+      <p className="text-center text-xs leading-relaxed">of {Math.round(max)}{unit}</p>
+    </div>
   );
 }

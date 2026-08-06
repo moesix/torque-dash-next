@@ -1,15 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
-import {
-  Table,
-  TableHead,
-  TableHeaderCell,
-  TableBody,
-  TableRow,
-  TableCell,
-  Text,
-} from '@tremor/react';
 import type { Session } from '@/lib/types';
 import { renameSession } from '@/lib/api';
 
@@ -71,31 +62,31 @@ export default function SessionTable({ sessions }: Props) {
   };
 
   return (
-    <Table>
-      <TableHead>
-        <TableRow>
-          <TableHeaderCell>Vehicle / Name</TableHeaderCell>
-          <TableHeaderCell>Vehicle</TableHeaderCell>
-          <TableHeaderCell>Start</TableHeaderCell>
-          <TableHeaderCell>Duration</TableHeaderCell>
-          <TableHeaderCell>Max Speed</TableHeaderCell>
-          <TableHeaderCell>Max RPM</TableHeaderCell>
-        </TableRow>
-      </TableHead>
-      <TableBody>
+    <table className="w-full text-left text-sm">
+      <thead className="border-b border-gray-200 dark:border-[var(--border-default)]">
+        <tr>
+          <th className="py-2.5 px-4 font-medium text-gray-500 dark:text-[var(--text-muted)] text-xs uppercase tracking-wider">Vehicle / Name</th>
+          <th className="py-2.5 px-4 font-medium text-gray-500 dark:text-[var(--text-muted)] text-xs uppercase tracking-wider">Vehicle</th>
+          <th className="py-2.5 px-4 font-medium text-gray-500 dark:text-[var(--text-muted)] text-xs uppercase tracking-wider">Start</th>
+          <th className="py-2.5 px-4 font-medium text-gray-500 dark:text-[var(--text-muted)] text-xs uppercase tracking-wider">Duration</th>
+          <th className="py-2.5 px-4 font-medium text-gray-500 dark:text-[var(--text-muted)] text-xs uppercase tracking-wider">Max Speed</th>
+          <th className="py-2.5 px-4 font-medium text-gray-500 dark:text-[var(--text-muted)] text-xs uppercase tracking-wider">Max RPM</th>
+        </tr>
+      </thead>
+      <tbody className="divide-y divide-gray-100 dark:divide-[var(--border-default)]">
         {sessions.length === 0 ? (
-          <TableRow>
-            <TableCell colSpan={6}>
-              <Text>No sessions yet.</Text>
-            </TableCell>
-          </TableRow>
+          <tr>
+            <td colSpan={6} className="py-2.5 px-4">
+              <p className="text-sm leading-relaxed">No sessions yet.</p>
+            </td>
+          </tr>
         ) : (
           sessions.map((s) => {
             const maxSpeed = s.maxSpeed ?? null;
             const maxRpm = s.maxRpm ?? null;
             const isEditing = editingId === s.id;
             return (
-              <TableRow
+              <tr
                 key={s.id}
                 tabIndex={isEditing ? -1 : 0}
                 role="button"
@@ -109,7 +100,7 @@ export default function SessionTable({ sessions }: Props) {
                 }}
                 className="card-hover cursor-pointer hover:bg-gray-50 dark:hover:bg-[var(--bg-surface)]"
               >
-                <TableCell>
+                <td className="py-2.5 px-4">
                   {isEditing ? (
                     <input
                       ref={inputRef}
@@ -140,25 +131,25 @@ export default function SessionTable({ sessions }: Props) {
                       </button>
                     </span>
                   )}
-                </TableCell>
-                <TableCell>
+                </td>
+                <td className="py-2.5 px-4">
                   {s.vehicleName || <span className="text-gray-400 dark:text-[var(--text-muted)] italic">Unassigned</span>}
-                </TableCell>
-                <TableCell>
+                </td>
+                <td className="py-2.5 px-4">
                   {s.startDate
                     ? new Date(s.startDate).toLocaleString()
                     : '—'}
-                </TableCell>
-                <TableCell>{s.duration || '—'}</TableCell>
-                <TableCell>
+                </td>
+                <td className="py-2.5 px-4">{s.duration || '—'}</td>
+                <td className="py-2.5 px-4">
                   {maxSpeed != null ? `${Math.round(maxSpeed)} km/h` : '—'}
-                </TableCell>
-                <TableCell>{maxRpm != null ? Math.round(maxRpm) : '—'}</TableCell>
-              </TableRow>
+                </td>
+                <td className="py-2.5 px-4">{maxRpm != null ? Math.round(maxRpm) : '—'}</td>
+              </tr>
             );
           })
         )}
-      </TableBody>
-    </Table>
+      </tbody>
+    </table>
   );
 }

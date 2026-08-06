@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import type { FormEvent } from 'react';
 import { useNavigate, Navigate } from 'react-router';
-import { Button } from '@tremor/react';
 import { register, getSettings } from '@/lib/api';
 import { useAuth } from './useAuth';
 
@@ -169,9 +168,17 @@ export default function Register() {
                 {error}
               </p>
             )}
-            <Button type="submit" disabled={busy} className="w-full">
+            <button
+              type="submit"
+              disabled={busy}
+              className="w-full rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white
+                shadow-xs transition hover:bg-indigo-700
+                focus:outline-none focus:ring-2 focus:ring-indigo-500/20
+                disabled:cursor-not-allowed disabled:opacity-50
+                dark:bg-indigo-500 dark:hover:bg-indigo-600"
+            >
               {busy ? 'Creating…' : 'Create account'}
-            </Button>
+            </button>
           </form>
 
           <p className="mt-6 text-center text-sm text-gray-500 dark:text-gray-400">

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
-import { Card, Text, Title, Switch } from '@tremor/react';
 import { getSettings, updateSettings, generateUploadToken, getVersion } from '@/lib/api';
 import type { Settings } from '@/lib/types';
+import Toggle from '@/components/ui/Toggle';
 import AiProviderCard from './AiProviderCard';
 import VehicleManager from './VehicleManager';
 
@@ -119,49 +119,50 @@ export default function SettingsPage() {
     <div className="max-w-2xl space-y-4">
       <div>
         <div className="flex items-center gap-2">
-          <Title>Settings</Title>
+          <h3 className="text-lg font-semibold leading-relaxed">Settings</h3>
           {version && (
             <span className="text-sm text-gray-500 dark:text-gray-400">
               v{version}
             </span>
           )}
         </div>
-        <Text className="mt-1 dark:text-[var(--text-secondary)]">Global site configuration.</Text>
+        <p className="mt-1 text-sm leading-relaxed dark:text-[var(--text-secondary)]">Global site configuration.</p>
       </div>
-      <Card>
+      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-6 shadow-xs">
         <div className="flex items-center justify-between">
           <div>
-            <Text className="font-medium">Disable registration</Text>
-            <Text className="mt-1 text-sm text-gray-500 dark:text-[var(--text-muted)]">
+            <p className="text-sm leading-relaxed font-medium">Disable registration</p>
+            <p className="mt-1 text-sm leading-relaxed text-gray-500 dark:text-[var(--text-muted)]">
               Close public signups. The deploy-time env var DISABLE_REGISTRATION
               always wins if set to true.
-            </Text>
+            </p>
           </div>
-          <Switch
+          <Toggle
             checked={disableRegistration}
             disabled={busy}
             onChange={(checked: boolean) => onToggle(checked)}
+            label="Disable registration"
           />
         </div>
         {error ? (
-          <Text className="mt-3 text-sm text-rose-600 dark:text-rose-400">{error}</Text>
+          <p className="mt-3 text-sm leading-relaxed text-rose-600 dark:text-rose-400">{error}</p>
         ) : null}
         {saved ? (
-          <Text className="mt-3 text-sm text-emerald-600 dark:text-emerald-400">Saved.</Text>
+          <p className="mt-3 text-sm leading-relaxed text-emerald-600 dark:text-emerald-400">Saved.</p>
         ) : null}
-      </Card>
+      </div>
 
-      <Card>
+      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-6 shadow-xs">
         <div className="space-y-4">
           <div>
-            <Text className="font-medium">Upload API Token</Text>
-            <Text className="mt-1 text-sm text-gray-500 dark:text-[var(--text-muted)]">
+            <p className="text-sm leading-relaxed font-medium">Upload API Token</p>
+            <p className="mt-1 text-sm leading-relaxed text-gray-500 dark:text-[var(--text-muted)]">
               A bearer token required for telemetry uploads. When set, the Torque
               app must include this token to authenticate uploads. This prevents
               unauthorized data ingestion using only a known email address.
               Generate a token and paste it into your Torque app&rsquo;s
               configuration. The token is shown only once.
-            </Text>
+            </p>
           </div>
 
           <div className="flex items-center gap-2">
@@ -182,10 +183,10 @@ export default function SettingsPage() {
           </div>
 
           {tokenFromEnv ? (
-            <Text className="text-sm text-amber-600 dark:text-amber-400">
+            <p className="text-sm leading-relaxed text-amber-600 dark:text-amber-400">
               Token is managed via the <code className="font-mono bg-amber-50 px-1 rounded dark:bg-amber-900/40 dark:text-amber-300">UPLOAD_API_TOKEN</code> environment
               variable. Unset it to manage the token through the app UI.
-            </Text>
+            </p>
           ) : null}
 
           {tokenInput ? (
@@ -202,9 +203,9 @@ export default function SettingsPage() {
                   {tokenCopied ? 'Copied!' : 'Copy'}
                 </button>
               </div>
-              <Text className="text-xs text-amber-600 dark:text-amber-400">
+              <p className="text-xs leading-relaxed text-amber-600 dark:text-amber-400">
                 Copy this token now. It won&rsquo;t be shown again.
-              </Text>
+              </p>
             </div>
           ) : null}
 
@@ -230,22 +231,22 @@ export default function SettingsPage() {
           </div>
 
           {tokenError ? (
-            <Text className="text-sm text-rose-600 dark:text-rose-400">{tokenError}</Text>
+            <p className="text-sm leading-relaxed text-rose-600 dark:text-rose-400">{tokenError}</p>
           ) : null}
         </div>
-      </Card>
+      </div>
 
       <AiProviderCard settings={llmSettings} onUpdate={setLlmSettings} />
       <VehicleManager />
 
-      <Card>
+      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-6 shadow-xs">
         <div className="space-y-4">
           <div>
-            <Text className="font-medium">Timezone</Text>
-            <Text className="mt-1 text-sm text-gray-500 dark:text-[var(--text-muted)]">
+            <p className="text-sm leading-relaxed font-medium">Timezone</p>
+            <p className="mt-1 text-sm leading-relaxed text-gray-500 dark:text-[var(--text-muted)]">
               Your UTC offset in minutes. Used to format session names with your
               local time. For example, UTC+8 (Malaysia) = 480, UTC-5 (EST) = -300.
-            </Text>
+            </p>
           </div>
 
           <div className="flex items-center gap-3">
@@ -278,24 +279,24 @@ export default function SettingsPage() {
             </span>
           </div>
         </div>
-      </Card>
+      </div>
 
-      <Card>
+      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-6 shadow-xs">
         <div className="space-y-4">
           <div>
-            <Text className="font-medium">Data Retention</Text>
-            <Text className="mt-1 text-sm text-gray-500 dark:text-[var(--text-muted)]">
+            <p className="text-sm leading-relaxed font-medium">Data Retention</p>
+            <p className="mt-1 text-sm leading-relaxed text-gray-500 dark:text-[var(--text-muted)]">
               Automatically delete telemetry data older than the specified number
               of days. This helps manage database size. When disabled, all data
               is retained indefinitely.
-            </Text>
+            </p>
           </div>
 
           <div className="flex items-center justify-between">
             <div>
-              <Text className="text-sm">Enable auto-cleanup</Text>
+              <p className="text-sm leading-relaxed">Enable auto-cleanup</p>
             </div>
-            <Switch
+            <Toggle
               checked={llmSettings.retentionEnabled ?? false}
               onChange={(checked: boolean) => {
                 const next = { ...llmSettings, retentionEnabled: checked };
@@ -308,6 +309,7 @@ export default function SettingsPage() {
                   });
                 });
               }}
+              label="Enable auto-cleanup"
             />
           </div>
 
@@ -349,10 +351,10 @@ export default function SettingsPage() {
           )}
 
           {retentionError ? (
-            <Text className="mt-2 text-sm text-rose-600 dark:text-rose-400">{retentionError}</Text>
+            <p className="mt-2 text-sm leading-relaxed text-rose-600 dark:text-rose-400">{retentionError}</p>
           ) : null}
         </div>
-      </Card>
+      </div>
     </div>
   );
 }

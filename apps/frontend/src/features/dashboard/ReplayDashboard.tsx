@@ -16,7 +16,6 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useParams } from 'react-router';
-import { Card, Title } from '@tremor/react';
 import { getSession, getTelemetry, exportSessionCsv, updateSessionNotes, getVehicles, reassignSessionVehicle } from '@/lib/api';
 import type { AnalysisPanelHandle } from '@/components/ai/AnalysisPanel';
 import type { Vehicle } from '@/lib/types';
@@ -225,46 +224,46 @@ export default function ReplayDashboard() {
         {/* Controls + Gauges skeleton */}
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
         <div className="lg:w-2/3 self-start">
-            <Card>
+            <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-6 shadow-xs">
               <Skeleton className="h-12 w-full" />
-            </Card>
+            </div>
           </div>
           <div className="lg:w-1/3">
-            <Card>
+            <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-6 shadow-xs">
               <div className="flex justify-around">
                 <Skeleton className="h-20 w-20" />
                 <Skeleton className="h-20 w-20" />
                 <Skeleton className="h-20 w-20" />
               </div>
-            </Card>
+            </div>
           </div>
         </div>
 
         {/* Chart area skeleton */}
-        <Card>
+        <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-6 shadow-xs">
           <Skeleton className="h-4 w-24 mb-4" />
           <Skeleton className="h-64 w-full" />
-        </Card>
+        </div>
 
         {/* Map + Metrics skeleton */}
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-          <Card className="lg:col-span-2">
+          <div className="lg:col-span-2 rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-6 shadow-xs">
             <Skeleton className="h-4 w-24 mb-4" />
             <Skeleton className="h-48 w-full" />
-          </Card>
-          <Card>
+          </div>
+          <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-6 shadow-xs">
             <Skeleton className="h-4 w-24 mb-4" />
             <Skeleton className="h-32 w-full" />
-          </Card>
+          </div>
         </div>
       </div>
     );
   }
   if (sessionQuery.isError || !sessionQuery.data) {
     return (
-      <Card>
+      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-6 shadow-xs">
         <ErrorAlert message="Session not found." />
-      </Card>
+      </div>
     );
   }
 
@@ -386,8 +385,8 @@ export default function ReplayDashboard() {
           maxSpeed={maxSpeed}
           maxCoolant={maxCoolant}
         />
-        <Card>
-          <Title>Metrics</Title>
+        <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-6 shadow-xs">
+          <h3 className="text-lg font-semibold leading-relaxed">Metrics</h3>
           <PidTogglePanel
             available={available}
             selected={selectedPids}
@@ -396,15 +395,15 @@ export default function ReplayDashboard() {
             onClear={handleClear}
             onReset={handleReset}
           />
-        </Card>
+        </div>
         <DecodedMetricsTable sources={available} seriesData={allSeriesData} />
       </div>
 
       {/* Time Series — full width */}
       <div className="animate-slide-up-delay-3">
-        <Card>
+        <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-6 shadow-xs">
           <div className="flex items-center justify-between">
-            <Title>Time Series</Title>
+            <h3 className="text-lg font-semibold leading-relaxed">Time Series</h3>
             <button
               type="button"
               onClick={handleExpand}
@@ -420,7 +419,7 @@ export default function ReplayDashboard() {
             cursorTime={cursorTime}
             onCursorMove={handleCursorMove}
           />
-        </Card>
+        </div>
 
         <dialog
           ref={dialogRef}
@@ -429,9 +428,9 @@ export default function ReplayDashboard() {
           aria-label="Expanded chart"
           onClose={handleCollapse}
         >
-          <Card className="h-full">
+          <div className="h-full rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-6 shadow-xs">
             <div className="flex items-center justify-between">
-              <Title>Time Series</Title>
+              <h3 className="text-lg font-semibold leading-relaxed">Time Series</h3>
               <button
                 type="button"
                 onClick={handleCollapse}
@@ -448,7 +447,7 @@ export default function ReplayDashboard() {
               onCursorMove={handleCursorMove}
               className="h-full"
             />
-          </Card>
+          </div>
         </dialog>
       </div>
 
@@ -459,8 +458,8 @@ export default function ReplayDashboard() {
 
       {/* GPS Track — full width */}
       <div className="animate-slide-up-delay-4">
-        <Card>
-          <Title>GPS Track</Title>
+        <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-6 shadow-xs">
+          <h3 className="text-lg font-semibold leading-relaxed">GPS Track</h3>
           {telemetryQuery.isLoading ? (
             <Skeleton className="mt-2 h-48 w-full" />
           ) : (
@@ -468,7 +467,7 @@ export default function ReplayDashboard() {
               <GpsTrackMap frames={frames} />
             </div>
           )}
-        </Card>
+        </div>
       </div>
 
       {/* AI Analysis confirmation dialog */}
