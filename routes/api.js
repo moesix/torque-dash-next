@@ -42,7 +42,17 @@ const sharedLimiter = makeLimiter({
 // limiter entirely. This lets the known uploader flush backlog freely without
 // opening a spoofable hole: the token is a secret configured in the Torque app,
 // not a guessable query param, and cloudflared forwards the header intact.
-const uploadLimiter = makeLimiter(rateLimits.upload);
+const uploadLimiter = makeLimiter({
+    ...rateLimits.upload,
+    // Skip the limiter for requests presenting the configured upload API token
+    // (env UPLOAD_API_TOKEN, or the DB-stored token). Read from the runtime
+    // holder per request so the DB is not hit on the hot /upload path.
+    skip: (req) => {
+        const token = runtime.getUploadApiToken();
+        return Boolean(token) &&
+            (req.headers.authorization || '') === `Bearer ${token}`;
+    },
+});
 router.get('/upload', uploadLimiter, UploadController.processUpload);
 
 // Stricter limiter for auth endpoints to slow brute-force / credential spray.

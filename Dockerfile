@@ -1,7 +1,8 @@
 # torque-dash-next backend image
-FROM node:20-bookworm-slim
+FROM node:22-bookworm-slim
 
-# bcrypt@3 is a native addon compiled at install time, so we need build tools.
+# bcrypt is a native addon (node-gyp): prebuilds are fetched when available,
+# but source compilation may happen at install time, so we need build tools.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends python3 make g++ \
  && rm -rf /var/lib/apt/lists/*
