@@ -22,6 +22,8 @@ A self-hosted dashboard for [Torque Pro](https://torque-bhp.com/) vehicle teleme
 | **DeepSeek first-class** | `deepseek-v4-flash` / `deepseek-v4-pro` with chain-of-thought Thinking Mode and configurable reasoning effort (High / Max). |
 | **PID decode engine** | Auto-discovers every OBD-II parameter from Torque's `values` JSONB — no schema changes when you add new PIDs. |
 | **Session management** | Auto-named trips (`Trip DDMMYYYY HH:MM AM/PM`), inline rename, shareable links. |
+| **Configurable data retention** | Opt-in TimescaleDB retention policy auto-deletes telemetry older than 90/120/180/365 days — off by default (all data kept indefinitely), toggled from the Settings page. |
+| **React Router v7** | Frontend routing upgraded from `react-router-dom` 6 to `react-router` 7.18.2 (exact pin), resolving the remaining react-router Dependabot advisories on the 6.x line. |
 
 ## Quick start
 

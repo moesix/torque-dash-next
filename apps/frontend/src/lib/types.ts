@@ -108,6 +108,12 @@ export interface Settings {
 
   /** Timezone offset in minutes from UTC (e.g. 480 for UTC+8). */
   timezoneOffset?: number;
+
+  // ── Data retention (migration 011) ──────────────────────────────
+  /** When true, telemetry data older than retentionDays is auto-deleted. */
+  retentionEnabled?: boolean;
+  /** Retention window in days (90-365). Only applies when retentionEnabled. */
+  retentionDays?: number;
 }
 
 /** Response from POST /api/settings/upload-token (token generation). The full

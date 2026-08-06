@@ -1,5 +1,6 @@
 const User = require('../models').User;
 const Settings = require('../models').Settings;
+const sequelize = require('../models').sequelize;
 const passport = require('passport');
 const { nanoid } = require('nanoid');
 const crypto = require('crypto');
@@ -168,6 +169,8 @@ class UserController {
                 llmReasoningEffort: settings.llmReasoningEffort || 'high',
                 llmMaxTokens: settings.llmMaxTokens || 16384,
                 timezoneOffset: settings.timezoneOffset ?? 0,
+                retentionEnabled: settings.retentionEnabled ?? false,
+                retentionDays: settings.retentionDays ?? 365,
             });
         } catch (err) {
             console.error(err.message || err);
@@ -278,6 +281,25 @@ class UserController {
               updateData.timezoneOffset = off;
             }
 
+            // Handle retentionEnabled if provided
+            if (req.body.retentionEnabled !== undefined) {
+              if (typeof req.body.retentionEnabled !== 'boolean') {
+                return res.status(400).json({ error: 'retentionEnabled must be a boolean.' });
+              }
+              updateData.retentionEnabled = req.body.retentionEnabled;
+            }
+
+            // Handle retentionDays if provided
+            if (req.body.retentionDays !== undefined) {
+              if (typeof req.body.retentionDays !== 'number' || !Number.isInteger(req.body.retentionDays)) {
+                return res.status(400).json({ error: 'retentionDays must be an integer.' });
+              }
+              if (req.body.retentionDays < 90 || req.body.retentionDays > 365) {
+                return res.status(400).json({ error: 'retentionDays must be between 90 and 365.' });
+              }
+              updateData.retentionDays = req.body.retentionDays;
+            }
+
             // API key requires encryption
             if (llmApiKey !== undefined) {
               if (llmApiKey === null) {
@@ -294,6 +316,38 @@ class UserController {
             // Keep the runtime holder in sync
             if (uploadApiToken !== undefined) {
                 runtime.setUploadApiToken(uploadApiToken);
+            }
+
+            // Apply or remove TimescaleDB retention policy
+            let policyApplied = false;
+            if (updateData.retentionEnabled !== undefined || updateData.retentionDays !== undefined) {
+                const settings = await Settings.getSingleton();
+                if (settings.retentionEnabled) {
+                    // Remove existing policy first (idempotent)
+                    await sequelize.query(
+                        `SELECT remove_retention_policy('"Logs"', if_exists => true)`
+                    ).catch(err => {
+                        console.error('[UserController] Failed to remove retention policy:', err.message);
+                    });
+                    // Apply new policy — parameterized (defense-in-depth, removes
+                    // reliance on upstream validation); Number() cast keeps the
+                    // replacement binding numeric
+                    const [daysResult] = await sequelize.query(
+                        `SELECT add_retention_policy('"Logs"', make_interval(days => :days))`,
+                        { replacements: { days: Number(settings.retentionDays) } }
+                    ).catch(err => {
+                        console.error('[UserController] Failed to apply retention policy:', err.message);
+                        return [null];
+                    });
+                    policyApplied = Array.isArray(daysResult) && daysResult.length > 0;
+                } else {
+                    // Remove policy
+                    await sequelize.query(
+                        `SELECT remove_retention_policy('"Logs"', if_exists => true)`
+                    ).catch(err => {
+                        console.error('[UserController] Failed to remove retention policy:', err.message);
+                    });
+                }
             }
 
             // Re-fetch the full settings row to return complete state
@@ -315,6 +369,9 @@ class UserController {
                 llmReasoningEffort: current.llmReasoningEffort || 'high',
                 llmMaxTokens: current.llmMaxTokens || 16384,
                 timezoneOffset: current.timezoneOffset ?? 0,
+                retentionEnabled: current.retentionEnabled ?? false,
+                retentionDays: current.retentionDays ?? 365,
+                retentionPolicyApplied: policyApplied,
             });
         } catch (err) {
             console.error(err.message || err);
