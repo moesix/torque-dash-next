@@ -90,7 +90,7 @@ export default function AnalysisPanel({ sessionId, ref }: Props) {
 
     if (llmSettings && !llmSettings.hasLlmProvider) {
       return (
-        <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-6 shadow-xs">
+        <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
           <h3 className="text-lg font-semibold leading-relaxed">AI Analysis</h3>
           <p className="mt-2 text-sm leading-relaxed text-gray-500 dark:text-[var(--text-muted)]">
             Configure an AI provider in{' '}
@@ -104,7 +104,7 @@ export default function AnalysisPanel({ sessionId, ref }: Props) {
     }
 
     return (
-      <div ref={panelRef} className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-6 shadow-xs">
+      <div ref={panelRef} className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <h3 className="text-lg font-semibold leading-relaxed">AI Analysis</h3>

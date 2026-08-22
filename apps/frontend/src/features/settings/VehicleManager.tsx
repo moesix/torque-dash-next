@@ -83,12 +83,12 @@ export default function VehicleManager() {
   }
 
   if (loading) {
-    return <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-6 shadow-xs"><p className="text-sm leading-relaxed">Loading vehicles...</p></div>;
+    return <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs"><p className="text-sm leading-relaxed">Loading vehicles...</p></div>;
   }
 
   return (
-    <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-6 shadow-xs">
-      <div className="flex items-center justify-between">
+    <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h3 className="text-lg font-semibold leading-relaxed">Vehicles</h3>
           <p className="mt-1 text-sm leading-relaxed text-gray-500 dark:text-[var(--text-muted)]">
@@ -163,7 +163,7 @@ export default function VehicleManager() {
                     <button
                       type="button"
                       onClick={() => handleSetDefault(v.id)}
-                      className="rounded px-2 py-1 text-xs text-gray-500 hover:bg-gray-100 dark:text-[var(--text-muted)] dark:hover:bg-gray-700"
+                      className="rounded px-3 py-2 text-xs min-h-[36px] text-gray-500 hover:bg-gray-100 dark:text-[var(--text-muted)] dark:hover:bg-gray-700"
                       title="Set as default"
                     >
                       ★
@@ -181,14 +181,14 @@ export default function VehicleManager() {
                         engineCc: v.engineCc,
                       });
                     }}
-                    className="rounded px-2 py-1 text-xs text-gray-500 hover:bg-gray-100 dark:text-[var(--text-muted)] dark:hover:bg-gray-700"
+                    className="rounded px-3 py-2 text-xs min-h-[36px] text-gray-500 hover:bg-gray-100 dark:text-[var(--text-muted)] dark:hover:bg-gray-700"
                   >
                     Edit
                   </button>
                   <button
                     type="button"
                     onClick={() => handleDelete(v.id)}
-                    className="rounded px-2 py-1 text-xs text-red-500 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/30"
+                    className="rounded px-3 py-2 text-xs min-h-[36px] text-red-500 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/30"
                   >
                     Delete
                   </button>

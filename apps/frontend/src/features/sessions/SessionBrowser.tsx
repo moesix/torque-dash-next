@@ -74,7 +74,7 @@ export default function SessionBrowser() {
               setSelectedVehicleId(e.target.value === 'all' ? 'all' : Number(e.target.value));
               setOffset(0);
             }}
-            className="rounded border bg-white px-3 py-1.5 text-sm dark:border-[var(--border-default)] dark:bg-[var(--bg-surface)] dark:text-[var(--text-primary)]"
+            className="rounded border bg-white px-3 py-2.5 min-h-[44px] text-sm dark:border-[var(--border-default)] dark:bg-[var(--bg-surface)] dark:text-[var(--text-primary)]"
           >
             <option value="all">All vehicles</option>
             {vehicles.map((v) => (
@@ -85,7 +85,7 @@ export default function SessionBrowser() {
         </div>
       )}
       {sessions.length > 0 ? (
-        <div className="mt-4">
+        <div className="mt-4 overflow-x-auto">
           <SessionTable sessions={sessions} />
           {hasMore && (
             <button

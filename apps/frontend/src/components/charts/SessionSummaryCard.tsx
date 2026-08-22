@@ -184,7 +184,7 @@ export default function SessionSummaryCard({
   }, [cursorTime, sortedTimestamps, rpmData, coolantData, speedData, frames.length]);
 
   return (
-    <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-6 shadow-xs">
+    <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
       <h3 className="text-lg font-semibold leading-relaxed">Session Summary</h3>
 
       {/* Top: 3 SVG ring gauges */}

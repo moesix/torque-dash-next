@@ -42,7 +42,7 @@ export default function DecodedMetricsTable({ sources, seriesData }: Props) {
   const pidRows = rows.filter((r) => r.src.source === 'pid');
 
   return (
-    <div className="overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-6 shadow-xs">
+    <div className="overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-lg font-semibold leading-relaxed">Decoded Metrics</h3>
         <span className="text-xs text-gray-400 dark:text-[var(--text-muted)]">

@@ -163,21 +163,21 @@ export default function PidTogglePanel({
         <button
           type="button"
           onClick={onSelectAll}
-          className="rounded bg-teal-50 px-2 py-0.5 text-xs font-medium text-teal-700 hover:bg-teal-100 dark:bg-teal-900/40 dark:text-teal-300 dark:hover:bg-teal-900/60"
+          className="rounded bg-teal-50 px-3 py-1.5 text-xs font-medium text-teal-700 hover:bg-teal-100 dark:bg-teal-900/40 dark:text-teal-300 dark:hover:bg-teal-900/60 min-h-[36px]"
         >
           Select All
         </button>
         <button
           type="button"
           onClick={onClear}
-          className="rounded bg-gray-50 px-2 py-0.5 text-xs font-medium text-gray-600 hover:bg-gray-100 dark:bg-[var(--bg-surface)] dark:text-[var(--text-secondary)] dark:hover:bg-[var(--bg-elevated)]"
+          className="rounded bg-gray-50 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-100 dark:bg-[var(--bg-surface)] dark:text-[var(--text-secondary)] dark:hover:bg-[var(--bg-elevated)] min-h-[36px]"
         >
           Clear
         </button>
         <button
           type="button"
           onClick={onReset}
-          className="rounded bg-gray-50 px-2 py-0.5 text-xs font-medium text-gray-600 hover:bg-gray-100 dark:bg-[var(--bg-surface)] dark:text-[var(--text-secondary)] dark:hover:bg-[var(--bg-elevated)]"
+          className="rounded bg-gray-50 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-100 dark:bg-[var(--bg-surface)] dark:text-[var(--text-secondary)] dark:hover:bg-[var(--bg-elevated)] min-h-[36px]"
         >
           Reset
         </button>
@@ -192,7 +192,7 @@ export default function PidTogglePanel({
         value={search}
         onChange={onSearchChange}
         placeholder="Search metrics…"
-        className="w-full rounded-md border border-gray-300 px-2 py-1 text-sm placeholder-gray-400 focus:border-teal-400 focus:outline-none dark:border-[var(--border-default)] dark:bg-[var(--bg-surface)] dark:text-[var(--text-primary)] dark:placeholder-[var(--text-muted)]"
+        className="w-full rounded-md border border-gray-300 px-2 py-2 text-sm placeholder-gray-400 focus:border-teal-400 focus:outline-none dark:border-[var(--border-default)] dark:bg-[var(--bg-surface)] dark:text-[var(--text-primary)] dark:placeholder-[var(--text-muted)]"
         aria-label="Filter metrics"
       />
 
@@ -211,7 +211,7 @@ export default function PidTogglePanel({
                 onClick={() => toggleCategory(cat)}
                 aria-expanded={isExpanded}
                 aria-controls={`pid-category-${cat}`}
-                className="flex w-full items-center gap-1 rounded px-1 py-0.5 text-left text-xs font-semibold text-gray-500 hover:bg-gray-50 dark:text-[var(--text-muted)] dark:hover:bg-[var(--bg-surface)]"
+                className="flex w-full items-center gap-1 rounded px-1 py-1.5 text-left text-xs font-semibold text-gray-500 hover:bg-gray-50 dark:text-[var(--text-muted)] dark:hover:bg-[var(--bg-surface)]"
               >
                 <span className="w-3 text-center text-[10px]">
                   {isExpanded ? '▼' : '▶'}
@@ -239,7 +239,7 @@ export default function PidTogglePanel({
                           type="checkbox"
                           checked={isChecked}
                           onChange={() => onToggle(src.pid)}
-                          className="h-3 w-3"
+                          className="h-5 w-5"
                         />
                         <span
                           className="inline-block h-2.5 w-2.5 rounded-full shrink-0"

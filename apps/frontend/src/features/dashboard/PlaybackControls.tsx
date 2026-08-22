@@ -60,7 +60,7 @@ export default function PlaybackControls({ frames }: Props) {
     cursorTime != null ? new Date(cursorTime).toLocaleTimeString() : '—';
 
   return (
-    <div className="h-fit rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-6 shadow-xs">
+    <div className="h-fit rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
       <div className="flex flex-wrap items-center gap-3">
         <button
           type="button"
@@ -83,7 +83,7 @@ export default function PlaybackControls({ frames }: Props) {
           className="min-w-[200px] flex-1 h-10"
           aria-label="Playback scrubber"
         />
-        <span className="w-24 text-right text-sm tabular-nums text-gray-600 dark:text-[var(--text-muted)]" aria-live="polite">
+        <span className="w-20 md:w-24 text-right text-sm tabular-nums text-gray-600 dark:text-[var(--text-muted)]" aria-live="polite">
           {cursorLabel}
         </span>
         <select

@@ -257,7 +257,7 @@ export default function OverlayChart({
     chart.setOption(
       {
         animation: false,
-        grid: { left: isMobile ? 8 : 56, right: rightMargin, top: 24, bottom: 60, containLabel: true },
+        grid: { left: isMobile ? 20 : 56, right: rightMargin, top: 24, bottom: 60, containLabel: true },
         tooltip: { trigger: 'axis' as const },
         xAxis: { type: 'time' as const },
         yAxis: yAxisOptions,

@@ -75,7 +75,7 @@ export default function AiProviderCard({ settings, onUpdate }: Props) {
   }
 
   return (
-    <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-6 shadow-xs">
+    <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
       <div className="space-y-4">
         <div>
           <p className="text-sm leading-relaxed font-medium">AI Provider</p>

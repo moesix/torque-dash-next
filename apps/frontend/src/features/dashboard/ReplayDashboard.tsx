@@ -224,12 +224,12 @@ export default function ReplayDashboard() {
         {/* Controls + Gauges skeleton */}
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
         <div className="lg:w-2/3 self-start">
-            <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-6 shadow-xs">
+            <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
               <Skeleton className="h-12 w-full" />
             </div>
           </div>
           <div className="lg:w-1/3">
-            <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-6 shadow-xs">
+            <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
               <div className="flex justify-around">
                 <Skeleton className="h-20 w-20" />
                 <Skeleton className="h-20 w-20" />
@@ -240,18 +240,18 @@ export default function ReplayDashboard() {
         </div>
 
         {/* Chart area skeleton */}
-        <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-6 shadow-xs">
+        <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
           <Skeleton className="h-4 w-24 mb-4" />
           <Skeleton className="h-64 w-full" />
         </div>
 
         {/* Map + Metrics skeleton */}
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-          <div className="lg:col-span-2 rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-6 shadow-xs">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+          <div className="lg:col-span-2 rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
             <Skeleton className="h-4 w-24 mb-4" />
             <Skeleton className="h-48 w-full" />
           </div>
-          <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-6 shadow-xs">
+          <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
             <Skeleton className="h-4 w-24 mb-4" />
             <Skeleton className="h-32 w-full" />
           </div>
@@ -261,7 +261,7 @@ export default function ReplayDashboard() {
   }
   if (sessionQuery.isError || !sessionQuery.data) {
     return (
-      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-6 shadow-xs">
+      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
         <ErrorAlert message="Session not found." />
       </div>
     );
@@ -293,7 +293,7 @@ export default function ReplayDashboard() {
             <button
               type="button"
               onClick={() => setShowAnalysisConfirm(true)}
-              className="rounded p-1.5 text-xs font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+              className="rounded p-2.5 min-w-[44px] min-h-[44px] text-xs font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
               title="AI-powered session analysis"
               aria-label="AI Analysis"
             >
@@ -314,7 +314,7 @@ export default function ReplayDashboard() {
                 }
               }}
               disabled={isExporting}
-              className="rounded p-1.5 text-xs font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200 disabled:opacity-50"
+              className="rounded p-2.5 min-w-[44px] min-h-[44px] text-xs font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200 disabled:opacity-50"
               title="Download session data as CSV"
               aria-label="Download CSV"
             >
@@ -331,7 +331,7 @@ export default function ReplayDashboard() {
                 setVehicles(v ?? []);
                 setShowReassign(true);
               }}
-              className="rounded p-1.5 text-xs font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+              className="rounded p-2.5 min-w-[44px] min-h-[44px] text-xs font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
               title="Reassign to a different vehicle"
             >
               🚗
@@ -378,14 +378,14 @@ export default function ReplayDashboard() {
       </div>
 
       {/* Session Summary + Metrics + Decoded Metrics — 3 equal columns */}
-      <div className="animate-slide-up-delay-2 grid grid-cols-1 gap-4 lg:grid-cols-3">
+      <div className="animate-slide-up-delay-2 grid grid-cols-1 md:grid-cols-2 gap-4 lg:grid-cols-3">
         <SessionSummaryCard
           frames={frames}
           maxRpm={maxRpm}
           maxSpeed={maxSpeed}
           maxCoolant={maxCoolant}
         />
-        <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-6 shadow-xs">
+        <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
           <h3 className="text-lg font-semibold leading-relaxed">Metrics</h3>
           <PidTogglePanel
             available={available}
@@ -401,7 +401,7 @@ export default function ReplayDashboard() {
 
       {/* Time Series — full width */}
       <div className="animate-slide-up-delay-3">
-        <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-6 shadow-xs">
+        <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
           <div className="flex items-center justify-between">
             <h3 className="text-lg font-semibold leading-relaxed">Time Series</h3>
             <button
@@ -428,7 +428,7 @@ export default function ReplayDashboard() {
           aria-label="Expanded chart"
           onClose={handleCollapse}
         >
-          <div className="h-full rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-6 shadow-xs">
+          <div className="h-full rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-semibold leading-relaxed">Time Series</h3>
               <button
@@ -458,7 +458,7 @@ export default function ReplayDashboard() {
 
       {/* GPS Track — full width */}
       <div className="animate-slide-up-delay-4">
-        <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-6 shadow-xs">
+        <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
           <h3 className="text-lg font-semibold leading-relaxed">GPS Track</h3>
           {telemetryQuery.isLoading ? (
             <Skeleton className="mt-2 h-48 w-full" />
