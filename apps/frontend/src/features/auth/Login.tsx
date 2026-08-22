@@ -55,7 +55,7 @@ export default function Login() {
       </div>
 
       {/* Right panel — form */}
-      <div className="flex flex-1 items-center justify-center p-6">
+      <div className="flex flex-1 items-center justify-center p-4 md:p-6">
         <div className="animate-slide-up w-full max-w-sm">
           {/* Mobile-only logo */}
           <div className="mb-8 text-center lg:hidden">
@@ -88,7 +88,7 @@ export default function Login() {
                 onChange={(e) => setEmail(e.target.value)}
                 aria-invalid={!!error}
                 aria-describedby={error ? 'login-error' : undefined}
-                className="mt-1 w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-sm
+                className="mt-1 w-full rounded-md border border-gray-300 bg-white px-3 py-3 text-sm
                   focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500/20
                   dark:border-gray-600 dark:bg-gray-800 dark:text-white"
               />
@@ -105,7 +105,7 @@ export default function Login() {
                 onChange={(e) => setPassword(e.target.value)}
                 aria-invalid={!!error}
                 aria-describedby={error ? 'login-error' : undefined}
-                className="mt-1 w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-sm
+                className="mt-1 w-full rounded-md border border-gray-300 bg-white px-3 py-3 text-sm
                   focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500/20
                   dark:border-gray-600 dark:bg-gray-800 dark:text-white"
               />

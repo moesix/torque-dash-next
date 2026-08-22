@@ -245,7 +245,7 @@ export default function DiagnosticPanel({
       {
         animation: false,
         grid: {
-          left: isMobile ? 8 : 56,
+          left: isMobile ? 20 : 56,
           right: rightMargin,
           top: 24,
           bottom: 60,
@@ -286,7 +286,7 @@ export default function DiagnosticPanel({
 
   // ── Render ─────────────────────────────────────────────────────────
   return (
-    <div className="overflow-hidden rounded-lg border border-[var(--border-default)] bg-white dark:bg-[var(--bg-card)]">
+    <div className="overflow-x-auto rounded-lg border border-[var(--border-default)] bg-white dark:bg-[var(--bg-card)]">
       {/* Header */}
       <button
         type="button"

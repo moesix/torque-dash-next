@@ -19,7 +19,7 @@ export default function GaugeTile({ title, value, max, unit = '' }: Props) {
   const display = Math.round(safeValue);
 
   return (
-    <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-6 shadow-xs">
+    <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
       <h3 className="text-lg font-semibold leading-relaxed">{title}</h3>
       <div className="flex items-center justify-center py-2">
         <svg

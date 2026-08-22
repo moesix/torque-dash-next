@@ -62,11 +62,12 @@ export default function SessionTable({ sessions }: Props) {
   };
 
   return (
+    <div className="overflow-x-auto">
     <table className="w-full text-left text-sm">
       <thead className="border-b border-gray-200 dark:border-[var(--border-default)]">
         <tr>
           <th className="py-2.5 px-4 font-medium text-gray-500 dark:text-[var(--text-muted)] text-xs uppercase tracking-wider">Vehicle / Name</th>
-          <th className="py-2.5 px-4 font-medium text-gray-500 dark:text-[var(--text-muted)] text-xs uppercase tracking-wider">Vehicle</th>
+          <th className="hidden md:table-cell py-2.5 px-4 font-medium text-gray-500 dark:text-[var(--text-muted)] text-xs uppercase tracking-wider">Vehicle</th>
           <th className="py-2.5 px-4 font-medium text-gray-500 dark:text-[var(--text-muted)] text-xs uppercase tracking-wider">Start</th>
           <th className="py-2.5 px-4 font-medium text-gray-500 dark:text-[var(--text-muted)] text-xs uppercase tracking-wider">Duration</th>
           <th className="py-2.5 px-4 font-medium text-gray-500 dark:text-[var(--text-muted)] text-xs uppercase tracking-wider">Max Speed</th>
@@ -117,7 +118,7 @@ export default function SessionTable({ sessions }: Props) {
                       {s.name || 'Unnamed session'}
                       <button
                         onClick={(e) => startEditing(s, e)}
-                        className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 hover:text-gray-600 dark:text-[var(--text-muted)] dark:hover:text-[var(--text-secondary)] ml-1"
+                        className="opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity text-gray-400 hover:text-gray-600 dark:text-[var(--text-muted)] dark:hover:text-[var(--text-secondary)] ml-1"
                         title="Rename session"
                       >
                         <svg
@@ -132,7 +133,7 @@ export default function SessionTable({ sessions }: Props) {
                     </span>
                   )}
                 </td>
-                <td className="py-2.5 px-4">
+                <td className="hidden md:table-cell py-2.5 px-4">
                   {s.vehicleName || <span className="text-gray-400 dark:text-[var(--text-muted)] italic">Unassigned</span>}
                 </td>
                 <td className="py-2.5 px-4">
@@ -151,5 +152,6 @@ export default function SessionTable({ sessions }: Props) {
         )}
       </tbody>
     </table>
+    </div>
   );
 }

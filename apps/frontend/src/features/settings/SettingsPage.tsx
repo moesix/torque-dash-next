@@ -128,7 +128,7 @@ export default function SettingsPage() {
         </div>
         <p className="mt-1 text-sm leading-relaxed dark:text-[var(--text-secondary)]">Global site configuration.</p>
       </div>
-      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-6 shadow-xs">
+      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
         <div className="flex items-center justify-between">
           <div>
             <p className="text-sm leading-relaxed font-medium">Disable registration</p>
@@ -152,7 +152,7 @@ export default function SettingsPage() {
         ) : null}
       </div>
 
-      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-6 shadow-xs">
+      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
         <div className="space-y-4">
           <div>
             <p className="text-sm leading-relaxed font-medium">Upload API Token</p>
@@ -191,7 +191,7 @@ export default function SettingsPage() {
 
           {tokenInput ? (
             <div className="space-y-2">
-              <div className="flex items-center gap-2">
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2">
                 <code className="flex-1 break-all rounded border bg-gray-50 px-3 py-2 text-sm font-mono dark:border-[var(--border-default)] dark:bg-[var(--bg-surface)] dark:text-[var(--text-primary)]">
                   {tokenInput}
                 </code>
@@ -209,7 +209,7 @@ export default function SettingsPage() {
             </div>
           ) : null}
 
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <button
               type="button"
               onClick={onGenerateToken}
@@ -239,7 +239,7 @@ export default function SettingsPage() {
       <AiProviderCard settings={llmSettings} onUpdate={setLlmSettings} />
       <VehicleManager />
 
-      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-6 shadow-xs">
+      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
         <div className="space-y-4">
           <div>
             <p className="text-sm leading-relaxed font-medium">Timezone</p>
@@ -249,7 +249,7 @@ export default function SettingsPage() {
             </p>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2">
             <label htmlFor="tz-offset" className="text-sm text-gray-700 dark:text-[var(--text-secondary)]">
               UTC offset (minutes):
             </label>
@@ -281,7 +281,7 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-6 shadow-xs">
+      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
         <div className="space-y-4">
           <div>
             <p className="text-sm leading-relaxed font-medium">Data Retention</p>
@@ -314,7 +314,7 @@ export default function SettingsPage() {
           </div>
 
           {llmSettings.retentionEnabled && (
-            <div className="flex items-center gap-3">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2">
               <label htmlFor="retention-days" className="text-sm text-gray-700 dark:text-[var(--text-secondary)]">
                 Keep data for:
               </label>
