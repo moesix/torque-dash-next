@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { Outlet, useLocation, useNavigate } from 'react-router';
 import { logout } from '@/lib/api';
 import MobileDrawer from '@/components/layout/MobileDrawer';
 import { toggleTheme, getTheme } from '@/lib/theme';
@@ -91,7 +91,7 @@ export default function AppShell() {
                 const next = toggleTheme();
                 setTheme(next);
               }}
-              className="rounded-md p-2 text-gray-600 hover:bg-gray-100 dark:text-[var(--text-secondary)] dark:hover:bg-[var(--bg-surface)]"
+              className="rounded-md p-2.5 text-gray-600 hover:bg-gray-100 dark:text-[var(--text-secondary)] dark:hover:bg-[var(--bg-surface)] min-h-[44px] min-w-[44px]"
               aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
             >
               {theme === 'dark' ? (
@@ -109,7 +109,7 @@ export default function AppShell() {
             <button
               type="button"
               onClick={onLogout}
-              className="rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-100 dark:border-[var(--border-strong)] dark:text-[var(--text-secondary)] dark:hover:bg-[var(--bg-surface)]"
+              className="rounded-md border border-gray-300 px-3 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-100 dark:border-[var(--border-strong)] dark:text-[var(--text-secondary)] dark:hover:bg-[var(--bg-surface)] min-h-[44px]"
             >
               Log out
             </button>

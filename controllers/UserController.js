@@ -1,9 +1,11 @@
 const User = require('../models').User;
 const Settings = require('../models').Settings;
+const sequelize = require('../models').sequelize;
 const passport = require('passport');
 const { nanoid } = require('nanoid');
 const crypto = require('crypto');
 const runtime = require('../config/runtime');
+const Joi = require('joi');
 
 class UserController {
     static async login(req, res, next) {
@@ -73,7 +75,7 @@ class UserController {
         }
         catch(err) {
             console.error(err.message || err);
-            res.sendStatus(500);
+            res.status(500).json({ error: 'Internal server error' });
         }
     }
     static async updateForwardUrls(req, res) {
@@ -82,11 +84,23 @@ class UserController {
             let user = await User.findOne({
                 where: { id: req.user.id }
             });
+            if(!user) return res.status(404).json({ error: 'User not found' });
             if(!urls) {
                 await user.update({
                     forwardUrls: null
                 });
                 return res.sendStatus(200);
+            }
+            if(!Array.isArray(urls)) {
+                return res.status(400).json({ error: 'URLs must be an array.' });
+            }
+            if(urls.length > 10) {
+                return res.status(400).json({ error: 'Too many URLs. Maximum is 10.' });
+            }
+            const schema = Joi.array().items(Joi.string().uri());
+            const { error } = schema.validate(urls);
+            if(error) {
+                return res.status(400).json({ error: 'Invalid URL: ' + error.details[0].message });
             }
             await user.update({
                 forwardUrls: urls
@@ -95,7 +109,7 @@ class UserController {
         }
         catch(err) {
             console.error(err.message || err);
-            res.sendStatus(500);
+            res.status(500).json({ error: 'Internal server error' });
         }
     }
     static async getShareId(req, res) {
@@ -108,7 +122,7 @@ class UserController {
         }
         catch(err) {
             console.error(err.message || err);
-            res.sendStatus(500);
+            res.status(500).json({ error: 'Internal server error' });
         }
     }
     static async toggleShareId(req, res) {
@@ -127,7 +141,7 @@ class UserController {
         }
         catch(err) {
             console.error(err.message || err);
-            res.sendStatus(500);
+            res.status(500).json({ error: 'Internal server error' });
         }
     }
     // Public read of site settings (the register/login pages need this to
@@ -137,6 +151,7 @@ class UserController {
         try {
             const settings = await Settings.getSingleton();
             const envDisabled = process.env.DISABLE_REGISTRATION === 'true';
+            res.set('Cache-Control', 'private, max-age=30');
             res.json({
                 disableRegistration: settings.disableRegistration || envDisabled,
                 hasUploadApiToken: Boolean(settings.uploadApiToken || runtime.isFromEnv()),
@@ -152,10 +167,14 @@ class UserController {
                 engineCc: settings.engineCc || null,
                 llmThinkingMode: settings.llmThinkingMode ?? true,
                 llmReasoningEffort: settings.llmReasoningEffort || 'high',
+                llmMaxTokens: settings.llmMaxTokens || 16384,
+                timezoneOffset: settings.timezoneOffset ?? 0,
+                retentionEnabled: settings.retentionEnabled ?? false,
+                retentionDays: settings.retentionDays ?? 365,
             });
         } catch (err) {
             console.error(err.message || err);
-            res.sendStatus(500);
+            res.status(500).json({ error: 'Internal server error' });
         }
     }
     // Authenticated toggle of site settings. NOTE: the app is single-operator,
@@ -231,7 +250,7 @@ class UserController {
             }
 
             // DeepSeek thinking mode fields
-            const { llmThinkingMode, llmReasoningEffort } = req.body;
+            const { llmThinkingMode, llmReasoningEffort, llmMaxTokens, timezoneOffset } = req.body;
 
             if (llmThinkingMode !== undefined) {
               if (typeof llmThinkingMode !== 'boolean') {
@@ -245,6 +264,41 @@ class UserController {
               }
               updateData.llmReasoningEffort = llmReasoningEffort;
             }
+            if (llmMaxTokens !== undefined) {
+              const t = Number(llmMaxTokens);
+              if (!Number.isInteger(t) || t < 2048 || t > 32768) {
+                return res.status(400).json({ error: 'llmMaxTokens must be an integer between 2048 and 32768.' });
+              }
+              updateData.llmMaxTokens = t;
+            }
+
+            // Timezone offset (minutes from UTC, e.g. 480 for UTC+8)
+            if (timezoneOffset !== undefined) {
+              const off = Number(timezoneOffset);
+              if (!Number.isInteger(off) || off < -720 || off > 840) {
+                return res.status(400).json({ error: 'timezoneOffset must be an integer between -720 and 840 (minutes from UTC).' });
+              }
+              updateData.timezoneOffset = off;
+            }
+
+            // Handle retentionEnabled if provided
+            if (req.body.retentionEnabled !== undefined) {
+              if (typeof req.body.retentionEnabled !== 'boolean') {
+                return res.status(400).json({ error: 'retentionEnabled must be a boolean.' });
+              }
+              updateData.retentionEnabled = req.body.retentionEnabled;
+            }
+
+            // Handle retentionDays if provided
+            if (req.body.retentionDays !== undefined) {
+              if (typeof req.body.retentionDays !== 'number' || !Number.isInteger(req.body.retentionDays)) {
+                return res.status(400).json({ error: 'retentionDays must be an integer.' });
+              }
+              if (req.body.retentionDays < 90 || req.body.retentionDays > 365) {
+                return res.status(400).json({ error: 'retentionDays must be between 90 and 365.' });
+              }
+              updateData.retentionDays = req.body.retentionDays;
+            }
 
             // API key requires encryption
             if (llmApiKey !== undefined) {
@@ -257,10 +311,43 @@ class UserController {
             }
 
             await Settings.upsert(updateData);
+            Settings.invalidateCache();
 
             // Keep the runtime holder in sync
             if (uploadApiToken !== undefined) {
                 runtime.setUploadApiToken(uploadApiToken);
+            }
+
+            // Apply or remove TimescaleDB retention policy
+            let policyApplied = false;
+            if (updateData.retentionEnabled !== undefined || updateData.retentionDays !== undefined) {
+                const settings = await Settings.getSingleton();
+                if (settings.retentionEnabled) {
+                    // Remove existing policy first (idempotent)
+                    await sequelize.query(
+                        `SELECT remove_retention_policy('"Logs"', if_exists => true)`
+                    ).catch(err => {
+                        console.error('[UserController] Failed to remove retention policy:', err.message);
+                    });
+                    // Apply new policy — parameterized (defense-in-depth, removes
+                    // reliance on upstream validation); Number() cast keeps the
+                    // replacement binding numeric
+                    const [daysResult] = await sequelize.query(
+                        `SELECT add_retention_policy('"Logs"', make_interval(days => :days))`,
+                        { replacements: { days: Number(settings.retentionDays) } }
+                    ).catch(err => {
+                        console.error('[UserController] Failed to apply retention policy:', err.message);
+                        return [null];
+                    });
+                    policyApplied = Array.isArray(daysResult) && daysResult.length > 0;
+                } else {
+                    // Remove policy
+                    await sequelize.query(
+                        `SELECT remove_retention_policy('"Logs"', if_exists => true)`
+                    ).catch(err => {
+                        console.error('[UserController] Failed to remove retention policy:', err.message);
+                    });
+                }
             }
 
             // Re-fetch the full settings row to return complete state
@@ -280,10 +367,15 @@ class UserController {
                 engineCc: current.engineCc || null,
                 llmThinkingMode: current.llmThinkingMode ?? true,
                 llmReasoningEffort: current.llmReasoningEffort || 'high',
+                llmMaxTokens: current.llmMaxTokens || 16384,
+                timezoneOffset: current.timezoneOffset ?? 0,
+                retentionEnabled: current.retentionEnabled ?? false,
+                retentionDays: current.retentionDays ?? 365,
+                retentionPolicyApplied: policyApplied,
             });
         } catch (err) {
             console.error(err.message || err);
-            res.sendStatus(500);
+            res.status(500).json({ error: 'Internal server error' });
         }
     }
     // Generate a new upload API token (64 hex chars). Returns the full token
@@ -305,7 +397,7 @@ class UserController {
             res.json({ uploadApiToken: token });
         } catch (err) {
             console.error(err.message || err);
-            res.sendStatus(500);
+            res.status(500).json({ error: 'Internal server error' });
         }
     }
 
@@ -352,7 +444,7 @@ class UserController {
             });
         } catch (err) {
             console.error('[UserController]', err.message || err);
-            res.sendStatus(500);
+            res.status(500).json({ error: 'Internal server error' });
         }
     }
 }

@@ -7,6 +7,8 @@ import type {
   Analysis,
   UpdateLlmSettings,
   TestLlmResponse,
+  Vehicle,
+  UpdateVehicle,
 } from './types';
 
 /**
@@ -31,7 +33,7 @@ function isAuthPage(): boolean {
   return p === '/login' || p === '/register';
 }
 
-async function request<T>(url: string, init?: RequestInit): Promise<T> {
+async function request<T>(url: string, init?: RequestInit): Promise<T | undefined> {
   const res = await fetch(url, {
     credentials: 'include',
     headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
@@ -54,7 +56,7 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   }
   // Non-JSON responses (e.g. the passport redirect on /login) carry no body we
   // parse; callers that expect JSON would have already thrown on !ok.
-  return undefined as unknown as T;
+  return undefined;
 }
 
 function normalizeRow(row: RawTelemetryRow): TelemetryFrame {
@@ -102,11 +104,25 @@ export async function logout(): Promise<void> {
   });
 }
 
-export async function getSessions(): Promise<Session[]> {
-  return request<Session[]>('/api/sessions');
+export interface PaginatedSessions {
+  sessions: Session[];
+  total: number;
+  limit: number;
+  offset: number;
 }
 
-export async function getSession(id: string): Promise<Session> {
+export async function getSessions(
+  limit = 50,
+  offset = 0,
+  vehicleId?: number | 'none' | null,
+): Promise<PaginatedSessions | undefined> {
+  let url = `/api/sessions?limit=${limit}&offset=${offset}`;
+  if (vehicleId === 'none') url += '&vehicleId=none';
+  else if (vehicleId != null) url += `&vehicleId=${vehicleId}`;
+  return request<PaginatedSessions>(url);
+}
+
+export async function getSession(id: string): Promise<Session | undefined> {
   return request<Session>(`/api/sessions/${id}`);
 }
 
@@ -123,13 +139,19 @@ export async function getTelemetry(
   return (rows ?? []).map(normalizeRow);
 }
 
-export async function getSettings(): Promise<Settings> {
+export async function getSettings(): Promise<Settings | undefined> {
   return request<Settings>('/api/settings');
 }
 
 export async function updateSettings(
-  body: { disableRegistration?: boolean; uploadApiToken?: string | null },
-): Promise<Settings> {
+  body: {
+    disableRegistration?: boolean;
+    uploadApiToken?: string | null;
+    timezoneOffset?: number;
+    retentionEnabled?: boolean;
+    retentionDays?: number;
+  },
+): Promise<Settings | undefined> {
   return request<Settings>('/api/settings', {
     method: 'PUT',
     body: JSON.stringify(body),
@@ -138,7 +160,7 @@ export async function updateSettings(
 
 /** Generate a new random upload API token (64 hex chars). The full token is
  *  returned in the response and will NEVER be visible again via GET. */
-export async function generateUploadToken(): Promise<GenerateUploadTokenResponse> {
+export async function generateUploadToken(): Promise<GenerateUploadTokenResponse | undefined> {
   return request<GenerateUploadTokenResponse>('/api/settings/upload-token', {
     method: 'POST',
   });
@@ -155,10 +177,21 @@ export async function renameSession(
   });
 }
 
+/** Update session notes. */
+export async function updateSessionNotes(
+  sessionId: string,
+  notes: string | null,
+): Promise<void> {
+  await request(`/api/sessions/notes/${sessionId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ notes }),
+  });
+}
+
 // ── BYOK LLM Analysis ─────────────────────────────────────────────────
 
 /** Update LLM provider and vehicle settings. */
-export async function updateLlmSettings(body: UpdateLlmSettings): Promise<Settings> {
+export async function updateLlmSettings(body: UpdateLlmSettings): Promise<Settings | undefined> {
   return request<Settings>('/api/settings', {
     method: 'PUT',
     body: JSON.stringify(body),
@@ -166,7 +199,7 @@ export async function updateLlmSettings(body: UpdateLlmSettings): Promise<Settin
 }
 
 /** Test LLM connection. */
-export async function testLlmConnection(): Promise<TestLlmResponse> {
+export async function testLlmConnection(): Promise<TestLlmResponse | undefined> {
   return request<TestLlmResponse>('/api/settings/test-llm', {
     method: 'POST',
   });
@@ -195,7 +228,7 @@ export async function analyzeSession(
 }
 
 /** List past analyses for a session. */
-export async function listAnalyses(sessionId: string): Promise<Analysis[]> {
+export async function listAnalyses(sessionId: string): Promise<Analysis[] | undefined> {
   return request<Analysis[]>(`/api/sessions/${sessionId}/analyses`);
 }
 
@@ -210,39 +243,89 @@ export async function deleteAnalysis(sessionId: string, analysisId: number): Pro
 
 /**
  * Export all telemetry data for a session as a CSV file.
- * Triggers a browser download with the filename from the server's
- * Content-Disposition header.
+ * Triggers a browser download — native streaming via <a href>, no Blob buffering.
+ * The backend sets Content-Disposition: attachment so the browser saves the
+ * file with the server-provided filename automatically.
  */
 export async function exportSessionCsv(sessionId: string): Promise<void> {
-  const res = await fetch(`/api/sessions/${sessionId}/export/csv`, {
+  // Pre-check: verify the endpoint is reachable and user is authenticated
+  const headRes = await fetch(`/api/sessions/${sessionId}/export/csv`, {
+    method: 'HEAD',
     credentials: 'include',
   });
 
-  if (res.status === 401) {
+  if (headRes.status === 401) {
     if (!isAuthPage()) {
       window.location.assign('/login');
     }
     throw new ApiError('Unauthorized', 401);
   }
-  if (!res.ok) {
-    throw new ApiError(`Export failed with status ${res.status}`, res.status);
+  if (!headRes.ok) {
+    throw new ApiError(`Export failed with status ${headRes.status}`, headRes.status);
   }
 
-  // Extract filename from Content-Disposition header
-  const disposition = res.headers.get('content-disposition') ?? '';
-  const match = disposition.match(/filename="?([^";\n]+)"?/);
-  const filename = match?.[1] ?? `session-${sessionId}.csv`;
-
-  // Create blob and trigger download via ephemeral <a> element
-  const blob = await res.blob();
-  const url = URL.createObjectURL(blob);
+  // Trigger native browser download — streams directly from the server,
+  // bypassing JS memory entirely. The browser saves with the server's
+  // Content-Disposition filename. The `download` attribute is a fallback.
   const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
+  a.href = `/api/sessions/${sessionId}/export/csv`;
+  a.download = `session-${sessionId}.csv`;
+  a.style.display = 'none';
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+}
+
+// ── Vehicle CRUD ──────────────────────────────────────────────────────
+
+/** List all vehicles for the current user. */
+export async function getVehicles(): Promise<Vehicle[] | undefined> {
+  return request<Vehicle[]>('/api/vehicles');
+}
+
+/** Get a single vehicle. */
+export async function getVehicle(id: number): Promise<Vehicle | undefined> {
+  return request<Vehicle>(`/api/vehicles/${id}`);
+}
+
+/** Create a new vehicle. */
+export async function createVehicle(body: UpdateVehicle): Promise<Vehicle | undefined> {
+  return request<Vehicle>('/api/vehicles', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+/** Update a vehicle. */
+export async function updateVehicle(
+  id: number,
+  body: UpdateVehicle,
+): Promise<Vehicle | undefined> {
+  return request<Vehicle>(`/api/vehicles/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+}
+
+/** Delete a vehicle. */
+export async function deleteVehicle(id: number): Promise<void> {
+  await request(`/api/vehicles/${id}`, { method: 'DELETE' });
+}
+
+/** Set a vehicle as default. */
+export async function setDefaultVehicle(id: number): Promise<Vehicle | undefined> {
+  return request<Vehicle>(`/api/vehicles/${id}/default`, { method: 'PATCH' });
+}
+
+/** Reassign a session to a different vehicle. */
+export async function reassignSessionVehicle(
+  sessionId: string,
+  vehicleId: number | null,
+): Promise<void> {
+  await request(`/api/sessions/${sessionId}/vehicle`, {
+    method: 'PATCH',
+    body: JSON.stringify({ vehicleId }),
+  });
 }
 
 // ── Version ─────────────────────────────────────────────────────────────

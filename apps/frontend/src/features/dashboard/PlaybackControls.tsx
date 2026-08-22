@@ -1,6 +1,5 @@
 import { useEffect } from 'react';
 import type { ChangeEvent } from 'react';
-import { Button, Card, Text } from '@tremor/react';
 import { usePlaybackStore } from '@/app/playbackStore';
 import type { TelemetryFrame } from '@/lib/types';
 
@@ -61,14 +60,19 @@ export default function PlaybackControls({ frames }: Props) {
     cursorTime != null ? new Date(cursorTime).toLocaleTimeString() : '—';
 
   return (
-    <Card className="h-fit">
+    <div className="h-fit rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
       <div className="flex flex-wrap items-center gap-3">
-        <Button
+        <button
+          type="button"
           onClick={() => (isPlaying ? pause() : play())}
-          className="min-w-[44px] min-h-[44px] flex items-center justify-center"
+          className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white
+            shadow-xs transition hover:bg-indigo-700
+            focus:outline-none focus:ring-2 focus:ring-indigo-500/20
+            disabled:cursor-not-allowed disabled:opacity-50
+            dark:bg-indigo-500 dark:hover:bg-indigo-600"
         >
           {isPlaying ? 'Pause' : 'Play'}
-        </Button>
+        </button>
         <input
           type="range"
           min={start}
@@ -79,7 +83,7 @@ export default function PlaybackControls({ frames }: Props) {
           className="min-w-[200px] flex-1 h-10"
           aria-label="Playback scrubber"
         />
-        <span className="w-24 text-right text-sm tabular-nums text-gray-600 dark:text-[var(--text-muted)]" aria-live="polite">
+        <span className="w-20 md:w-24 text-right text-sm tabular-nums text-gray-600 dark:text-[var(--text-muted)]" aria-live="polite">
           {cursorLabel}
         </span>
         <select
@@ -94,9 +98,9 @@ export default function PlaybackControls({ frames }: Props) {
           <option value={8}>8×</option>
         </select>
       </div>
-      <Text className="mt-2 text-xs text-gray-500 dark:text-[var(--text-muted)]">
+      <p className="mt-2 text-xs leading-relaxed text-gray-500 dark:text-[var(--text-muted)]">
         {pct.toFixed(1)}% through session
-      </Text>
-    </Card>
+      </p>
+    </div>
   );
 }

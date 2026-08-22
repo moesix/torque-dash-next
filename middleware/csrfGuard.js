@@ -52,7 +52,7 @@ function csrfGuard({ allowedOrigins = [], publicOrigin } = {}) {
         if (origin) {
             // Origin present: must be same-origin or an explicitly trusted SPA
             // origin. Compare the full origin per OWASP.
-            let ok = false;
+            let ok;
             try {
                 ok = new URL(origin).origin === expected || allow.has(origin);
             } catch {

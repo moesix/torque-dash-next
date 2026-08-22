@@ -1,9 +1,10 @@
 const crypto = require('crypto');
 const User = require('../models').User;
 const Session = require('../models').Session;
+const Vehicle = require('../models').Vehicle;
+const Settings = require('../models').Settings;
 const userCache = require('../lib/userCache');
 const ssrfGuard = require('../lib/ssrfGuard');
-const moment = require('moment');
 const ingestBuffer = require('../services/ingestBuffer');
 const runtime = require('../config/runtime');
 
@@ -55,17 +56,40 @@ class UploadController {
             let user = await resolveUser(eml);
             if (!user) return res.status(403).send('Invalid user account.');
 
+            // Resolve vehicle from Torque's `v` param (vehicle profile name).
+            // Falls back to the user's default vehicle when `v` is missing or
+            // doesn't match any known vehicle name.
+            let vehicle = null;
+            if (v) {
+                vehicle = await Vehicle.findOne({
+                    where: { userId: user.id, name: v },
+                });
+            }
+            if (!vehicle) {
+                vehicle = await Vehicle.findOne({
+                    where: { userId: user.id, isDefault: true },
+                });
+            }
+
             // Resolve session (find-or-create) — caches the resolved numeric FK.
             let currentSession = await Session.findOrCreate({
                 where: { sessionId: session },
-                defaults: { userId: user.id }
+                defaults: {
+                    userId: user.id,
+                    vehicleId: vehicle ? vehicle.id : null,
+                }
             });
             let sess = currentSession[0];
 
             // After findOrCreate, if this is a new session, give it a default name
             if (currentSession[1] && time) {
-                const ts = moment(Number(time));
-                const name = `Trip ${ts.format('DDMMYYYY h:mmA')}`;
+                // Fetch the user's timezone offset (minutes from UTC, e.g. 480 for UTC+8)
+                const settings = await Settings.getSingleton();
+                const offsetMinutes = settings?.timezoneOffset ?? 0;
+                const d = new Date(Number(time));
+                const ts = new Date(d.getTime() + offsetMinutes * 60000);
+                const pad = (n) => String(n).padStart(2, '0');
+                const name = `Trip ${pad(ts.getDate())}${pad(ts.getMonth() + 1)}${ts.getFullYear()} ${ts.getHours() % 12 || 12}:${pad(ts.getMinutes())}${ts.getHours() >= 12 ? 'PM' : 'AM'}`;
                 await sess.update({ name });
             }
 
@@ -104,7 +128,7 @@ class UploadController {
                 });
             }
         } catch (err) {
-            res.sendStatus(500);
+            res.status(500).json({ error: 'Internal server error' });
             console.error(err.message || err);
         }
     }

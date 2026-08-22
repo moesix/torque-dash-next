@@ -13,13 +13,13 @@
  *   pattern that threw RangeError on large datasets.
  */
 
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useParams } from 'react-router-dom';
-import { Card, Title } from '@tremor/react';
-import { getSession, getTelemetry, exportSessionCsv } from '@/lib/api';
-import AnalysisPanel from '@/components/ai/AnalysisPanel';
+import { useParams } from 'react-router';
+import { getSession, getTelemetry, exportSessionCsv, updateSessionNotes, getVehicles, reassignSessionVehicle } from '@/lib/api';
 import type { AnalysisPanelHandle } from '@/components/ai/AnalysisPanel';
+import type { Vehicle } from '@/lib/types';
+import VehicleReassignDialog from '@/components/vehicles/VehicleReassignDialog';
 import Skeleton from '@/components/ui/Skeleton';
 import ErrorAlert from '@/components/ui/ErrorAlert';
 import { usePlaybackStore } from '@/app/playbackStore';
@@ -27,10 +27,13 @@ import SessionSummaryCard from '@/components/charts/SessionSummaryCard';
 import GpsTrackMap from '@/components/map/GpsTrackMap';
 import PlaybackControls from './PlaybackControls';
 import OverlayChart from '@/components/charts/OverlayChart';
+import DiagnosticPanels from '@/components/charts/DiagnosticPanels';
 import PidTogglePanel from '@/components/telemetry/PidTogglePanel';
 import DecodedMetricsTable from '@/components/telemetry/DecodedMetricsTable';
 import { getAvailableSeries, getSeriesData, coerceScalar } from '@/lib/pidDecode';
 import type { SeriesSource } from '@/lib/types';
+
+const AnalysisPanel = React.lazy(() => import('@/components/ai/AnalysisPanel'));
 
 // ── Constants ────────────────────────────────────────────────────────────
 
@@ -87,6 +90,17 @@ export default function ReplayDashboard() {
   const analysisDialogRef = useRef<HTMLDialogElement | null>(null);
   const analysisPanelRef = useRef<AnalysisPanelHandle>(null);
   const [showAnalysisConfirm, setShowAnalysisConfirm] = useState(false);
+  const [notes, setNotes] = useState<string>('');
+  const [notesSaving, setNotesSaving] = useState(false);
+  const [showReassign, setShowReassign] = useState(false);
+  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+
+  // Sync notes state when session data loads
+  useEffect(() => {
+    if (sessionQuery.data) {
+      setNotes(sessionQuery.data.notes ?? '');
+    }
+  }, [sessionQuery.data]);
 
   // Safari fallback for closedby="any" (light-dismiss)
   useEffect(() => {
@@ -210,46 +224,46 @@ export default function ReplayDashboard() {
         {/* Controls + Gauges skeleton */}
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
         <div className="lg:w-2/3 self-start">
-            <Card>
+            <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
               <Skeleton className="h-12 w-full" />
-            </Card>
+            </div>
           </div>
           <div className="lg:w-1/3">
-            <Card>
+            <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
               <div className="flex justify-around">
                 <Skeleton className="h-20 w-20" />
                 <Skeleton className="h-20 w-20" />
                 <Skeleton className="h-20 w-20" />
               </div>
-            </Card>
+            </div>
           </div>
         </div>
 
         {/* Chart area skeleton */}
-        <Card>
+        <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
           <Skeleton className="h-4 w-24 mb-4" />
           <Skeleton className="h-64 w-full" />
-        </Card>
+        </div>
 
         {/* Map + Metrics skeleton */}
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-          <Card className="lg:col-span-2">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+          <div className="lg:col-span-2 rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
             <Skeleton className="h-4 w-24 mb-4" />
             <Skeleton className="h-48 w-full" />
-          </Card>
-          <Card>
+          </div>
+          <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
             <Skeleton className="h-4 w-24 mb-4" />
             <Skeleton className="h-32 w-full" />
-          </Card>
+          </div>
         </div>
       </div>
     );
   }
   if (sessionQuery.isError || !sessionQuery.data) {
     return (
-      <Card>
+      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
         <ErrorAlert message="Session not found." />
-      </Card>
+      </div>
     );
   }
 
@@ -262,6 +276,11 @@ export default function ReplayDashboard() {
           <div className="min-w-0">
             <h1 className="text-lg font-semibold text-gray-900 dark:text-white font-display">
               {sessionQuery.data.name || 'Session Replay'}
+              {sessionQuery.data.vehicleName && (
+                <span className="ml-2 inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 dark:bg-gray-700 dark:text-gray-300">
+                  {sessionQuery.data.vehicleName}
+                </span>
+              )}
             </h1>
             <p className="text-sm text-gray-500 dark:text-[var(--text-secondary)]">
               {sessionQuery.data.startDate
@@ -274,7 +293,7 @@ export default function ReplayDashboard() {
             <button
               type="button"
               onClick={() => setShowAnalysisConfirm(true)}
-              className="rounded p-1.5 text-xs font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+              className="rounded p-2.5 min-w-[44px] min-h-[44px] text-xs font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
               title="AI-powered session analysis"
               aria-label="AI Analysis"
             >
@@ -295,7 +314,7 @@ export default function ReplayDashboard() {
                 }
               }}
               disabled={isExporting}
-              className="rounded p-1.5 text-xs font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200 disabled:opacity-50"
+              className="rounded p-2.5 min-w-[44px] min-h-[44px] text-xs font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200 disabled:opacity-50"
               title="Download session data as CSV"
               aria-label="Download CSV"
             >
@@ -305,11 +324,52 @@ export default function ReplayDashboard() {
                 '↓ CSV'
               )}
             </button>
+            <button
+              type="button"
+              onClick={async () => {
+                const v = await getVehicles();
+                setVehicles(v ?? []);
+                setShowReassign(true);
+              }}
+              className="rounded p-2.5 min-w-[44px] min-h-[44px] text-xs font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+              title="Reassign to a different vehicle"
+            >
+              🚗
+            </button>
             {exportError && (
               <span className="text-xs text-red-500">{exportError}</span>
             )}
           </div>
         </div>
+      </div>
+
+      {/* Session notes */}
+      <div className="animate-slide-up rounded-lg bg-white px-4 py-3 shadow-xs dark:bg-[var(--bg-card)]">
+        <label htmlFor="session-notes" className="mb-1 block text-sm font-medium text-gray-700 dark:text-[var(--text-secondary)]">
+          Notes
+        </label>
+        <textarea
+          id="session-notes"
+          rows={3}
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          onBlur={async () => {
+            if (!id) return;
+            setNotesSaving(true);
+            try {
+              await updateSessionNotes(id, notes.trim() || null);
+            } catch {
+              // Silently ignore
+            } finally {
+              setNotesSaving(false);
+            }
+          }}
+          placeholder="Add notes about this session..."
+          className="w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm shadow-xs focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500 dark:border-[var(--border-default)] dark:bg-[var(--bg-surface)] dark:text-[var(--text-primary)] dark:focus:border-teal-400"
+        />
+        {notesSaving && (
+          <span className="text-xs text-gray-400 dark:text-[var(--text-muted)]">Saving...</span>
+        )}
       </div>
 
       {/* Playback controls — full width */}
@@ -318,15 +378,15 @@ export default function ReplayDashboard() {
       </div>
 
       {/* Session Summary + Metrics + Decoded Metrics — 3 equal columns */}
-      <div className="animate-slide-up-delay-2 grid grid-cols-1 gap-4 lg:grid-cols-3">
+      <div className="animate-slide-up-delay-2 grid grid-cols-1 md:grid-cols-2 gap-4 lg:grid-cols-3">
         <SessionSummaryCard
           frames={frames}
           maxRpm={maxRpm}
           maxSpeed={maxSpeed}
           maxCoolant={maxCoolant}
         />
-        <Card>
-          <Title>Metrics</Title>
+        <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
+          <h3 className="text-lg font-semibold leading-relaxed">Metrics</h3>
           <PidTogglePanel
             available={available}
             selected={selectedPids}
@@ -335,15 +395,15 @@ export default function ReplayDashboard() {
             onClear={handleClear}
             onReset={handleReset}
           />
-        </Card>
+        </div>
         <DecodedMetricsTable sources={available} seriesData={allSeriesData} />
       </div>
 
       {/* Time Series — full width */}
       <div className="animate-slide-up-delay-3">
-        <Card>
+        <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
           <div className="flex items-center justify-between">
-            <Title>Time Series</Title>
+            <h3 className="text-lg font-semibold leading-relaxed">Time Series</h3>
             <button
               type="button"
               onClick={handleExpand}
@@ -359,7 +419,7 @@ export default function ReplayDashboard() {
             cursorTime={cursorTime}
             onCursorMove={handleCursorMove}
           />
-        </Card>
+        </div>
 
         <dialog
           ref={dialogRef}
@@ -368,9 +428,9 @@ export default function ReplayDashboard() {
           aria-label="Expanded chart"
           onClose={handleCollapse}
         >
-          <Card className="h-full">
+          <div className="h-full rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
             <div className="flex items-center justify-between">
-              <Title>Time Series</Title>
+              <h3 className="text-lg font-semibold leading-relaxed">Time Series</h3>
               <button
                 type="button"
                 onClick={handleCollapse}
@@ -387,14 +447,19 @@ export default function ReplayDashboard() {
               onCursorMove={handleCursorMove}
               className="h-full"
             />
-          </Card>
+          </div>
         </dialog>
+      </div>
+
+      {/* ── Pre-configured diagnostic panels ────────────── */}
+      <div className="animate-slide-up-delay-3">
+        <DiagnosticPanels frames={frames} available={available} />
       </div>
 
       {/* GPS Track — full width */}
       <div className="animate-slide-up-delay-4">
-        <Card>
-          <Title>GPS Track</Title>
+        <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
+          <h3 className="text-lg font-semibold leading-relaxed">GPS Track</h3>
           {telemetryQuery.isLoading ? (
             <Skeleton className="mt-2 h-48 w-full" />
           ) : (
@@ -402,7 +467,7 @@ export default function ReplayDashboard() {
               <GpsTrackMap frames={frames} />
             </div>
           )}
-        </Card>
+        </div>
       </div>
 
       {/* AI Analysis confirmation dialog */}
@@ -441,9 +506,26 @@ export default function ReplayDashboard() {
         </div>
       </dialog>
 
+      {/* Vehcile reassign dialog */}
+      {showReassign && (
+        <VehicleReassignDialog
+          vehicles={vehicles}
+          currentVehicleId={sessionQuery.data.vehicleId}
+          onReassign={async (vehicleId) => {
+            if (!id) return;
+            await reassignSessionVehicle(id, vehicleId);
+            await sessionQuery.refetch();
+            setShowReassign(false);
+          }}
+          onClose={() => setShowReassign(false)}
+        />
+      )}
+
       {/* AI Analysis panel — at the bottom */}
       <div id="ai-analysis-panel" className="animate-slide-up-delay-5">
-        <AnalysisPanel ref={analysisPanelRef} sessionId={id as string} />
+        <React.Suspense fallback={<div className="text-sm text-gray-400 p-4">Loading analysis panel...</div>}>
+          <AnalysisPanel ref={analysisPanelRef} sessionId={id as string} />
+        </React.Suspense>
       </div>
     </div>
   );

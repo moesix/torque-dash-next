@@ -1,4 +1,4 @@
-import { RouterProvider, createBrowserRouter } from 'react-router-dom';
+import { RouterProvider, createBrowserRouter } from 'react-router';
 import { routerConfig } from '@/app/router';
 
 // App defines the router instance and hands it to RouterProvider.

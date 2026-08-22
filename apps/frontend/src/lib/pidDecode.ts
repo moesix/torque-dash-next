@@ -25,11 +25,14 @@ const FALLBACK_MAP: Record<string, { full: string; short: string; unit: string }
   k49:     { full: 'Accel Pedal Position D',      short: 'Pedal D',   unit: '%' },
   k4a:     { full: 'Accel Pedal Position E',      short: 'Pedal E',   unit: '%' },
   k5:      { full: 'Engine Coolant Temperature',  short: 'Coolant',   unit: '°C' },
-  kb:      { full: 'Intake Manifold Pressure',    short: 'MAP',       unit: 'psi' },
+  k6:      { full: 'Fuel Trim (Short Term Bank 1)',  short: 'STFT B1',   unit: '%' },
+  k7:      { full: 'Fuel Trim (Long Term Bank 1)',   short: 'LTFT B1',   unit: '%' },
+  kb:      { full: 'Intake Manifold Pressure',    short: 'MAP',       unit: 'kPa' },
   kc:      { full: 'Engine RPM',                  short: 'Revs',      unit: 'rpm' },
   kd:      { full: 'Vehicle Speed (OBD)',         short: 'Speed',     unit: 'km/h' },
   ke:      { full: 'Timing Advance',              short: 'Timing',    unit: '°' },
   kf:      { full: 'Intake Air Temperature',      short: 'IAT',       unit: '°C' },
+  k14:     { full: 'O2 Sensor 1 Voltage (B1S1)',     short: 'O2S1',      unit: 'V' },
   kff1001: { full: 'MAF-derived Speed Est',       short: 'MAF Speed', unit: 'km/h' },
   kff1005: { full: 'Fuel Trim (Long Term)',       short: 'LTFT',      unit: '%' },
   kff1006: { full: 'Fuel Trim (Short Term)',      short: 'STFT',      unit: '%' },
@@ -273,4 +276,32 @@ export function computeStats(
   if (count === 0) return null;
 
   return { min, max, avg: sum / count, last };
+}
+
+// ── Computed series helpers ───────────────────────────────────────────────
+
+/**
+ * Compute Total Trim = STFT + LTFT for each frame.
+ * Both STFT (k6) and LTFT (k7) must be non-null for a result; if either
+ * is null at a timestamp, that point is null.
+ *
+ * Returns [timestamp_ms, value | null][] suitable for ECharts.
+ */
+export function computeTotalTrim(frames: TelemetryFrame[]): [number, number | null][] {
+  const data: [number, number | null][] = new Array(frames.length);
+
+  for (let i = 0; i < frames.length; i++) {
+    const f = frames[i];
+    const ts = new Date(f.timestamp).getTime();
+    const stft = coerceScalar(f.values?.k6);
+    const ltft = coerceScalar(f.values?.k7);
+
+    if (stft !== null && ltft !== null) {
+      data[i] = [ts, stft + ltft];
+    } else {
+      data[i] = [ts, null];
+    }
+  }
+
+  return data;
 }

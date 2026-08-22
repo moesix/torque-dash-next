@@ -1,10 +1,9 @@
 const Session = require('../models').Session;
 const Log = require('../models').Log;
 const User = require('../models').User;
+const Vehicle = require('../models').Vehicle;
 const sequelize = require('../models').sequelize;
 const Op = require('../models').Sequelize.Op;
-const moment = require('moment');
-require('moment-duration-format');
 const { nanoid } = require('nanoid');
 
 class SessionController {
@@ -18,7 +17,7 @@ class SessionController {
         }
         catch (err) {
             console.error('[SessionController]', err);
-            res.sendStatus(500);
+            res.status(500).json({ error: 'Internal server error' });
         }
     }
     static async getOne(req, res) {
@@ -28,7 +27,13 @@ class SessionController {
                 where: { 
                     userId: req.user.id ,
                     id: req.params.sessionId
-                }
+                },
+                include: [{
+                    model: Vehicle,
+                    as: 'Vehicle',
+                    attributes: ['id', 'name', 'make', 'model', 'year'],
+                    required: false,
+                }]
             });
             if(!session) return res.status(404).send('Resource not found');
 
@@ -41,27 +46,49 @@ class SessionController {
             out.duration = formatDuration(s.start, s.end);
             out.maxSpeed = (s.maxSpeed != null) ? s.maxSpeed : null;
             out.maxRpm = (s.maxRpm != null) ? s.maxRpm : null;
+            out.vehicleId = session.vehicleId || null;
+            out.vehicleName = session.Vehicle?.name || null;
             res.json(out);
         }
         catch (err) {
             console.error('[SessionController]', err);
-            res.sendStatus(500);
+            res.status(500).json({ error: 'Internal server error' });
         }
     }
     static async getAll(req, res) {
         try {
+            const limit = Math.min(parseInt(req.query.limit, 10) || 50, 200);
+            const offset = parseInt(req.query.offset, 10) || 0;
+            const vehicleId = req.query.vehicleId ? Number(req.query.vehicleId) : null;
+
             // Check if user exists
             let user = await User.findOne({
                 where: { id: req.user.id }
             });
             if(!user) return res.status(401).json({ error: 'User not found' });
 
-            // Get all sessions for user (no eager Log load)
+            // Build where clause with optional vehicleId filter
+            const where = { userId: user.id };
+            if (vehicleId) where.vehicleId = vehicleId;
+            else if (req.query.vehicleId === 'none') where.vehicleId = null;
+
+            // Get paginated sessions for user (no eager Log load)
             let sessions = await Session.findAll({
-                where: { userId: user.id }
+                where,
+                include: [{
+                    model: Vehicle,
+                    as: 'Vehicle',
+                    attributes: ['id', 'name', 'make', 'model', 'year'],
+                    required: false,
+                }],
+                limit,
+                offset,
+                order: [['createdAt', 'DESC']]
             });
 
-            // ONE grouped aggregate query across every session id — never per-session.
+            const total = await Session.count({ where });
+
+            // ONE grouped aggregate query across fetched session ids — never per-session.
             const summaries = await aggregateSummaries(sessions.map(s => s.id));
             const out = sessions.map(session => {
                 const s = summaries.get(session.id) || {};
@@ -71,13 +98,16 @@ class SessionController {
                 json.duration = formatDuration(s.start, s.end);
                 json.maxSpeed = (s.maxSpeed != null) ? s.maxSpeed : null;
                 json.maxRpm = (s.maxRpm != null) ? s.maxRpm : null;
+                json.vehicleId = session.vehicleId || null;
+                json.vehicleName = session.Vehicle?.name || null;
                 return json;
             });
-            res.json(out);
+            res.set('Cache-Control', 'private, max-age=30');
+            res.json({ sessions: out, total, limit, offset });
         }
         catch (err) {
             console.error('[SessionController]', err);
-            res.sendStatus(500);
+            res.status(500).json({ error: 'Internal server error' });
         }
     }
     static async getOneShared(req, res) {
@@ -110,7 +140,7 @@ class SessionController {
         }
         catch (err) {
             console.error('[SessionController]', err);
-            res.sendStatus(500);
+            res.status(500).json({ error: 'Internal server error' });
         }
     }
     static async getAllShared(req, res) {
@@ -142,12 +172,12 @@ class SessionController {
         }
         catch (err) {
             console.error('[SessionController]', err);
-            res.sendStatus(500);
+            res.status(500).json({ error: 'Internal server error' });
         }
     }
     static async rename(req, res) {
         try {
-            await Session.update(
+            const [affectedCount] = await Session.update(
                 { name: req.body.name },
                 { where: { 
                     id: req.params.sessionId, 
@@ -155,11 +185,29 @@ class SessionController {
                     } 
                 }
             )
+            if (affectedCount === 0) return res.status(404).json({ error: 'Session not found' });
             res.sendStatus(200);
         }
         catch (err) {
             console.error('[SessionController]', err);
-            res.sendStatus(500);
+            res.status(500).json({ error: 'Internal server error' });
+        }
+    }
+    static async updateNotes(req, res) {
+        try {
+            const { notes } = req.body;
+            if (notes !== undefined && notes !== null && typeof notes !== 'string') {
+                return res.status(400).json({ error: 'notes must be a string or null.' });
+            }
+            const session = await Session.findOne({
+                where: { id: req.params.sessionId, userId: req.user.id }
+            });
+            if (!session) return res.status(404).json({ error: 'Session not found' });
+            await session.update({ notes: notes || null });
+            res.json({ ok: true, notes: session.notes });
+        } catch (err) {
+            console.error('[SessionController]', err);
+            res.status(500).json({ error: 'Internal server error' });
         }
     }
     static async addLocation(req, res) {
@@ -191,19 +239,21 @@ class SessionController {
         }
         catch (err) {
             console.error('[SessionController]', err);
-            res.sendStatus(500);
+            res.status(500).json({ error: 'Internal server error' });
         }
     }
     static async copy(req, res) {
         try {
+            // Session lookup and null check BEFORE the transaction
+            let session = await Session.findOne({
+                where: { 
+                    userId: req.user.id,
+                    id: req.params.sessionId
+                }
+            });
+            if (!session) return res.status(404).json({ error: 'Session not found' });
+
             await sequelize.transaction( async (t) => {
-                // find the session (without loading logs into memory)
-                let session = await Session.findOne({
-                    where: { 
-                        userId: req.user.id,
-                        id: req.params.sessionId
-                        }
-                });
                 // Create a copy of the session
                 let sessionCopy = await Session.create({
                     sessionId: nanoid(),
@@ -211,32 +261,24 @@ class SessionController {
                     startLocation: session.startLocation,
                     endLocation: session.endLocation,
                     userId: session.userId
-                });
-                // Fetch log data as raw objects (not Sequelize models) to avoid
-                // hydrating thousands of model instances into memory.
-                const logs = await Log.findAll({
-                    where: { sessionId: session.id },
-                    raw: true
-                });
-                // Bulk copy all logs with resolved FK in a single INSERT
-                if (logs.length > 0) {
-                    const copyRows = logs.map(l => ({
-                        sessionId: sessionCopy.id,
-                        timestamp: l.timestamp,
-                        lon: l.lon,
-                        lat: l.lat,
-                        values: l.values,
-                        engine_rpm: l.engine_rpm,
-                        vehicle_speed: l.vehicle_speed
-                    }));
-                    await Log.bulkCreate(copyRows, { ignoreDuplicates: true });
-                }
+                }, { transaction: t });
+                // Copy logs server-side via INSERT...SELECT (never load rows into Node.js)
+                await sequelize.query(
+                    `INSERT INTO "Logs" ("sessionId", timestamp, lon, lat, values, engine_rpm, vehicle_speed)
+                     SELECT :newSessionId, timestamp, lon, lat, values, engine_rpm, vehicle_speed
+                     FROM "Logs"
+                     WHERE "sessionId" = :oldSessionId`,
+                    {
+                        replacements: { newSessionId: sessionCopy.id, oldSessionId: session.id },
+                        transaction: t
+                    }
+                );
             });
             res.sendStatus(200);
         }
         catch (err) {
             console.error('[SessionController]', err);
-            res.sendStatus(500);
+            res.status(500).json({ error: 'Internal server error' });
         }
     }
     static async filter(req, res) {
@@ -281,12 +323,28 @@ class SessionController {
         }
         catch (err) {
             console.error('[SessionController]', err);
-            res.sendStatus(500);
+            res.status(500).json({ error: 'Internal server error' });
         }
     }
     static async cut(req, res) {
         try {
             let { from, to } = req.body
+
+            if (!from || !to) {
+                return res.status(400).json({ error: 'Missing required fields: from, to' });
+            }
+
+            const startDate = new Date(from);
+            const endDate = new Date(to);
+
+            if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+                return res.status(400).json({ error: 'Invalid date format for from/to' });
+            }
+
+            if (startDate > endDate) {
+                return res.status(400).json({ error: 'from must be before or equal to to' });
+            }
+
             let session = await Session.findOne({ 
                 where: { 
                     id: req.params.sessionId, 
@@ -309,7 +367,7 @@ class SessionController {
         }
         catch (err) {
             console.error('[SessionController]', err);
-            res.sendStatus(500);
+            res.status(500).json({ error: 'Internal server error' });
         }
     }
     static async join(req, res) {
@@ -335,42 +393,36 @@ class SessionController {
                     sessionId: nanoid(),
                     name: name,
                     userId: req.user.id
-                });
-                // Fetch logs from both sessions as raw objects (not Sequelize models)
-                const [logsOne, logsTwo] = await Promise.all([
-                    Log.findAll({ where: { sessionId: sessionOne.id }, raw: true }),
-                    Log.findAll({ where: { sessionId: sessionTwo.id }, raw: true })
+                }, { transaction: t });
+                // Copy logs from both sessions server-side via INSERT...SELECT
+                await Promise.all([
+                    sequelize.query(
+                        `INSERT INTO "Logs" ("sessionId", timestamp, lon, lat, values, engine_rpm, vehicle_speed)
+                         SELECT :targetSessionId, timestamp, lon, lat, values, engine_rpm, vehicle_speed
+                         FROM "Logs"
+                         WHERE "sessionId" = :sourceSessionId`,
+                        {
+                            replacements: { targetSessionId: joinSession.id, sourceSessionId: sessionOne.id },
+                            transaction: t
+                        }
+                    ),
+                    sequelize.query(
+                        `INSERT INTO "Logs" ("sessionId", timestamp, lon, lat, values, engine_rpm, vehicle_speed)
+                         SELECT :targetSessionId, timestamp, lon, lat, values, engine_rpm, vehicle_speed
+                         FROM "Logs"
+                         WHERE "sessionId" = :sourceSessionId`,
+                        {
+                            replacements: { targetSessionId: joinSession.id, sourceSessionId: sessionTwo.id },
+                            transaction: t
+                        }
+                    )
                 ]);
-                // Bulk copy all logs from both sessions in a single INSERT
-                const copyRows = [
-                    ...logsOne.map(l => ({
-                        sessionId: joinSession.id,
-                        timestamp: l.timestamp,
-                        lon: l.lon,
-                        lat: l.lat,
-                        values: l.values,
-                        engine_rpm: l.engine_rpm,
-                        vehicle_speed: l.vehicle_speed
-                    })),
-                    ...logsTwo.map(l => ({
-                        sessionId: joinSession.id,
-                        timestamp: l.timestamp,
-                        lon: l.lon,
-                        lat: l.lat,
-                        values: l.values,
-                        engine_rpm: l.engine_rpm,
-                        vehicle_speed: l.vehicle_speed
-                    }))
-                ];
-                if (copyRows.length > 0) {
-                    await Log.bulkCreate(copyRows, { ignoreDuplicates: true });
-                }
             });
             res.sendStatus(200);
         }
         catch (err) {
             console.error('[SessionController]', err);
-            res.sendStatus(500);
+            res.status(500).json({ error: 'Internal server error' });
         }
     }
     static async exportCsv(req, res) {
@@ -459,6 +511,37 @@ class SessionController {
             }
         }
     }
+
+    static async reassignVehicle(req, res) {
+        try {
+            const { vehicleId } = req.body;
+            // vehicleId can be a number (assign) or null (unassign)
+            if (vehicleId !== null && vehicleId !== undefined) {
+                const v = Number(vehicleId);
+                if (!Number.isInteger(v) || v < 1) {
+                    return res.status(400).json({ error: 'vehicleId must be a positive integer or null.' });
+                }
+                // Verify vehicle belongs to this user
+                const vehicle = await Vehicle.findOne({
+                    where: { id: v, userId: req.user.id },
+                });
+                if (!vehicle) {
+                    return res.status(404).json({ error: 'Vehicle not found.' });
+                }
+            }
+
+            const session = await Session.findOne({
+                where: { id: req.params.sessionId, userId: req.user.id },
+            });
+            if (!session) return res.status(404).json({ error: 'Session not found' });
+
+            await session.update({ vehicleId: vehicleId || null });
+            res.json({ ok: true, vehicleId: session.vehicleId });
+        } catch (err) {
+            console.error('[SessionController]', err);
+            res.status(500).json({ error: 'Internal server error' });
+        }
+    }
 }
 
 // Aggregated session summary (start/end time + max speed/RPM) computed with a
@@ -494,13 +577,23 @@ async function aggregateSummaries(sessionIds) {
 }
 
 // Format a [start, end] pair into a compact human-readable duration string.
-// Returns null when either bound is missing. moment-duration-format (imported at
-// top) lets us trim leading/trailing zero units, e.g. "1h 02m 05s".
+// Returns null when either bound is missing.
+// Produces e.g. "1h 2m 5s" or "3d 1h 0m 5s", trimming leading zero units.
 function formatDuration(start, end) {
     if (!start || !end) return null;
-    const ms = new Date(end) - new Date(start);
-    if (isNaN(ms) || ms < 0) return null;
-    return moment.duration(ms).format('d[d] h[h] m[m] s[s]', { trim: 'both' });
+    const ms = new Date(end).getTime() - new Date(start).getTime();
+    if (ms < 0) return null;
+    const totalSeconds = Math.floor(ms / 1000);
+    const d = Math.floor(totalSeconds / 86400);
+    const h = Math.floor((totalSeconds % 86400) / 3600);
+    const m = Math.floor((totalSeconds % 3600) / 60);
+    const s = totalSeconds % 60;
+    const parts = [];
+    if (d > 0) parts.push(`${d}d`);
+    if (h > 0) parts.push(`${h}h`);
+    if (m > 0) parts.push(`${m}m`);
+    parts.push(`${s}s`);
+    return parts.join(' ');
 }
 
 // Strip path-dangerous chars from session names for Content-Disposition filenames,

@@ -6,8 +6,9 @@
  * where possible, and statements are executed individually so that benign
  * "already exists" / "does not exist" errors on re-run are tolerated and skipped.
  *
- * IMPORTANT: This script is run MANUALLY (e.g. `node scripts/migrate.js`).
- * It is NOT auto-run on server boot (see app.js bootstrap guard).
+ * This script runs TimescaleDB migrations. In Docker deployments, it is
+ * executed automatically at container startup (see Dockerfile CMD). For
+ * non-Docker setups, run manually: `node scripts/migrate.js`.
  */
 const fs = require('fs');
 const path = require('path');
@@ -26,7 +27,8 @@ function isBenignError(err) {
         /multiple primary keys/i.test(msg) ||
         /relation "log_1min" already exists/i.test(msg) ||
         /already a hypertable/i.test(msg) ||
-        /operation not supported on hypertables that have compression enabled/i.test(msg)
+        /operation not supported on hypertables that have compression enabled/i.test(msg) ||
+        /cannot disable compression on hypertable with compressed chunks/i.test(msg)
     );
 }
 

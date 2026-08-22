@@ -92,7 +92,8 @@ export default function GpsTrackMap({ frames }: Props) {
       center={center}
       zoom={13}
       scrollWheelZoom
-      style={{ height: 360, width: '100%' }}
+      style={{ width: '100%' }}
+      className="h-64 md:h-[360px]"
     >
       <TileLayer
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"

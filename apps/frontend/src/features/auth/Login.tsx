@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import type { FormEvent } from 'react';
-import { useNavigate, Navigate } from 'react-router-dom';
-import { Button } from '@tremor/react';
+import { useNavigate, Navigate } from 'react-router';
 import { login, getSettings, getVersion } from '@/lib/api';
 import { useAuth } from './useAuth';
 
@@ -17,7 +16,7 @@ export default function Login() {
 
   useEffect(() => {
     getSettings()
-      .then((s) => setRegistrationDisabled(s.disableRegistration))
+      .then((s) => setRegistrationDisabled(s?.disableRegistration ?? false))
       .catch(() => setRegistrationDisabled(false));
   }, []);
 
@@ -56,7 +55,7 @@ export default function Login() {
       </div>
 
       {/* Right panel — form */}
-      <div className="flex flex-1 items-center justify-center p-6">
+      <div className="flex flex-1 items-center justify-center p-4 md:p-6">
         <div className="animate-slide-up w-full max-w-sm">
           {/* Mobile-only logo */}
           <div className="mb-8 text-center lg:hidden">
@@ -89,7 +88,7 @@ export default function Login() {
                 onChange={(e) => setEmail(e.target.value)}
                 aria-invalid={!!error}
                 aria-describedby={error ? 'login-error' : undefined}
-                className="mt-1 w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-sm
+                className="mt-1 w-full rounded-md border border-gray-300 bg-white px-3 py-3 text-sm
                   focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500/20
                   dark:border-gray-600 dark:bg-gray-800 dark:text-white"
               />
@@ -106,7 +105,7 @@ export default function Login() {
                 onChange={(e) => setPassword(e.target.value)}
                 aria-invalid={!!error}
                 aria-describedby={error ? 'login-error' : undefined}
-                className="mt-1 w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-sm
+                className="mt-1 w-full rounded-md border border-gray-300 bg-white px-3 py-3 text-sm
                   focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500/20
                   dark:border-gray-600 dark:bg-gray-800 dark:text-white"
               />
@@ -116,9 +115,17 @@ export default function Login() {
                 {error}
               </p>
             )}
-            <Button type="submit" disabled={busy} className="w-full">
+            <button
+              type="submit"
+              disabled={busy}
+              className="w-full rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white
+                shadow-xs transition hover:bg-indigo-700
+                focus:outline-none focus:ring-2 focus:ring-indigo-500/20
+                disabled:cursor-not-allowed disabled:opacity-50
+                dark:bg-indigo-500 dark:hover:bg-indigo-600"
+            >
               {busy ? 'Signing in…' : 'Sign in'}
-            </Button>
+            </button>
           </form>
 
           <p className="mt-6 text-center text-sm text-gray-500 dark:text-gray-400">

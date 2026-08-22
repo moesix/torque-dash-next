@@ -11,7 +11,7 @@ import { getSessions } from '@/lib/api';
 export function useAuth() {
   const query = useQuery({
     queryKey: ['auth', 'probe'],
-    queryFn: getSessions,
+    queryFn: () => getSessions(),
     retry: false,
     staleTime: 30_000,
   });

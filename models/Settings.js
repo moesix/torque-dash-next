@@ -75,10 +75,45 @@ module.exports = (sequelize, DataTypes) => {
             type: DataTypes.TEXT,
             defaultValue: 'high',
         },
+
+        // ── Max output tokens (migration 010) ────────────────────────
+        llmMaxTokens: {
+            type: DataTypes.INTEGER,
+            allowNull: false,
+            defaultValue: 16384,
+        },
+
+        // ── Timezone offset (migration 007) ──────────────────────────
+        timezoneOffset: {
+            type: DataTypes.INTEGER,
+            allowNull: false,
+            defaultValue: 0,
+        },
+
+        // ── Data retention (migration 011) ────────────────────────
+        retentionEnabled: {
+            type: DataTypes.BOOLEAN,
+            allowNull: false,
+            defaultValue: false,
+        },
+        retentionDays: {
+            type: DataTypes.INTEGER,
+            allowNull: false,
+            defaultValue: 365,
+        },
     });
+
+    // ── In-memory TTL cache ─────────────────────────────────────────────
+    let _settingsCache = null;
+    let _cacheTimestamp = 0;
+    const CACHE_TTL_MS = 30000; // 30 seconds
 
     // Resolve the singleton row, creating it on first access.
     Settings.getSingleton = async function () {
+        const now = Date.now();
+        if (_settingsCache && (now - _cacheTimestamp) < CACHE_TTL_MS) {
+            return _settingsCache;
+        }
         const [row] = await Settings.findOrCreate({
             where: { id: 1 },
             defaults: {
@@ -94,9 +129,20 @@ module.exports = (sequelize, DataTypes) => {
                 engineCc: null,
                 llmThinkingMode: true,
                 llmReasoningEffort: 'high',
+                llmMaxTokens: 16384,
+                timezoneOffset: 0,
+                retentionEnabled: false,
+                retentionDays: 365,
             },
         });
+        _settingsCache = row;
+        _cacheTimestamp = now;
         return row;
+    };
+
+    Settings.invalidateCache = function () {
+        _settingsCache = null;
+        _cacheTimestamp = 0;
     };
 
     return Settings;

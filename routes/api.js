@@ -6,6 +6,7 @@ const { rateLimits } = require('../config/config');
 const SessionController = require('../controllers/SessionController');
 const UploadController = require('../controllers/UploadController');
 const UserController = require('../controllers/UserController');
+const VehicleController = require('../controllers/VehicleController');
 const TelemetryController = require('../controllers/TelemetryController');
 const AnalysisController = require('../controllers/AnalysisController');
 const runtime = require('../config/runtime');
@@ -41,7 +42,17 @@ const sharedLimiter = makeLimiter({
 // limiter entirely. This lets the known uploader flush backlog freely without
 // opening a spoofable hole: the token is a secret configured in the Torque app,
 // not a guessable query param, and cloudflared forwards the header intact.
-const uploadLimiter = makeLimiter(rateLimits.upload);
+const uploadLimiter = makeLimiter({
+    ...rateLimits.upload,
+    // Skip the limiter for requests presenting the configured upload API token
+    // (env UPLOAD_API_TOKEN, or the DB-stored token). Read from the runtime
+    // holder per request so the DB is not hit on the hot /upload path.
+    skip: (req) => {
+        const token = runtime.getUploadApiToken();
+        return Boolean(token) &&
+            (req.headers.authorization || '') === `Bearer ${token}`;
+    },
+});
 router.get('/upload', uploadLimiter, UploadController.processUpload);
 
 // Stricter limiter for auth endpoints to slow brute-force / credential spray.
@@ -100,10 +111,20 @@ router.get('/sessions/:id/telemetry', authenticate, TelemetryController.range);
 
 router.patch('/sessions/rename/:sessionId', authenticate, SessionController.rename);
 router.patch('/sessions/addlocation/:sessionId', authenticate, SessionController.addLocation);
+router.patch('/sessions/notes/:sessionId', authenticate, SessionController.updateNotes);
 router.patch('/sessions/filter/:sessionId', authenticate, SessionController.filter);
 router.patch('/sessions/cut/:sessionId', authenticate, SessionController.cut);
 router.post('/sessions/copy/:sessionId', authenticate, SessionController.copy);
 router.post('/sessions/join/:sessionId', authenticate, SessionController.join);
+router.patch('/sessions/:sessionId/vehicle', authenticate, SessionController.reassignVehicle);
+
+// ── Vehicle CRUD ──────────────────────────────────────────────────────
+router.get('/vehicles', authenticate, VehicleController.getAll);
+router.get('/vehicles/:vehicleId', authenticate, VehicleController.getOne);
+router.post('/vehicles', writeLimiter, authenticate, VehicleController.create);
+router.put('/vehicles/:vehicleId', writeLimiter, authenticate, VehicleController.update);
+router.delete('/vehicles/:vehicleId', writeLimiter, authenticate, VehicleController.delete);
+router.patch('/vehicles/:vehicleId/default', authenticate, VehicleController.setDefault);
 
 // ── BYOK LLM Analysis ─────────────────────────────────────────────────
 router.post('/settings/test-llm', aiLimiter, authenticate, AnalysisController.testConnection);

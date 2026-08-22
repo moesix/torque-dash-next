@@ -41,6 +41,12 @@ export interface Session {
   userId: number;
   startLocation?: string | null;
   endLocation?: string | null;
+  /** Freeform user notes attached to this session. */
+  notes?: string | null;
+  /** The vehicle this session is assigned to. */
+  vehicleId?: number | null;
+  /** Resolved vehicle name from the Vehicle model. */
+  vehicleName?: string | null;
   /** Populated by the backend's aggregateSummaries() query. */
   startDate?: string;
   endDate?: string;
@@ -50,6 +56,29 @@ export interface Session {
   maxSpeed?: number | null;
   /** Pre-computed summary: peak engine RPM (from `engine_rpm`). */
   maxRpm?: number | null;
+}
+
+/** A vehicle profile. */
+export interface Vehicle {
+  id: number;
+  name: string;
+  make: string | null;
+  model: string | null;
+  year: number | null;
+  engineCc: number | null;
+  isDefault: boolean;
+  userId: number;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+/** Request body for creating/updating a vehicle. */
+export interface UpdateVehicle {
+  name?: string;
+  make?: string | null;
+  model?: string | null;
+  year?: number | null;
+  engineCc?: number | null;
 }
 
 /** Global site settings, read via GET /api/settings. */
@@ -75,6 +104,16 @@ export interface Settings {
   engineCc: number | null;
   llmThinkingMode?: boolean;
   llmReasoningEffort?: string;
+  llmMaxTokens?: number;
+
+  /** Timezone offset in minutes from UTC (e.g. 480 for UTC+8). */
+  timezoneOffset?: number;
+
+  // ── Data retention (migration 011) ──────────────────────────────
+  /** When true, telemetry data older than retentionDays is auto-deleted. */
+  retentionEnabled?: boolean;
+  /** Retention window in days (90-365). Only applies when retentionEnabled. */
+  retentionDays?: number;
 }
 
 /** Response from POST /api/settings/upload-token (token generation). The full
@@ -132,6 +171,8 @@ export interface UpdateLlmSettings {
   engineCc?: number | null;
   llmThinkingMode?: boolean;
   llmReasoningEffort?: string;
+  llmMaxTokens?: number;
+  timezoneOffset?: number;
 }
 
 /** Response from POST /api/settings/test-llm. */

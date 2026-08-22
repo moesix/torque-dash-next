@@ -79,8 +79,14 @@ which enforces ownership (or `?shareId=` for shared sessions) and returns
   null lat/lon (no longer dropped).
 - **Promoted columns:** `engineRpm` ← `values.kc` (PID 0x0C), `vehicleSpeed` ← `values.kd` (PID 0x0D). Torque stores hex keys **without leading zeros**, so the key is `kc`, not `k0c`. Values are extracted with a zero‑safe pattern: `values.kc != null ? Number(values.kc) : null` (preserves legitimate `0` values).
 - **Auto-naming:** new sessions are automatically named `Trip DDMMYYYY h:mmA`
-  using `moment(Number(time))` (local time from the Torque `time` param).
-  The format uses 12-hour clock with AM/PM for human-readable session names.
+  (12-hour clock with AM/PM) using `Date` arithmetic adjusted by the user's
+  `timezoneOffset` from the `Settings` singleton (stored in minutes, e.g. `480`
+  for UTC+8). The `moment` dependency previously used here has been removed.
+- **Vehicle resolution (`v` param):** Torque Pro's optional `v` query param
+  (vehicle profile name) is matched to a `Vehicle` record by name and userId.
+  When `v` is absent or no match is found, the controller falls back to the
+  user's default vehicle (`isDefault: true`). The resolved `vehicleId` is stored
+  on the `Session` and returned in session metadata.
 - **SSRF-guarded `forwardUrls`:** each URL is checked with `lib/ssrfGuard.isSafeUrl`
   before a fire-and-forget `fetch`.
 - Responds `200 OK` immediately; the DB flush is asynchronous.
@@ -162,12 +168,183 @@ which enforces ownership (or `?shareId=` for shared sessions) and returns
 - **Key format** — Torque hex keys **without leading zeros** (e.g. `k5`, `kc`,
   `kd`, `kf`, `kff1007`). No entries use zero-padded variants.
 
+### 2.7 Security Headers (Helmet)
+
+- **Helmet middleware** (`app.js`) applies a standard set of HTTP security headers
+  to all responses: `X-Content-Type-Options: nosniff`, `X-Frame-Options:
+  SAMEORIGIN`, `X-XSS-Protection: 0` (modern browsers ignore this, but it's kept
+  for safety), `Strict-Transport-Security` (set at the nginx layer), and others.
+- **CSP disabled** — `contentSecurityPolicy: false` is passed to Helmet because
+  the React SPA relies on inline scripts and styles. A future plan should enable
+  CSP via nonces or hashes.
+- **nginx HSTS** — the frontend nginx config (`apps/frontend/nginx.conf`) adds
+  `Strict-Transport-Security: max-age=31536000; includeSubDomains` to enforce
+  HTTPS for one year.
+
+### 2.8 Session Notes
+
+- **Schema:** a nullable `notes` TEXT column on the `Sessions` table, added by
+  migration `infra/timescale/008_add_session_notes.sql`.
+- **API:** `PATCH /api/sessions/notes/:sessionId` accepts `{ notes: string|null }`
+  and updates the session's freeform notes field. Only the session owner may
+  update notes.
+- **Frontend:** the `ReplayDashboard` renders a `<textarea>` for session notes
+  with auto-save on blur. A `Saving...` indicator shows during the async save.
+  The notes are synced from the session query data when the page loads.
+- **Contract:** notes are returned as part of the session metadata in
+  `GET /api/sessions/:id` and `GET /api/sessions` (included in `notes` field).
+
+### 2.9 Vehicle Model
+
+- **Purpose:** the `Vehicle` model (Sequelize, `models/Vehicle.js`) lets users
+  define named vehicle profiles (make, model, year, engine displacement) and
+  assign sessions to them. This replaces the earlier approach of storing vehicle
+  fields in `Settings` — the legacy Settings vehicle fields remain for backward
+  compatibility.
+
+- **Schema (`infra/timescale/009_add_vehicles.sql`):**
+  - `Vehicles` table: `id` (PK), `name` (VARCHAR 255, NOT NULL, default
+    `'My Vehicle'`), `make` (TEXT), `model` (TEXT), `year` (INTEGER),
+    `engineCc` (INTEGER), `isDefault` (BOOLEAN, NOT NULL, default false),
+    `userId` (FK → `Users.id`, ON DELETE CASCADE), `createdAt`, `updatedAt`.
+  - `Sessions.vehicleId` — nullable FK (`Vehicles.id`, ON DELETE SET NULL),
+    added by migration 009.
+  - Indexes on `Sessions(vehicleId)` and `Vehicles(userId)` for fast lookups.
+
+- **Associations:**
+  - `Vehicle.belongsTo(User)` via `userId`.
+  - `Vehicle.hasMany(Session)` via `vehicleId` (ON DELETE SET NULL).
+  - `Session.belongsTo(Vehicle)` returns `vehicleId` and resolved `vehicleName`
+    in session metadata. Both `GET /api/sessions/:id` and `GET /api/sessions`
+    include the `Vehicle` association.
+
+- **Upload path integration:** `UploadController` resolves Torque Pro's `v` query
+  param to a `Vehicle` by name, falling back to the user's default vehicle.
+  The resolved `vehicleId` is stored on `findOrCreate` of the session.
+
+- **Frontend:**
+  - `VehicleManager` (in Settings, `features/settings/VehicleManager.tsx`) —
+    full CRUD UI for vehicle profiles: add, edit, delete, set default. Replaces
+    the old `VehicleCard` component.
+  - Vehicle filter in `SessionBrowser` — a `<select>` dropdown filters the
+    session list by vehicle (`All vehicles`, specific vehicle, or `Unassigned`).
+  - Vehicle column in `SessionTable` — displays `vehicleName` or `(Unassigned)`.
+  - `VehicleReassignDialog` (in ReplayDashboard) — native `<dialog>` that lets
+    users reassign a session to a different vehicle or unassign it.
+
+### 2.10 `lib/llmPrompt.js` — AI Analysis Prompt Builder
+
+The AI analysis prompt is assembled in `lib/llmPrompt.js`, which exports five
+functions used by `controllers/AnalysisController.js` to build the LLM prompt
+from session telemetry:
+
+- **`buildContext(session, settings, telemetrySample, pidKeys)`** — Generates the
+  vehicle/session context block (vehicle make/model/year, engine displacement,
+  session name, location, duration, data point count, discovered PID keys).
+- **`computeSummaryStats(telemetrySample, pidKeys)`** — Pre-computes min, max,
+  mean, and median for every numeric PID across the full telemetry sample.
+  Also computes Combined Fuel Trim (STFT + LTFT) per-row to prevent index
+  misalignment from dropped packets. Filters null/empty values before `Number()`
+  conversion to avoid data corruption (`Number(null) === 0`).
+- **`resampleTelemetry(telemetrySample, maxRows = 80)`** — Uniformly resamples
+  telemetry across the full timeline rather than taking a head/tail slice.
+  Ensures the LLM receives data from the start, middle cruising phase, and end
+  of every drive.
+- **`buildTelemetryCsv(telemetrySample, pidKeys)`** — Outputs raw CSV instead of
+  Markdown tables, saving ~30% on LLM tokens. Strips lat/lon columns and
+  extracts `HH:mm:ss` from timestamps via regex. Uses `resampleTelemetry()`
+  internally.
+- **`buildAnalysisPrompt(session, settings, telemetrySample, pidKeys)`** —
+  Assembles the full analysis prompt by composing all of the above. Includes
+  pre-calculated statistical aggregates with units, four diagnostic guardrails
+  (fuel trim physics, A/C idle behaviour, ECU torque management, deceleration
+  fuel cut-off), dynamic engine size injection, and five specific analysis
+  categories.
+
+**Key architectural decisions:**
+
+- **Statistics computed in JS, not by the LLM.** Summary statistics are
+  pre-computed server-side so the LLM works from exact values rather than having
+  to estimate from sampled rows. This eliminates hallucinated min/max figures.
+- **Diagnostic guardrails encoded in the prompt.** Domain-specific rules (e.g.
+  "combined fuel trim within ±10% is normal closed-loop operation") prevent the
+  LLM from over-diagnosing standard OBD-II operating quirks as mechanical faults.
+- **Uniform resampling.** The resampler picks evenly-spaced rows across the
+  entire timeline, ensuring the LLM sees data from every phase of the drive
+  rather than just the start and end.
+- **CSV over Markdown.** CSV is more token-efficient than Markdown tables for
+  the same telemetry data, reducing per-analysis cost.
+
+### 2.11 `lib/llmProviders.js` — LLM Provider Routing & Token Budget
+
+- **Provider registry** — `PROVIDERS` maps `openai`, `anthropic`, `ollama`,
+  `deepseek`, and `custom` to display names, model lists, and default models.
+  The frontend `PROVIDERS` constant in `AiProviderCard.tsx` mirrors this list
+  exactly (verified in Plan 043 — no drift).
+- **Dispatch (`analyze()`)** — routes by `settings.llmProvider`: OpenAI /
+  Ollama / Custom → `analyzeOpenAICompatible` (OpenAI-compatible
+  `/chat/completions`), DeepSeek → `analyzeOpenAICompatible` with an
+  `extraBody` carrying DeepSeek's `thinking` / `reasoning_effort` fields,
+  Anthropic → `analyzeAnthropic` (Messages API). Custom endpoints are
+  SSRF-checked via `lib/ssrfGuard` before any request (localhost/127.0.0.1 is
+  allowed for Ollama).
+- **Configurable token budget** — `max_tokens` is no longer hardcoded. Every
+  provider resolves it as `options.maxTokens || settings.llmMaxTokens || 16384`:
+  an explicit caller option wins, then the `llmMaxTokens` setting (Settings
+  singleton, migration 010, default 16384, validated range 2048–32768), then
+  the 16384 fallback. `AnalysisController.testConnection` passes
+  `maxTokens: 20` so connection probes stay cheap, while production analyses
+  use the configured budget. This replaces the previous hardcoded 8192 that
+  starved DeepSeek thinking-mode responses (reasoning + content share one
+  budget).
+- **API keys** — stored encrypted at rest (`llmApiKeyEnc`, AES-256-GCM via
+  `lib/encryption.js`); `getApiKey()` decrypts on demand, `prepareApiKey()`
+  encrypts on save.
+
+### 2.12 Data Retention Policy (Plan 046)
+
+The `Logs` hypertable grows unboundedly, so the Settings singleton exposes a
+configurable TimescaleDB retention policy for automatic cleanup:
+
+- **Settings fields** — added by migration `infra/timescale/011_add_retention_settings.sql`:
+  - `retentionEnabled` BOOLEAN NOT NULL default **false** (opt-in — off by
+    default, all data retained indefinitely).
+  - `retentionDays` INTEGER NOT NULL default **365**, validated range **90–365**.
+  - Both fields are exposed in `GET /api/settings` (defaulting to `false`/`365`
+    via `??` fallbacks) and mirrored in `models/Settings.js` + the singleton
+    defaults.
+- **`PUT /api/settings` validation** — `UserController.updateSettings` rejects
+  non-boolean `retentionEnabled` and non-integer `retentionDays` with `400`
+  (`retentionEnabled must be a boolean.` / `retentionDays must be an integer.`),
+  and rejects `retentionDays` outside 90–365 (`retentionDays must be between 90
+  and 365.`).
+- **TimescaleDB policy application** — when either retention field is present in
+  the update, the controller runs TimescaleDB's native retention policy API on
+  the `"Logs"` hypertable:
+  - **Remove-then-add (idempotent) pattern:** the existing policy is always
+    removed first with `remove_retention_policy('"Logs"', if_exists => true)`,
+    then — if retention is enabled — re-applied with
+    `add_retention_policy('"Logs"', make_interval(days => :days))` using a
+    parameterized `Number()`-cast replacement. Disabling retention runs removal
+    only. Failures are caught and logged rather than failing the settings save.
+  - **`retentionPolicyApplied`** — the `PUT /api/settings` response includes a
+    boolean flag reflecting whether the policy was (re)applied during the save.
+- **Frontend** — the Settings page renders a "Data Retention" card: an enable
+  `Switch` plus a 90/120/180/365-day `<select>` (visible when enabled). The card
+  keeps local error state and rolls the form back to the server-side settings on
+  save failure.
+
 ---
 
 ## 3. Frontend Internals (`apps/frontend/`)
 
-Stack: **React 18 + TypeScript + Vite + Tailwind v4 + Tremor + ECharts +
-react-leaflet + TanStack Query + zustand**.
+Stack: **React 19 + TypeScript 7 + Vite 8 + Tailwind CSS 4 + ECharts +
+react-leaflet 5 + TanStack Query 5 + zustand 5 + react-router 8.3.0** (exact
+pin). Routing migrated from `react-router-dom` 6 → `react-router` 7 in Plan 045
+and upgraded to `react-router` **8.3.0** in Plan 047 (imports come from the
+`react-router` package). All UI is styled with native Tailwind utilities —
+**@tremor/react was removed in Plan 049** and its components (cards, buttons,
+tables, switch, etc.) were reimplemented with plain Tailwind classes.
 
 ### 3.1 App structure
 ```
@@ -183,11 +360,12 @@ src/
     tables/  SessionTable.tsx
     telemetry/ PidTogglePanel.tsx, DecodedMetricsTable.tsx
     ui/      Skeleton.tsx, ErrorAlert.tsx
+    vehicles/ VehicleReassignDialog.tsx
   features/
     auth/    Login.tsx, Register.tsx, useAuth.ts
     dashboard/ ReplayDashboard.tsx, PlaybackControls.tsx
     sessions/  SessionBrowser.tsx
-    settings/  SettingsPage.tsx
+    settings/  SettingsPage.tsx, AiProviderCard.tsx, VehicleManager.tsx
   lib/
     api.ts    # fetch wrapper, credentials:'include'
     types.ts
@@ -197,7 +375,9 @@ src/
 
 ### 3.2 Data fetching
 - **TanStack Query** drives all reads: `getSessions`, `getSession`,
-  `getTelemetry`.
+  `getTelemetry`, `getVehicles`.
+- **Mutations** use direct `fetch` via the `request()` wrapper: notes updates,
+  vehicle CRUD, session reassignment, and all settings changes.
 - **Auth** is cookie-based: every `fetch` uses `credentials: 'include'`. The
   SPA expects **401 JSON** from protected endpoints and redirects to `/login`
   on 401 (unless already on an auth page).
@@ -291,7 +471,16 @@ extracts `[timestamp_ms, value]` pairs via the safe `coerceScalar()` helper.
 
 - **CSS custom properties** — colors (bg-base, bg-card, text-primary, accent, etc.) defined as CSS variables in `index.css`, with `.dark` class overrides for dark mode. Tailwind v4 uses a CSS-first configuration approach: all design tokens are defined in the `@theme` block in `index.css`, referenced as `var()` tokens (`--color-surface-base`, `--color-fg`, `--color-brand-accent`). The `tailwind.config.ts` file is reduced to a minimal placeholder since the JS config is no longer the primary source of truth.
 - **PostCSS replaced** — the `postcss.config.js` file has been removed. Tailwind is loaded via the `@tailwindcss/vite` Vite plugin (in `vite.config.ts`), with `@import "tailwindcss"` in `index.css` replacing the old `@tailwind base/components/utilities` directives.
-- **Tremor v3 compatibility** — Tremor v3 uses class names like `bg-tremor-brand-emphasis` or `rounded-tremor-default` that Tailwind v4 does not detect by default from `node_modules`. These are safelisted via `@source inline()` pattern directives in `index.css`, which replace the v3 `safelist: [{pattern: /.../}]` JS config approach. The Tremor `node_modules` directory is also scanned with `@source "../node_modules/@tremor/react/dist/**/*.{js,ts,jsx,tsx}"` so any Tremor classes found in source are picked up automatically.
+- **Tremor removed (Plan 049)** — the `@tremor/react` dependency and all Tremor
+  components were replaced with native Tailwind utilities (cards, buttons,
+  tables, badges, and a new accessible `Toggle` switch at
+  `components/ui/Toggle.tsx` with an sr-only label). The `@source inline()`
+  safelist directives and the Tremor `node_modules` scan that Tailwind v4 needed
+  to detect `bg-tremor-*` classes were removed from `index.css`, and the
+  Tremor-specific `--text-tremor-*` typography tokens were replaced with plain
+  Tailwind text utilities. Bundle size dropped ~65 kB; all chunks are now
+  <400 kB (largest: echarts at ~380 kB, split via Rolldown `codeSplitting`
+  groups in `vite.config.ts`).
 - **Typography** — Google Fonts: Space Grotesk for display/body text, Martian Mono for monospace data. Font stacks are exposed as `--font-display`, `--font-body`, `--font-mono` CSS variables and mapped to Tailwind theme values (`--font-display`, `--font-body`, `--font-mono`) in the `@theme` block.
 - **Dark mode** — managed by `lib/theme.ts`: detects `prefers-color-scheme`, persists choice to localStorage, provides `getTheme()` / `setTheme()` / `toggleTheme()`. The theme toggle button (sun/moon icons) lives in `AppShell` and applies the `.dark` class on `<html>`. The custom variant `@custom-variant dark (&:where(.dark, .dark *));` in `index.css` enables `dark:` class-based Tailwind variants.
 - **Mobile drawer** — `MobileDrawer.tsx` renders a slide-out navigation panel with backdrop overlay, Escape-to-close, focus-on-open, and dark mode support. Triggered by a hamburger button visible below the `md` breakpoint.
@@ -302,12 +491,12 @@ extracts `[timestamp_ms, value]` pairs via the safe `coerceScalar()` helper.
 
 The following modern CSS and UX enhancements were applied in the UI refinement pass:
 
-- **Brand color shift** — Primary accent changed from amber (`#f59e0b`) to teal (`#009999` light / `#2ec4b6` dark). Tremor brand tokens, chart series colors (COLORS[0]), map polylines, gauge rings, sidebar logos, login/register panels, focus rings, and `accent-color` all use the teal palette.
+- **Brand color shift** — Primary accent changed from amber (`#f59e0b`) to teal (`#009999` light / `#2ec4b6` dark). Brand design tokens, chart series colors (COLORS[0]), map polylines, gauge rings, sidebar logos, login/register panels, focus rings, and `accent-color` all use the teal palette.
 - **`light-dark()` CSS function** — All color tokens (`--bg-base`, `--text-primary`, `--accent`, `--border-default`, etc.) are defined once in `:root` using `light-dark(lightValue, darkValue)`. This eliminates the need to redeclare every variable in `.dark {}`. The `.dark` class block is retained as a fallback for browsers that don't support `light-dark()` yet.
 - **`color-scheme` declaration** — `color-scheme: light dark` in CSS + `<meta name="color-scheme" content="light dark">` in `index.html`. Browser UI (scrollbars, form controls) automatically adapts to the system theme.
 - **`accent-color: var(--accent)`** — Checkboxes, radio buttons, range sliders, and other native form controls inherit the teal brand color.
 - **Custom scrollbar theming** — `scrollbar-color` + `scrollbar-width` set via CSS custom properties with `light-dark()` values, so scrollbars match the active theme.
-- **Fluid typography** — `--text-tremor-title: clamp(1rem, 1.5cqi, 1.125rem)` and `--text-tremor-metric: clamp(1.5rem, 2cqi, 1.875rem)` for responsive font sizing that scales with the container.
+- **Fluid typography** — responsive font sizing that scales with the container (e.g. `clamp()`-based sizes for section titles and metric values; the old Tremor-derived `--text-tremor-*` tokens were removed with the Tremor migration in Plan 049).
 - **Native `<dialog>` for fullscreen chart** — The expanded chart overlay in `ReplayDashboard` uses `<dialog closedby="any">` with `showModal()`/`close()` for proper modal behavior (focus trapping, Escape key, light-dismiss). Safari fallback adds a click-outside handler for browsers without `closedby` support.
 - **Scroll-driven animations** — Dashboard session cards use `animation-timeline: view()` with `animation-range` for entry reveals as cards scroll into the viewport, without JavaScript scroll listeners.
 - **View Transitions API** — Crossfade page navigation via `::view-transition-old(root)` and `::view-transition-new(root)` keyframe animations. The main content area carries `viewTransitionName: 'main-content'` in AppShell.
@@ -317,6 +506,67 @@ The following modern CSS and UX enhancements were applied in the UI refinement p
 - **Card hover polish** — `.card-hover` now uses `translate: 0 -2px` on hover for a subtle lift effect, plus `box-shadow` transition.
 - **Sidebar depth** — AppShell sidebar uses layered `box-shadow` for subtle inset depth (1px border + 4px shadow).
 - **Reduced motion** — All new animations (scroll-driven, view transitions, card hover) are gated behind `prefers-reduced-motion: reduce` which sets `animation: none !important` and `transition: none !important`.
+
+### 3.10 Diagnostic Graph Panels
+
+The session replay dashboard includes six pre-configured collapsible diagnostic
+panels rendered below the overlay chart. Each panel is a self-contained ECharts
+chart wrapped in a card with a header (title, row count, expand/collapse chevron).
+
+**Components:**
+- `DiagnosticPanel` — generic collapsible panel: lazy ECharts initialization
+  (chart is only created when first expanded), dual Y-axis support, series-level
+  markLine/markArea, and computed series overlay.
+- `DiagnosticPanels` — container that instantiates the six panels with their
+  specific PID configurations and layout options.
+
+**Panel configurations:**
+
+| # | Title | PIDs | Axes | Notes |
+|---|-------|------|------|-------|
+| 1 | Engine RPM & Vehicle Speed | `engineRpm`, `vehicleSpeed` | Dual (left/right) | Core drivetrain metrics |
+| 2 | Fuel Trims | `k6` (STFT), `k7` (LTFT) | Single | Includes computed **Total Trim** series (STFT + LTFT), dashed 0-line markLine, ±10% reference band |
+| 3 | O2 Sensor & AFR | `kff1214`, `kff124d` | Dual (left/right) | O2 voltage and air-fuel ratio |
+| 4 | Engine Coolant Temp | `k5` | Single | Y-axis clamped to 60–95 °C |
+| 5 | Boost & MAF | `kff1278`, `k10` | Dual (left/right) | **Conditional** — only shown if both PIDs exist in session data |
+| 6 | Throttle & Pedal | `k11`, `k49` | Single | **Conditional** — only shown if both PIDs exist in session data |
+
+**Key design decisions:**
+- **Lazy initialization** — ECharts instances are created only on first expand,
+  avoiding the cost of rendering six charts when the user hasn't opened them.
+- **Dual Y-axis** — panels with metrics of different scales (e.g. RPM + Speed,
+  O2 voltage + AFR) use ECharts `yAxis: [{}, {}]` with the second axis offset
+  right and its split lines hidden.
+- **Computed series** — the Fuel Trims panel overlays a `Total Trim` line
+  computed from the sum of STFT and LTFT values.
+- **Conditional rendering** — panels 5 and 6 check PID availability via
+  `hasPids()` before mounting, keeping the UI clean for sessions that lack those
+  sensors.
+- **Dark mode compatible** — styling follows the same CSS custom properties and
+  `dark:` variants used by `OverlayChart`.
+
+The panels are imported in `ReplayDashboard.tsx` and rendered below the overlay
+chart, receiving the full `frames` array and the `available` series list.
+
+### 3.11 AI Provider Settings Card (`AiProviderCard.tsx`)
+
+The Settings page's AI provider card (`features/settings/AiProviderCard.tsx`)
+manages the LLM connection and exposes the configurable token budget:
+
+- **Provider status display** — the status badge shows a human-readable
+  provider name (e.g. `Connected (DeepSeek)`) resolved from the `PROVIDERS`
+  list instead of the raw stored value. When a provider is configured, a row of
+  chips below the badge shows `Model`, `Thinking` (DeepSeek only), `Effort`
+  (DeepSeek only, when thinking mode is on), and `Max tokens`.
+- **Max Output Tokens input** — a **general** setting (applies to all
+  providers, not DeepSeek-specific) rendered after the Model selector, with
+  `min=2048`, `max=32768`, `step=1024`, defaulting to
+  `settings.llmMaxTokens ?? 16384`. Help text warns that higher values increase
+  API cost and that DeepSeek thinking mode shares the budget between reasoning
+  and content. Saved via `body.llmMaxTokens` in `PUT /api/settings`.
+- **Provider-specific fields** — DeepSeek shows Thinking Mode + Reasoning
+  Effort (High / Max); Ollama/Custom show a free-text model name and endpoint
+  URL (SSRF-checked server-side).
 
 ---
 
@@ -389,23 +639,44 @@ See `docs/deployment.md` for the full deployment guide.
 | `POST /api/users/change-password` | cookie | change password (requires currentPassword + newPassword; regenerates session) |
 | `POST /api/users/logout` | cookie | logout |
 | `GET /api/version` | none | returns `{ version: string }` from package.json |
-| `GET /api/sessions` | cookie | list sessions (summary) |
+| `GET /api/sessions?limit&offset` | cookie | list sessions (paginated: `{ sessions, total, limit, offset }`) |
 | `GET /api/sessions/:id` | cookie + owner | session metadata (no full logs) |
 | `GET /api/sessions/:id/telemetry?from&to&limit` | cookie + owner | paged telemetry frames |
 | `GET /api/sessions/:id/export/csv` | cookie + owner | stream all telemetry as CSV with dynamic PID column discovery |
 | `PATCH /api/sessions/rename/:id` | cookie + owner | rename session (body: `{ name }`) |
+| `PATCH /api/sessions/notes/:sessionId` | cookie + owner | update session notes (body: `{ notes: string\|null }`) |
+| `PATCH /api/sessions/:sessionId/vehicle` | cookie + owner | reassign session to a vehicle or unassign (body: `{ vehicleId: number\|null }`) |
 | `DELETE /api/sessions/:id` | cookie + owner | delete a session |
 | `GET /api/sessions/:id/shared/:shareId` | shareId | shared view |
 | `POST /api/sessions/:id/analyze` | cookie + owner | trigger AI analysis for a session (SSE stream) |
 | `GET /api/sessions/:id/analyses` | cookie + owner | list cached analyses for a session |
 | `DELETE /api/sessions/:id/analyses/:analysisId` | cookie + owner | delete a cached analysis |
-| `GET /api/settings` | none | public settings (disableRegistration, hasUploadApiToken, hasLlmProvider, vehicle fields) |
-| `PUT /api/settings` | cookie | update settings (disableRegistration, uploadApiToken, llmProvider, llmApiKey, llmModel, llmEndpoint, llmThinkingMode, llmReasoningEffort, vehicle fields) |
+| `GET /api/settings` | none | public settings (disableRegistration, hasUploadApiToken, hasLlmProvider, llmMaxTokens, retentionEnabled, retentionDays, vehicle fields) |
+| `PUT /api/settings` | cookie | update settings (disableRegistration, uploadApiToken, llmProvider, llmApiKey, llmModel, llmEndpoint, llmThinkingMode, llmReasoningEffort, llmMaxTokens, retentionEnabled, retentionDays, vehicle fields); response includes `retentionPolicyApplied` |
 | `POST /api/settings/upload-token` | cookie | generate a new upload API token (shown once) |
 | `POST /api/settings/test-llm` | cookie | test LLM connection (returns streaming response) |
+| `GET /api/vehicles` | cookie | list all vehicles for authenticated user |
+| `GET /api/vehicles/:vehicleId` | cookie | get a single vehicle |
+| `POST /api/vehicles` | cookie | create a new vehicle (body: `{ name, make?, model?, year?, engineCc? }`) |
+| `PUT /api/vehicles/:vehicleId` | cookie | update a vehicle (body: partial fields) |
+| `DELETE /api/vehicles/:vehicleId` | cookie | delete a vehicle (sessions unassigned via SET NULL) |
+| `PATCH /api/vehicles/:vehicleId/default` | cookie | set a vehicle as the user's default (unsets all others) |
 | `POST /api/upload` (`/upload` from Torque) | email-gated + **Bearer token required when `UPLOAD_API_TOKEN` is set** | ingest (401 without token) |
 | `GET /health` | none | probe |
 
 > See `routes/api.js` for the authoritative route table. The SPA auth contract
 > is now **resolved** — all endpoints return JSON/401 over `/api`. See
 > `docs/development.md → Known Issues` for history.
+
+**Session list pagination and filtering:** `GET /api/sessions` accepts `limit`
+(default 50, max 200) and `offset` query parameters, plus an optional `vehicleId`
+filter (a numeric vehicle ID or `none` for unassigned sessions). The response
+shape is `{ sessions: Session[], total: number, limit: number, offset: number }`,
+with each session including `vehicleId` and `vehicleName` (resolved from the
+`Vehicle` association) plus `notes`. The frontend `SessionBrowser` paginates with
+a "Load More" button and provides a vehicle filter dropdown; `SessionTable`
+receives only the current page.
+
+**HTTP caching headers:** `GET /api/settings` and `GET /api/sessions` set
+`Cache-Control: private, max-age=30` to reduce redundant requests on the fast
+read paths without risking stale data for more than 30 seconds.

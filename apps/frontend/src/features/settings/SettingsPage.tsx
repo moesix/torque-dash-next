@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
-import { Card, Text, Title, Switch } from '@tremor/react';
 import { getSettings, updateSettings, generateUploadToken, getVersion } from '@/lib/api';
 import type { Settings } from '@/lib/types';
+import Toggle from '@/components/ui/Toggle';
 import AiProviderCard from './AiProviderCard';
-import VehicleCard from './VehicleCard';
+import VehicleManager from './VehicleManager';
 
 export default function SettingsPage() {
   const [disableRegistration, setDisableRegistration] = useState(false);
@@ -18,6 +18,9 @@ export default function SettingsPage() {
   const [tokenCopied, setTokenCopied] = useState(false);
   const [tokenError, setTokenError] = useState<string | null>(null);
   const [tokenBusy, setTokenBusy] = useState(false);
+
+  // Data retention card-local error state (rendered inside the retention card)
+  const [retentionError, setRetentionError] = useState<string | null>(null);
 
   const [version, setVersion] = useState<string>('');
 
@@ -36,6 +39,9 @@ export default function SettingsPage() {
     engineCc: null,
     llmThinkingMode: true,
     llmReasoningEffort: 'high',
+    timezoneOffset: 0,
+    retentionEnabled: false,
+    retentionDays: 365,
   });
 
   useEffect(() => {
@@ -45,6 +51,7 @@ export default function SettingsPage() {
   useEffect(() => {
     getSettings()
       .then((s) => {
+        if (!s) return;
         setDisableRegistration(s.disableRegistration);
         setHasUploadApiToken(s.hasUploadApiToken);
         setTokenFromEnv(s.tokenFromEnv);
@@ -59,7 +66,7 @@ export default function SettingsPage() {
     setSaved(false);
     try {
       const s = await updateSettings({ disableRegistration: next });
-      setDisableRegistration(s.disableRegistration);
+      if (s) setDisableRegistration(s.disableRegistration);
       setSaved(true);
     } catch {
       setError('Failed to save settings.');
@@ -74,8 +81,10 @@ export default function SettingsPage() {
     setTokenInput('');
     try {
       const res = await generateUploadToken();
-      setTokenInput(res.uploadApiToken);
-      setHasUploadApiToken(true);
+      if (res) {
+        setTokenInput(res.uploadApiToken);
+        setHasUploadApiToken(true);
+      }
     } catch {
       setTokenError('Failed to generate token.');
     } finally {
@@ -88,7 +97,7 @@ export default function SettingsPage() {
     setTokenError(null);
     try {
       const s = await updateSettings({ uploadApiToken: null });
-      setHasUploadApiToken(s.hasUploadApiToken);
+      if (s) setHasUploadApiToken(s.hasUploadApiToken);
       setTokenInput('');
     } catch {
       setTokenError('Failed to clear token.');
@@ -110,49 +119,50 @@ export default function SettingsPage() {
     <div className="max-w-2xl space-y-4">
       <div>
         <div className="flex items-center gap-2">
-          <Title>Settings</Title>
+          <h3 className="text-lg font-semibold leading-relaxed">Settings</h3>
           {version && (
             <span className="text-sm text-gray-500 dark:text-gray-400">
               v{version}
             </span>
           )}
         </div>
-        <Text className="mt-1 dark:text-[var(--text-secondary)]">Global site configuration.</Text>
+        <p className="mt-1 text-sm leading-relaxed dark:text-[var(--text-secondary)]">Global site configuration.</p>
       </div>
-      <Card>
+      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
         <div className="flex items-center justify-between">
           <div>
-            <Text className="font-medium">Disable registration</Text>
-            <Text className="mt-1 text-sm text-gray-500 dark:text-[var(--text-muted)]">
+            <p className="text-sm leading-relaxed font-medium">Disable registration</p>
+            <p className="mt-1 text-sm leading-relaxed text-gray-500 dark:text-[var(--text-muted)]">
               Close public signups. The deploy-time env var DISABLE_REGISTRATION
               always wins if set to true.
-            </Text>
+            </p>
           </div>
-          <Switch
+          <Toggle
             checked={disableRegistration}
             disabled={busy}
             onChange={(checked: boolean) => onToggle(checked)}
+            label="Disable registration"
           />
         </div>
         {error ? (
-          <Text className="mt-3 text-sm text-rose-600 dark:text-rose-400">{error}</Text>
+          <p className="mt-3 text-sm leading-relaxed text-rose-600 dark:text-rose-400">{error}</p>
         ) : null}
         {saved ? (
-          <Text className="mt-3 text-sm text-emerald-600 dark:text-emerald-400">Saved.</Text>
+          <p className="mt-3 text-sm leading-relaxed text-emerald-600 dark:text-emerald-400">Saved.</p>
         ) : null}
-      </Card>
+      </div>
 
-      <Card>
+      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
         <div className="space-y-4">
           <div>
-            <Text className="font-medium">Upload API Token</Text>
-            <Text className="mt-1 text-sm text-gray-500 dark:text-[var(--text-muted)]">
+            <p className="text-sm leading-relaxed font-medium">Upload API Token</p>
+            <p className="mt-1 text-sm leading-relaxed text-gray-500 dark:text-[var(--text-muted)]">
               A bearer token required for telemetry uploads. When set, the Torque
               app must include this token to authenticate uploads. This prevents
               unauthorized data ingestion using only a known email address.
               Generate a token and paste it into your Torque app&rsquo;s
               configuration. The token is shown only once.
-            </Text>
+            </p>
           </div>
 
           <div className="flex items-center gap-2">
@@ -173,15 +183,15 @@ export default function SettingsPage() {
           </div>
 
           {tokenFromEnv ? (
-            <Text className="text-sm text-amber-600 dark:text-amber-400">
+            <p className="text-sm leading-relaxed text-amber-600 dark:text-amber-400">
               Token is managed via the <code className="font-mono bg-amber-50 px-1 rounded dark:bg-amber-900/40 dark:text-amber-300">UPLOAD_API_TOKEN</code> environment
               variable. Unset it to manage the token through the app UI.
-            </Text>
+            </p>
           ) : null}
 
           {tokenInput ? (
             <div className="space-y-2">
-              <div className="flex items-center gap-2">
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2">
                 <code className="flex-1 break-all rounded border bg-gray-50 px-3 py-2 text-sm font-mono dark:border-[var(--border-default)] dark:bg-[var(--bg-surface)] dark:text-[var(--text-primary)]">
                   {tokenInput}
                 </code>
@@ -193,13 +203,13 @@ export default function SettingsPage() {
                   {tokenCopied ? 'Copied!' : 'Copy'}
                 </button>
               </div>
-              <Text className="text-xs text-amber-600 dark:text-amber-400">
+              <p className="text-xs leading-relaxed text-amber-600 dark:text-amber-400">
                 Copy this token now. It won&rsquo;t be shown again.
-              </Text>
+              </p>
             </div>
           ) : null}
 
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <button
               type="button"
               onClick={onGenerateToken}
@@ -221,13 +231,130 @@ export default function SettingsPage() {
           </div>
 
           {tokenError ? (
-            <Text className="text-sm text-rose-600 dark:text-rose-400">{tokenError}</Text>
+            <p className="text-sm leading-relaxed text-rose-600 dark:text-rose-400">{tokenError}</p>
           ) : null}
         </div>
-      </Card>
+      </div>
 
       <AiProviderCard settings={llmSettings} onUpdate={setLlmSettings} />
-      <VehicleCard settings={llmSettings} onUpdate={setLlmSettings} />
+      <VehicleManager />
+
+      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
+        <div className="space-y-4">
+          <div>
+            <p className="text-sm leading-relaxed font-medium">Timezone</p>
+            <p className="mt-1 text-sm leading-relaxed text-gray-500 dark:text-[var(--text-muted)]">
+              Your UTC offset in minutes. Used to format session names with your
+              local time. For example, UTC+8 (Malaysia) = 480, UTC-5 (EST) = -300.
+            </p>
+          </div>
+
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+            <label htmlFor="tz-offset" className="text-sm text-gray-700 dark:text-[var(--text-secondary)]">
+              UTC offset (minutes):
+            </label>
+            <input
+              id="tz-offset"
+              type="number"
+              min={-720}
+              max={840}
+              step={15}
+              value={llmSettings.timezoneOffset ?? 0}
+              onChange={(e) => {
+                const next = { ...llmSettings, timezoneOffset: Number(e.target.value) };
+                setLlmSettings(next);
+              }}
+              onBlur={async () => {
+                try {
+                  await updateSettings({ timezoneOffset: llmSettings.timezoneOffset ?? 0 });
+                  setSaved(true);
+                } catch {
+                  setError('Failed to save timezone.');
+                }
+              }}
+              className="w-24 rounded border bg-white px-3 py-1.5 text-sm font-mono dark:border-[var(--border-default)] dark:bg-[var(--bg-surface)] dark:text-[var(--text-primary)]"
+            />
+            <span className="text-sm text-gray-500 dark:text-[var(--text-muted)]">
+              {((llmSettings.timezoneOffset ?? 0) === 0) ? '(UTC)' : `(${((llmSettings.timezoneOffset ?? 0) >= 0 ? '+' : '')}${((llmSettings.timezoneOffset ?? 0) / 60).toFixed(1)}h)`}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
+        <div className="space-y-4">
+          <div>
+            <p className="text-sm leading-relaxed font-medium">Data Retention</p>
+            <p className="mt-1 text-sm leading-relaxed text-gray-500 dark:text-[var(--text-muted)]">
+              Automatically delete telemetry data older than the specified number
+              of days. This helps manage database size. When disabled, all data
+              is retained indefinitely.
+            </p>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm leading-relaxed">Enable auto-cleanup</p>
+            </div>
+            <Toggle
+              checked={llmSettings.retentionEnabled ?? false}
+              onChange={(checked: boolean) => {
+                const next = { ...llmSettings, retentionEnabled: checked };
+                setLlmSettings(next);
+                setRetentionError(null);
+                updateSettings({ retentionEnabled: checked }).catch(() => {
+                  setRetentionError('Failed to save retention setting.');
+                  getSettings().then((s) => {
+                    if (s) setLlmSettings(s);
+                  });
+                });
+              }}
+              label="Enable auto-cleanup"
+            />
+          </div>
+
+          {llmSettings.retentionEnabled && (
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+              <label htmlFor="retention-days" className="text-sm text-gray-700 dark:text-[var(--text-secondary)]">
+                Keep data for:
+              </label>
+              <select
+                id="retention-days"
+                value={
+                  [90, 120, 180, 365].includes(llmSettings.retentionDays ?? 365)
+                    ? (llmSettings.retentionDays ?? 365)
+                    : 365
+                }
+                onChange={(e) => {
+                  const days = Number(e.target.value);
+                  const next = { ...llmSettings, retentionDays: days };
+                  setLlmSettings(next);
+                  setRetentionError(null);
+                  updateSettings({ retentionDays: days }).catch(() => {
+                    setRetentionError('Failed to save retention days.');
+                    getSettings().then((s) => {
+                      if (s) setLlmSettings(s);
+                    });
+                  });
+                }}
+                className="rounded border bg-white px-3 py-1.5 text-sm dark:border-[var(--border-default)] dark:bg-[var(--bg-surface)] dark:text-[var(--text-primary)]"
+              >
+                <option value={90}>90 days</option>
+                <option value={120}>120 days</option>
+                <option value={180}>180 days</option>
+                <option value={365}>365 days</option>
+              </select>
+              <span className="text-sm text-gray-500 dark:text-[var(--text-muted)]">
+                (current: {llmSettings.retentionDays ?? 365} days)
+              </span>
+            </div>
+          )}
+
+          {retentionError ? (
+            <p className="mt-2 text-sm leading-relaxed text-rose-600 dark:text-rose-400">{retentionError}</p>
+          ) : null}
+        </div>
+      </div>
     </div>
   );
 }

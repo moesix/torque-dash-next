@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { Card, Text } from '@tremor/react';
 import { updateLlmSettings, testLlmConnection } from '@/lib/api';
 import type { Settings } from '@/lib/types';
 
@@ -23,6 +22,7 @@ export default function AiProviderCard({ settings, onUpdate }: Props) {
   const [endpoint, setEndpoint] = useState(settings.llmEndpoint || '');
   const [thinkingMode, setThinkingMode] = useState(settings.llmThinkingMode ?? true);
   const [reasoningEffort, setReasoningEffort] = useState(settings.llmReasoningEffort || 'high');
+  const [maxTokens, setMaxTokens] = useState(settings.llmMaxTokens ?? 16384);
   const [busy, setBusy] = useState(false);
   const [testResult, setTestResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -38,12 +38,13 @@ export default function AiProviderCard({ settings, onUpdate }: Props) {
       if (apiKey) body.llmApiKey = apiKey;
       if (model) body.llmModel = model;
       if (endpoint) body.llmEndpoint = endpoint;
+      body.llmMaxTokens = maxTokens; // general setting, applies to all providers
       if (provider === 'deepseek') {
         body.llmThinkingMode = thinkingMode;
         body.llmReasoningEffort = reasoningEffort;
       }
       const updated = await updateLlmSettings(body);
-      onUpdate(updated);
+      if (updated) onUpdate(updated);
       setApiKey('');
       setTestResult(null);
     } catch {
@@ -59,7 +60,9 @@ export default function AiProviderCard({ settings, onUpdate }: Props) {
     setError(null);
     try {
       const res = await testLlmConnection();
-      if (res.ok) {
+      if (!res) {
+        setError('Connection test returned no response.');
+      } else if (res.ok) {
         setTestResult(`Connected! Response: "${res.response}"`);
       } else {
         setError(res.error || 'Test failed');
@@ -72,14 +75,14 @@ export default function AiProviderCard({ settings, onUpdate }: Props) {
   }
 
   return (
-    <Card>
+    <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
       <div className="space-y-4">
         <div>
-          <Text className="font-medium">AI Provider</Text>
-          <Text className="mt-1 text-sm text-gray-500 dark:text-[var(--text-muted)]">
+          <p className="text-sm leading-relaxed font-medium">AI Provider</p>
+          <p className="mt-1 text-sm leading-relaxed text-gray-500 dark:text-[var(--text-muted)]">
             Configure an LLM provider for session analysis. Your API key is
             encrypted at rest and never reaches the browser.
-          </Text>
+          </p>
         </div>
 
         <div className="flex items-center gap-2">
@@ -89,12 +92,39 @@ export default function AiProviderCard({ settings, onUpdate }: Props) {
               : 'bg-gray-50 text-gray-600 ring-1 ring-gray-500/10 dark:bg-[var(--bg-surface)] dark:text-[var(--text-secondary)]'
           }`}>
             <span className={`h-1.5 w-1.5 rounded-full ${settings.hasLlmProvider ? 'bg-emerald-500' : 'bg-gray-400'}`} />
-            {settings.hasLlmProvider ? `Connected (${settings.llmProvider})` : 'Not configured'}
+            {settings.hasLlmProvider
+              ? `Connected (${PROVIDERS.find(p => p.value === settings.llmProvider)?.label || settings.llmProvider})`
+              : 'Not configured'}
           </span>
         </div>
 
+        {settings.hasLlmProvider && (
+          <div className="flex flex-wrap gap-3 text-xs text-gray-500 dark:text-[var(--text-muted)]">
+            {settings.llmModel && (
+              <span className="inline-flex items-center gap-1">
+                <span className="font-medium">Model:</span> {settings.llmModel}
+              </span>
+            )}
+            {settings.llmProvider === 'deepseek' && (
+              <>
+                <span className="inline-flex items-center gap-1">
+                  <span className="font-medium">Thinking:</span> {settings.llmThinkingMode ? 'On' : 'Off'}
+                </span>
+                {settings.llmThinkingMode && (
+                  <span className="inline-flex items-center gap-1">
+                    <span className="font-medium">Effort:</span> {settings.llmReasoningEffort || 'high'}
+                  </span>
+                )}
+              </>
+            )}
+            <span className="inline-flex items-center gap-1">
+              <span className="font-medium">Max tokens:</span> {settings.llmMaxTokens || 16384}
+            </span>
+          </div>
+        )}
+
         <div>
-          <Text className="text-sm font-medium mb-1">Provider</Text>
+          <p className="text-sm leading-relaxed font-medium mb-1">Provider</p>
           <select
             value={provider}
             onChange={(e) => { setProvider(e.target.value); setModel(''); }}
@@ -108,7 +138,7 @@ export default function AiProviderCard({ settings, onUpdate }: Props) {
         </div>
 
         <div>
-          <Text className="text-sm font-medium mb-1">API Key</Text>
+          <p className="text-sm leading-relaxed font-medium mb-1">API Key</p>
           <input
             type="password"
             value={apiKey}
@@ -120,7 +150,7 @@ export default function AiProviderCard({ settings, onUpdate }: Props) {
 
         {models.length > 0 && (
           <div>
-            <Text className="text-sm font-medium mb-1">Model</Text>
+            <p className="text-sm leading-relaxed font-medium mb-1">Model</p>
             <select
               value={model}
               onChange={(e) => setModel(e.target.value)}
@@ -132,9 +162,25 @@ export default function AiProviderCard({ settings, onUpdate }: Props) {
           </div>
         )}
 
+        <div>
+          <p className="text-sm leading-relaxed font-medium mb-1">Max Output Tokens</p>
+          <input
+            type="number"
+            min={2048}
+            max={32768}
+            step={1024}
+            value={maxTokens}
+            onChange={(e) => setMaxTokens(Number(e.target.value))}
+            className="w-full rounded border bg-white px-3 py-2 text-sm dark:border-[var(--border-default)] dark:bg-[var(--bg-surface)]"
+          />
+          <p className="text-xs leading-relaxed text-gray-500 dark:text-[var(--text-muted)] mt-1">
+            Maximum output tokens per analysis. DeepSeek thinking mode shares this budget between reasoning and content. Increase if analyses are truncated. Warning: higher values increase potential API costs (default: 16384).
+          </p>
+        </div>
+
         {(provider === 'custom' || provider === 'ollama') && (
           <div>
-            <Text className="text-sm font-medium mb-1">Model Name</Text>
+            <p className="text-sm leading-relaxed font-medium mb-1">Model Name</p>
             <input
               type="text"
               value={model}
@@ -147,7 +193,7 @@ export default function AiProviderCard({ settings, onUpdate }: Props) {
 
         {(provider === 'custom' || provider === 'ollama') && (
           <div>
-            <Text className="text-sm font-medium mb-1">Endpoint URL</Text>
+            <p className="text-sm leading-relaxed font-medium mb-1">Endpoint URL</p>
             <input
               type="url"
               value={endpoint}
@@ -177,7 +223,7 @@ export default function AiProviderCard({ settings, onUpdate }: Props) {
             </div>
             {thinkingMode && (
               <div className="mt-2">
-                <Text className="text-sm font-medium mb-1">Reasoning Effort</Text>
+                <p className="text-sm leading-relaxed font-medium mb-1">Reasoning Effort</p>
                 <select
                   value={reasoningEffort}
                   onChange={(e) => setReasoningEffort(e.target.value)}
@@ -212,9 +258,9 @@ export default function AiProviderCard({ settings, onUpdate }: Props) {
           )}
         </div>
 
-        {testResult && <Text className="text-sm text-emerald-600 dark:text-emerald-400">{testResult}</Text>}
-        {error && <Text className="text-sm text-rose-600 dark:text-rose-400">{error}</Text>}
+        {testResult && <p className="text-sm leading-relaxed text-emerald-600 dark:text-emerald-400">{testResult}</p>}
+        {error && <p className="text-sm leading-relaxed text-rose-600 dark:text-rose-400">{error}</p>}
       </div>
-    </Card>
+    </div>
   );
 }

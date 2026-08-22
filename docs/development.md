@@ -10,7 +10,9 @@ the React/Vite frontend (`apps/frontend/`).
 
 ## 1. Prerequisites
 
-- **Node.js 18+** and npm
+- **Node.js 22** (LTS) and npm — the Docker images are built on
+  `node:22-bookworm-slim` and CI runs on Node 22. Vite 8 requires Node
+  **20.19+ / 22.12+**, so Node 22 is the supported floor.
 - **PostgreSQL** with the **TimescaleDB** extension (`CREATE EXTENSION timescaledb;`)
 - A Torque Pro device/app (or a scripted `GET /api/upload`) to generate data
 - (Frontend only) a modern browser
@@ -24,7 +26,7 @@ the React/Vite frontend (`apps/frontend/`).
 npm install
 ```
 Installs Express 4, Sequelize 6, `pg`, Passport, Joi, bcrypt, express-session,
-connect-pg-simple, cors, connect-flash, lodash, moment, nanoid, plus dev tooling
+connect-pg-simple, cors, connect-flash, helmet, lodash, nanoid, plus dev tooling
 (eslint, morgan, nodemon).
 
 ### Frontend (`apps/frontend/`)
@@ -32,8 +34,18 @@ connect-pg-simple, cors, connect-flash, lodash, moment, nanoid, plus dev tooling
 cd apps/frontend
 npm install
 ```
-Installs React 18, Vite 5, TypeScript 5, Tailwind v4, Tremor 3, ECharts 5,
-react-leaflet 4, TanStack Query 5, zustand 4, react-router-dom 6.
+Installs React 19, Vite 8, TypeScript 7, Tailwind CSS 4, ECharts 6,
+react-leaflet 5, TanStack Query 5, zustand 5, react-router 8.3.0 (exact
+pin). No Tremor — all UI uses native Tailwind utilities (Plan 049).
+
+> **react-router version:** Exact-pinned to **8.3.0** (not `^8.3.0`) as the
+> single `react-router` package. Plan 045 migrated from `react-router-dom`
+> 6.30.4 to `react-router` 7.18.2, resolving the two 6.x Dependabot advisories
+> (GHSA-wrjc-x8rr-h8h6 backslash open redirect, GHSA-337j-9hxr-rhxg constructor
+> injection via SSR hydration); Plan 047 then upgraded to **8.3.0**, which also
+> resolves the previously tracked GHSA-qwww-vcr4-c8h2 advisory (high, RSC-mode
+> CSRF, affected react-router 7.12.0–8.2.0). All frontend imports come from
+> `react-router` (the `createBrowserRouter` + `RouterProvider` pattern).
 
 ---
 
@@ -64,20 +76,40 @@ Set these at the backend repo root (`.env` or exported in the shell).
 
 ## 4. Running the Database Migration
 
-The TimescaleDB schema (`infra/timescale/log_hypertable.sql`) is applied
-manually, **not** on server boot:
+The migration script (`scripts/migrate.js`) loads **every `.sql` file** in
+`infra/timescale/` in lexicographic order and executes each statement via `pg`.
+
+**In Docker, migrations run automatically.** The backend container's CMD
+(`Dockerfile`) executes `node scripts/migrate.js` at every container start
+(after `sequelize.sync()`), so `docker compose up -d` applies any pending
+migrations — no manual step needed for Docker deployments. A manual run is
+only required for **non-Docker (manual) setups**:
 
 ```sh
 node scripts/migrate.js
 ```
 
-It:
-1. Loads the SQL and splits it into individual statements.
-2. Runs each statement via `pg`; benign "already exists" / "does not exist"
+The script:
+1. Reads all `.sql` files from `infra/timescale/`, sorted by filename.
+2. Strips SQL comments and splits each file into individual statements on `;`.
+3. Runs each statement via `pg`; benign "already exists" / "does not exist"
    errors are tolerated (idempotent re-runs).
-3. Creates the `Logs` hypertable, promoted columns, the unique index on id (with
-   the `timestamp` partition column — required by TimescaleDB), and the `log_1min`
-   continuous aggregate.
+
+**Current migration files** (in execution order):
+
+| File | Purpose |
+| --- | --- |
+| `log_hypertable.sql` | Creates the `Logs` hypertable, promoted columns `engine_rpm` / `vehicle_speed`, unique index on `id`, and the `log_1min` continuous aggregate |
+| `settings.sql` | Seeds the `Settings` singleton row (misc global configuration) |
+| `003_add_llm_settings.sql` | Adds `llmProvider`, `llmModel`, `llmEndpoint`, `llmApiKey` columns to Settings |
+| `004_add_analyses_table.sql` | Creates the `Analyses` table for cached AI analysis results |
+| `005_add_analysis_reasoning.sql` | Adds `reasoning` column to `Analyses` (stores LLM chain-of-thought) |
+| `006_add_deepseek_settings.sql` | Adds `llmThinkingMode` and `llmReasoningEffort` columns to Settings |
+| `007_add_timezone_offset.sql` | Adds `timezoneOffset` column to Settings for session name formatting |
+| `008_add_session_notes.sql` | Adds nullable `notes` TEXT column to Sessions |
+| `009_add_vehicles.sql` | Creates the `Vehicles` table and adds `vehicleId` FK to Sessions |
+| `010_add_llm_max_tokens.sql` | Adds `llmMaxTokens` INTEGER column to Settings (NOT NULL, default 16384) |
+| `011_add_retention_settings.sql` | Adds `retentionEnabled` BOOLEAN (NOT NULL, default false) and `retentionDays` INTEGER (NOT NULL, default 365) columns to Settings for the data retention policy |
 
 Run this against a **TimescaleDB-enabled** database (the `timescaledb` extension
 must exist). For large existing datasets, run in a maintenance window
@@ -98,7 +130,60 @@ node app.js
 
 ---
 
-## 6. Running the Frontend
+## 6. Model & Controller Patterns
+
+The Vehicle model (`models/Vehicle.js`) and controller
+(`controllers/VehicleController.js`) serve as the reference pattern for adding
+new entities. Key conventions:
+
+### 6.1 Model (`models/Vehicle.js`)
+- Sequelize model with explicit field types, `allowNull`, and `defaultValue`.
+- **Associations** defined in an `associate` function — projects `belongsTo`/`hasMany`
+  from both sides so Sequelize resolves foreign keys correctly.
+- Dynamically loaded by `models/index.js` (auto-reads all files in the `models/`
+  directory), no registration step needed.
+- Example from `Vehicle`:
+  ```js
+  Vehicle.associate = function (models) {
+      Vehicle.belongsTo(models.User, { as: 'User', foreignKey: 'userId' });
+      Vehicle.hasMany(models.Session, {
+          as: 'Sessions',
+          foreignKey: { name: 'vehicleId', allowNull: true },
+          onDelete: 'set null',
+      });
+  };
+  ```
+
+### 6.2 Controller (`controllers/VehicleController.js`)
+- Static methods on a class, one per action: `getAll`, `getOne`, `create`,
+  `update`, `delete`, plus domain-specific actions like `setDefault`.
+- **Ownership scoping** — every query includes `where: { userId: req.user.id }`
+  so users can only access their own data.
+- **Validation** — early returns with `4xx` JSON errors before database writes.
+- **Error handling** — try/catch with `console.error` + `500` JSON response.
+- No Express `router` registration in the controller — routes are defined in
+  `routes/api.js`.
+
+### 6.3 Routes (`routes/api.js`)
+- Route → controller mapping is explicit in `routes/api.js`:
+  ```js
+  const VehicleController = require('../controllers/VehicleController');
+  // ── Vehicle CRUD ──
+  router.get('/vehicles', authenticate, VehicleController.getAll);
+  router.post('/vehicles', writeLimiter, authenticate, VehicleController.create);
+  router.put('/vehicles/:vehicleId', writeLimiter, authenticate, VehicleController.update);
+  router.delete('/vehicles/:vehicleId', writeLimiter, authenticate, VehicleController.delete);
+  router.patch('/vehicles/:vehicleId/default', authenticate, VehicleController.setDefault);
+  ```
+- Write operations use `writeLimiter` rate limiter; reads use `authenticate` only.
+
+### 6.4 Migration SQL (`infra/timescale/009_add_vehicles.sql`)
+- Raw SQL with `IF NOT EXISTS` / idempotent guards. Lexicographic filename
+  ordering determines execution order (e.g. `008_` runs before `009_`).
+
+---
+
+## 7. Running the Frontend
 
 ### Dev server (Vite)
 ```sh
@@ -121,27 +206,115 @@ npm run build      # runs `tsc --noEmit && vite build` → apps/frontend/dist
 > origin/CDN or an nginx layer that proxies `/api` to the backend. See Known
 > Issues (LOW).
 
+### Frontend API client (`lib/api.ts`)
+
+The API client at `apps/frontend/src/lib/api.ts` provides typed fetch wrappers
+for all backend endpoints. New functions added in Plans 040–041:
+
+| Function | Endpoint | Purpose |
+| --- | --- | --- |
+| `getVehicles()` | `GET /api/vehicles` | List all vehicles |
+| `getVehicle(id)` | `GET /api/vehicles/:id` | Get a single vehicle |
+| `createVehicle(body)` | `POST /api/vehicles` | Create a new vehicle |
+| `updateVehicle(id, body)` | `PUT /api/vehicles/:id` | Update a vehicle |
+| `deleteVehicle(id)` | `DELETE /api/vehicles/:id` | Delete a vehicle |
+| `setDefaultVehicle(id)` | `PATCH /api/vehicles/:id/default` | Set as default vehicle |
+| `reassignSessionVehicle(sessionId, vehicleId)` | `PATCH /api/sessions/:sessionId/vehicle` | Reassign session to a vehicle |
+| `updateSessionNotes(sessionId, notes)` | `PATCH /api/sessions/notes/:sessionId` | Update session notes |
+
+All functions use `request()` with `credentials: 'include'` for cookie-based
+auth. Vehicle types (`Vehicle`, `UpdateVehicle`) and the extended `Session`
+type (with `notes`, `vehicleId`, `vehicleName`) are defined in `lib/types.ts`.
+
 ---
 
-## 7. Development Tooling
+## 8. AI Analysis — Prompt Pipeline
 
-### 7.1 ESLint
+The AI analysis feature (`POST /api/sessions/:id/analyze`) streams diagnostic
+insights from an OpenAI-compatible LLM. The prompt is built by
+`lib/llmPrompt.js`, which after Plan 042 exports five functions instead of the
+previous two.
 
-The project uses **ESLint 8** for backend code with a project-local `.eslintrc.js`
-configuration:
+### 8.1 Prompt Assembly Flow
+
+```
+POST /api/sessions/:id/analyze
+  → controllers/AnalysisController.js
+  → lib/llmPrompt.buildAnalysisPrompt(session, settings, telemetrySample, pidKeys)
+      ├── buildContext(...)         → vehicle info, session metadata
+      ├── computeSummaryStats(...)  → min/max/mean/median per PID
+      ├── buildTelemetryCsv(...)    → resampled CSV telemetry data
+      └── returns full prompt text → sent to LLM provider
+```
+
+### 8.2 Key Functions
+
+| Function | Purpose |
+|----------|---------|
+| `computeSummaryStats(telemetrySample, pidKeys)` | Pre-computes min, max, mean, median for every PID. Filters null/empty values before numeric conversion to avoid `Number(null) === 0` corruption. Also computes Combined Fuel Trim (STFT + LTFT) per-row. |
+| `resampleTelemetry(telemetrySample, maxRows = 80)` | Uniform resampling across the full timeline (replaces the older head/tail slicing approach). Ensures the LLM sees data from start, middle, and end of every drive. |
+| `buildTelemetryCsv(telemetrySample, pidKeys)` | Outputs raw CSV instead of Markdown tables (~30% token savings). Removes lat/lon columns. Extracts `HH:mm:ss` via regex. Calls `resampleTelemetry()` internally. |
+| `buildContext(session, settings, telemetrySample, pidKeys)` | Builds the vehicle/session context block with cleaner formatting and a "Data points in sample" label. |
+| `buildAnalysisPrompt(session, settings, telemetrySample, pidKeys)` | Assembles the complete prompt from all of the above. Includes pre-calculated stats, four diagnostic guardrails, dynamic engine size, and five analysis categories. |
+
+### 8.3 Design Notes
+
+- **Statistics pre-computed in JS** — exact min/max/mean/median values are
+  calculated server-side, so the LLM does not need to estimate them from sampled
+  rows. This eliminates hallucinated figures in the analysis.
+- **Uniform resampling** — evenly-spaced rows across the full telemetry range
+  (start, middle cruising, end) replace the older approach of keeping only the
+  first and last N rows.
+- **CSV format** — saves approximately 30% of tokens compared to Markdown tables
+  for the same telemetry sample, reducing per-analysis cost.
+- **Diagnostic guardrails** — four domain-specific rules encoded in the prompt
+  prevent the LLM from flagging normal OBD-II behaviour (negative fuel trims
+  within ±10%, A/C idle load, ECU torque management timing, deceleration fuel
+  cut-off) as mechanical faults.
+- **`lib/pidRegistry.js`** is imported to resolve PID short keys to human-readable
+  names and units in both CSV column headers and the stats display.
+
+### 8.4 LLM Token Budget & Provider Status (Plan 043)
+
+- **`llmMaxTokens` setting** — the `Settings` singleton gains an INTEGER
+  `llmMaxTokens` field (migration `010_add_llm_max_tokens.sql`, NOT NULL,
+  default **16384**, validated range **2048–32768**). `PUT /api/settings`
+  rejects out-of-range values with `400`; both the GET and PUT responses
+  include the field. Covered by `test/settingsValidation.test.js` (7 cases).
+- **Provider token budget** — `lib/llmProviders.js` now sends
+  `max_tokens: options.maxTokens || settings.llmMaxTokens || 16384` for **all**
+  providers (OpenAI, Anthropic, DeepSeek, Ollama, Custom), replacing the old
+  hardcoded 8192. Explicit caller options take precedence — e.g. the connection
+  test passes `maxTokens: 20` to keep probes cheap, while production analyses
+  use the configured budget. This matters for DeepSeek thinking mode, where
+  reasoning and content share the same budget.
+- **Settings UI** — `AiProviderCard.tsx` adds a general "Max Output Tokens"
+  input (min 2048, max 32768, step 1024) with a cost warning, and the provider
+  status badge now shows the human-readable provider name plus chips for Model,
+  DeepSeek Thinking / Effort, and Max tokens.
+
+---
+
+## 9. Development Tooling
+
+### 9.1 ESLint
+
+The project uses **ESLint 10** (flat config) for backend code with a
+project-local `eslint.config.js` configuration (`@eslint/js` recommended presets
++ `globals` 17):
 
 ```sh
 npm run lint
 ```
 
 The config (`node` env, `es2022`, `eslint:recommended`) ignores
-`apps/frontend/dist/` (Vite build output). Custom rules include:
+`apps/frontend/dist/` (Vite build output) and `node_modules/`. Custom rules include:
 
 - `no-unused-vars` set to `warn` (ignoring args prefixed with `_`).
 - `no-console` is **off** — the server intentionally uses `console.log`/`console.error`.
 - `no-empty` is `error` — empty catch blocks are forbidden.
 
-### 7.2 Pre-commit Hooks (husky + lint-staged)
+### 9.2 Pre-commit Hooks (husky + lint-staged)
 
 The project uses **husky 9** and **lint-staged 17** to run lint and syntax checks
 on every commit:
@@ -161,7 +334,7 @@ on every commit:
 > First-time setup: run `npm install` (or `npm run prepare`) to initialise the
 > husky hooks directory (`.husky/`).
 
-### 7.3 CI Pipeline
+### 9.3 CI Pipeline
 
 A **GitHub Actions** workflow (`.github/workflows/ci.yml`) runs on every push
 or pull request to the `development` branch:
@@ -170,10 +343,11 @@ or pull request to the `development` branch:
 - **Frontend checks:** `npm ci` → `npx tsc --noEmit` (typecheck) → `npm run build`.
 
 The workflow uses `actions/checkout@v7` and `actions/setup-node@v7` with npm
-caching. The lint step currently has `continue-on-error: true` as a transitional
-measure.
+caching and **Node 22** (`node-version: '22'`, matching the `node:22-bookworm-slim`
+runtime images). The lint step is now **enforced** — the previous `continue-on-error: true`
+has been removed, so ESLint failures correctly block the build.
 
-### 7.4 Versioning
+### 9.4 Versioning
 
 A **Version Bump** workflow (`.github/workflows/version-bump.yml`) runs on every
 push to `master`. It:
@@ -197,7 +371,7 @@ pinned deployments.
 
 ---
 
-## 8. Known Issues / Follow-up Items
+## 10. Known Issues / Follow-up Items
 
 These are documented issues from code reviews. Severity is assigned per the review.
 
@@ -271,9 +445,11 @@ blockers are resolved and re-reviewed as PASS:
   aggregate exists but no endpoint reads from it. Consider serving dashboard
   overviews from it to reduce load on the raw hypertable.
 - ✅ **`duration` now formatted + stale comments swept.** `SessionController`
-  formats `duration` into a compact human string (e.g. `"1h 02m 05s"`) via
-  `moment-duration-format`; the legacy `addStartEndData` mutation path is gone and
-  stale `302`/`addStartEndData` comments were removed from backend + frontend.
+  formats `duration` into a compact human string (e.g. `"1h 2m 5s"`) via a
+  native `formatDuration()` helper that replaces the removed
+  `moment-duration-format` dependency; the legacy `addStartEndData` mutation path
+  is gone and stale `302`/`addStartEndData` comments were removed from backend +
+  frontend.
 
 ### Follow-up features (post-MVP)
 
@@ -306,13 +482,19 @@ blockers are resolved and re-reviewed as PASS:
   category, and toggle metrics on/off. A collapsible `DecodedMetricsTable` shows
   min/max/avg/last for every PID. The `pidDecode.ts` engine auto-discovers PID
   sources from the `values` JSONB column using embedded Torque metadata
-  (`userFullName*`/`userUnit*`/`defaultUnit*`) with a curated fallback map for
+  (  `userFullName*`/`userUnit*`/`defaultUnit*`) with a curated fallback map for
   standard OBD-II PIDs. A pre-existing `RangeError` from spread-into-`Math.max`
   at ~10k frames has also been fixed. The old `TimeSeriesChart.tsx` was deleted.
+- ✅ **react-router v8 upgrade (Plans 045 + 047).** The app is on `react-router`
+  **8.3.0** (exact pin, imports from the `react-router` package). Plan 045
+  migrated from `react-router-dom` 6 (resolving GHSA-wrjc-x8rr-h8h6 and
+  GHSA-337j-9hxr-rhxg on the 6.x line), and Plan 047 completed the v8 upgrade,
+  which also **resolves GHSA-qwww-vcr4-c8h2** (high, RSC-mode CSRF,
+  react-router 7.12.0–8.2.0 — fixed in 8.3.0).
 
 ---
 
-## 9. Status
+## 11. Status
 
 - **Core features complete:** ingestion, TimescaleDB migration, paged telemetry,
   React replay dashboard (overlay chart + imperative Leaflet marker), CSV export,
@@ -343,15 +525,25 @@ blockers are resolved and re-reviewed as PASS:
   - **SSRF guard** (`lib/ssrfGuard.js`) validates custom LLM endpoints.
   - Docker-based deployment with GHCR images (`docker-compose.yml`).
   - Non-root backend container (`appuser`), unprivileged nginx frontend.
-- **Dev tooling:** ESLint 8 (`.eslintrc.js`), husky 9 + lint-staged 17
+- **Session list pagination + vehicle filtering** — `GET /api/sessions` accepts `limit`, `offset`, and `vehicleId` query params (returns `{ sessions, total, limit, offset }` with `vehicleId`/`vehicleName` per session). The frontend `SessionBrowser` paginates via a "Load More" button and provides a vehicle filter dropdown.
+- **Dev tooling:** ESLint 10 (`eslint.config.js`), husky 9 + lint-staged 17
   (pre-commit lint + syntax check), CI pipeline (`.github/workflows/ci.yml`)
-  running on push/PR to `development`, and automated semver version bump
+  running on push/PR to `development` (Node 22), and automated semver version bump
   (`.github/workflows/version-bump.yml`) on push to `master`.
-- **Remaining open issues:** SSRF TOCTOU (documented in section 8 above).
+- **Session Notes (Plan 040)** — `notes` TEXT column on Sessions, `PATCH /api/sessions/notes/:sessionId` endpoint, auto-save textarea in the replay dashboard. Migration: `008_add_session_notes.sql`.
+- **Multi-Vehicle Support (Plan 041)** — full `Vehicle` model (name, make, model, year, engineCc, isDefault) with userId FK. Sessions gain nullable `vehicleId` FK. CRUD endpoints at `/api/vehicles/*`, session reassign via `PATCH /api/sessions/:sessionId/vehicle`. UploadController resolves Torque's `v` param to a vehicle. Frontend: `VehicleManager` in Settings with add/edit/delete/default, vehicle filter in session list, vehicle column in session table, reassign dialog in replay dashboard. Migration: `009_add_vehicles.sql`.
+- **Improved LLM Analysis Prompt (Plan 042)** — `lib/llmPrompt.js` was rewritten with five exported functions (up from two): `computeSummaryStats()` pre-computes min/max/mean/median per PID with null-safe filtering; `resampleTelemetry()` uniformly resamples across the full timeline replacing head/tail slicing; `buildTelemetryCsv()` outputs token-efficient CSV instead of Markdown tables; `buildContext()` and `buildAnalysisPrompt()` were cleaned up and now include pre-calculated statistical aggregates, four diagnostic guardrails, dynamic engine size injection, and five specific analysis categories. See section 8 for full details.
+- **Configurable LLM token limit + provider status (Plan 043)** — `llmMaxTokens` setting (INTEGER, default 16384, range 2048–32768; migration `010_add_llm_max_tokens.sql`) replaces the hardcoded 8192 `max_tokens` across all LLM providers. Settings UI gains a general "Max Output Tokens" input and an expanded provider status display (human-readable provider name, Model, DeepSeek Thinking/Effort, Max tokens). Validation in `UserController.updateSettings` (400 on out-of-range); 7 new cases in `test/settingsValidation.test.js`. See section 8.4.
+- **Dependabot fixes (Plan 044)** — `react-router-dom` exact-pinned to 6.30.4 (transitive `react-router` 6.30.4, `@remix-run/router` 1.23.3) and `postcss` 8.5.25, resolving 4 of 6 alerts. The remaining two react-router advisories were then resolved by the v7 migration (Plan 045).
+- **react-router v7 migration (Plan 045)** — `react-router-dom` 6.30.4 replaced with `react-router` 7.18.2 (exact pin); all 8 frontend files now import from `react-router`. Resolves GHSA-wrjc-x8rr-h8h6 and GHSA-337j-9hxr-rhxg. The v8 upgrade was completed in Plan 047.
+- **Configurable Data Retention Policy (Plan 046)** — `retentionEnabled` (BOOLEAN, default false — opt-in) and `retentionDays` (INTEGER, default 365, range 90–365) on the Settings singleton (migration `011_add_retention_settings.sql`). `PUT /api/settings` validates both fields (400 on non-boolean / non-integer / out-of-range) and applies a TimescaleDB `add_retention_policy`/`remove_retention_policy` on the `Logs` hypertable using a remove-then-add idempotent pattern; the response includes `retentionPolicyApplied`. Frontend Settings page gains a "Data Retention" card (enable Switch + 90/120/180/365-day select, local error state, rollback on save failure). Validation mirrored in `test/settingsValidation.test.js` (10 new cases; suite now **61 tests**).
+- **Bleeding-edge dependency upgrade (Plan 047)** — backend (root `package.json`): `joi` 18.2.3, `express-rate-limit` 8.6.2, `pg` 8.22.0, `cors` 2.8.6, `express-session` 1.19.0, `nodemon` 3.1.14, `globals` 17.9.0, `lint-staged` 17.3.0. Frontend: `react`/`react-dom` 19.2.8, `react-router` **8.3.0** (exact pin — replaces `react-router-dom`, resolves GHSA-qwww-vcr4-c8h2), `vite` 8.2.0, `@vitejs/plugin-react` 5.2.0, `typescript` 7.0.2, `tailwindcss` 4.3.3 + `@tailwindcss/vite` 4.3.3, `zustand` 5.0.14, `@tanstack/react-query` 5.101.4, `react-markdown` 10.1.0, `react-leaflet` 5.0.0, `@types/react` 19.2.18, `@types/react-dom` 19.2.4. Infra: both Dockerfiles on `node:22-bookworm-slim`, CI workflows on Node 22, `timescale/timescaledb:2.29.1-pg16` in compose.
+- **Tremor replaced with native Tailwind (Plan 049)** — the `@tremor/react` dependency was removed; every Tremor component was reimplemented with plain Tailwind utilities, including a new accessible `Toggle` switch (`components/ui/Toggle.tsx`, sr-only label). `index.css` dropped the Tremor safelist directives and typography tokens. Bundle shrunk ~65 kB; all chunks now <400 kB (largest ~380 kB echarts) via Rolldown `codeSplitting` groups in `vite.config.ts`. See `docs/architecture.md` §3.8.
+- **Remaining open issues:** SSRF TOCTOU (documented in section 10 above — Known Issues / Follow-up Items).
 
 ---
 
-## 10. Alternative Setup Methods
+## 12. Alternative Setup Methods
 
 The sections below cover building from source and manual (non-Docker) setup. For
 most users, the Docker quick start in the README or the full deployment guide

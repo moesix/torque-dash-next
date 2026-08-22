@@ -1,0 +1,337 @@
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="1280" height="640" viewBox="0 0 1280 640"
+     role="img" aria-labelledby="sp-title sp-desc">
+  <title id="sp-title">torqueDASH-Next — Self-Hosted OBD-II Vehicle Telemetry Dashboard with AI Analysis</title>
+  <desc id="sp-desc">GitHub social preview for torqueDASH-Next showing project branding, AI provider logos, and live OBD-II telemetry data panel.</desc>
+
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#0d1117"/>
+      <stop offset="100%" stop-color="#161b22"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#009999" stop-opacity="0"/>
+      <stop offset="15%" stop-color="#009999" stop-opacity="1"/>
+      <stop offset="85%" stop-color="#009999" stop-opacity="1"/>
+      <stop offset="100%" stop-color="#009999" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="cmd-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#009999" stop-opacity="0.12"/>
+      <stop offset="100%" stop-color="#009999" stop-opacity="0.06"/>
+    </linearGradient>
+    <linearGradient id="ai-glow" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#7c3aed" stop-opacity="0.15"/>
+      <stop offset="50%" stop-color="#009999" stop-opacity="0.1"/>
+      <stop offset="100%" stop-color="#10a37f" stop-opacity="0.15"/>
+    </linearGradient>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#e6edf3" stroke-width="0.5" opacity="0.04"/>
+    </pattern>
+    <pattern id="dots" width="20" height="20" patternUnits="userSpaceOnUse">
+      <circle cx="10" cy="10" r="0.6" fill="#e6edf3" opacity="0.06"/>
+    </pattern>
+  </defs>
+
+  <!-- Background (extends to edges — decorative) -->
+  <rect width="1280" height="640" fill="url(#bg)"/>
+  <rect width="1280" height="640" fill="url(#grid)"/>
+  <rect width="1280" height="640" fill="url(#dots)"/>
+
+  <!-- ============================== -->
+  <!-- LEFT SIDE: Title Block          -->
+  <!-- Safe zone: x>=40, y>=40         -->
+  <!-- ============================== -->
+  <g id="title-block" transform="translate(80 80)">
+
+    <!-- Category eyebrow -->
+    <text x="0" y="0"
+          font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+          font-size="16" font-weight="500" fill="#009999"
+          letter-spacing="3">SELF-HOSTED OBD-II TELEMETRY</text>
+
+    <!-- Project name -->
+    <text x="0" y="68"
+          font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+          font-size="72"><tspan font-weight="700" fill="#e6edf3">torque</tspan><tspan font-weight="800" fill="#009999">DASH</tspan><tspan font-weight="600" fill="#8b949e">-Next</tspan></text>
+
+    <!-- Tagline -->
+    <text x="0" y="112"
+          font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+          font-size="22" fill="#8b949e">Live vehicle data from Torque Pro.</text>
+    <text x="0" y="142"
+          font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+          font-size="22" fill="#8b949e">Session replays, route maps, and PID analytics.</text>
+
+    <!-- Quick start command box -->
+    <g transform="translate(0 176)">
+      <rect width="380" height="48" rx="8" fill="url(#cmd-bg)" stroke="#009999" stroke-opacity="0.25" stroke-width="1"/>
+      <text x="20" y="32"
+            font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+            font-size="16" fill="#009999">$ docker compose up -d</text>
+    </g>
+
+    <!-- ======================== -->
+    <!-- AI Analysis Section       -->
+    <!-- ======================== -->
+    <g id="ai-section" transform="translate(0 260)">
+
+      <!-- AI Analysis label -->
+      <text x="0" y="0"
+            font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+            font-size="13" font-weight="600" fill="#8b949e"
+            letter-spacing="2">AI-POWERED SESSION ANALYSIS</text>
+
+      <!-- AI Provider badges — row 1 -->
+      <g transform="translate(0 18)">
+
+        <!-- OpenAI badge -->
+        <g transform="translate(0 0)">
+          <rect width="160" height="44" rx="8" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+          <rect width="160" height="44" rx="8" fill="url(#ai-glow)" opacity="0.5"/>
+          <g transform="translate(16 12)">
+            <path d="M10 0C4.48 0 0 4.48 0 10s4.48 10 10 10 10-4.48 10-10S15.52 0 10 0zm0 3.6c1.36 0 2.56.56 3.44 1.44L10 8.48 6.56 5.04C7.44 4.16 8.64 3.6 10 3.6zM3.6 10c0-1.36.56-2.56 1.44-3.44L8.48 10l-3.44 3.44C4.16 12.56 3.6 11.36 3.6 10zm6.4 10c-1.36 0-2.56-.56-3.44-1.44L10 11.52l3.44 3.44C12.56 15.84 11.36 16.4 10 16.4zm0-3.6c-1.36 0-2.56-.56-3.44-1.44L10 7.92l3.44 3.44c-.88.88-2.08 1.44-3.44 1.44z" fill="#10a37f" opacity="0.9"/>
+          </g>
+          <text x="44" y="27"
+                font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+                font-size="14" font-weight="600" fill="#e6edf3">OpenAI</text>
+        </g>
+
+        <!-- Anthropic badge -->
+        <g transform="translate(176 0)">
+          <rect width="160" height="44" rx="8" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+          <rect width="160" height="44" rx="8" fill="url(#ai-glow)" opacity="0.5"/>
+          <g transform="translate(16 12)">
+            <path d="M10 0L0 20h4l2-4h8l2 4h4L10 0zm0 6l3 6H7l3-6z" fill="#d4a574" opacity="0.9"/>
+          </g>
+          <text x="44" y="27"
+                font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+                font-size="14" font-weight="600" fill="#e6edf3">Anthropic</text>
+        </g>
+
+        <!-- DeepSeek badge -->
+        <g transform="translate(352 0)">
+          <rect width="160" height="44" rx="8" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+          <rect width="160" height="44" rx="8" fill="url(#ai-glow)" opacity="0.5"/>
+          <g transform="translate(16 12)">
+            <circle cx="10" cy="10" r="9" fill="none" stroke="#4dabf7" stroke-width="1.5" opacity="0.9"/>
+            <text x="10" y="14" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="11" font-weight="700" fill="#4dabf7" text-anchor="middle">DS</text>
+          </g>
+          <text x="44" y="27"
+                font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+                font-size="14" font-weight="600" fill="#e6edf3">DeepSeek</text>
+        </g>
+      </g>
+
+      <!-- AI Provider badges — row 2 -->
+      <g transform="translate(0 74)">
+
+        <!-- Ollama badge -->
+        <g transform="translate(0 0)">
+          <rect width="160" height="44" rx="8" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+          <rect width="160" height="44" rx="8" fill="url(#ai-glow)" opacity="0.5"/>
+          <g transform="translate(16 12)">
+            <!-- Ollama logo (simplified circle with play) -->
+            <circle cx="10" cy="10" r="9" fill="none" stroke="#a78bfa" stroke-width="1.5" opacity="0.9"/>
+            <path d="M8 6l6 4-6 4z" fill="#a78bfa" opacity="0.9"/>
+          </g>
+          <text x="44" y="27"
+                font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+                font-size="14" font-weight="600" fill="#e6edf3">Ollama</text>
+        </g>
+
+        <!-- Custom AI badge -->
+        <g transform="translate(176 0)">
+          <rect width="160" height="44" rx="8" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+          <rect width="160" height="44" rx="8" fill="url(#ai-glow)" opacity="0.5"/>
+          <g transform="translate(16 12)">
+            <!-- Custom/API icon (gear + code) -->
+            <circle cx="10" cy="10" r="9" fill="none" stroke="#8b949e" stroke-width="1.5" opacity="0.9"/>
+            <text x="10" y="14" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" font-weight="700" fill="#8b949e" text-anchor="middle">{ }</text>
+          </g>
+          <text x="44" y="27"
+                font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+                font-size="14" font-weight="600" fill="#e6edf3">Custom AI</text>
+        </g>
+      </g>
+    </g>
+  </g>
+
+  <!-- ============================== -->
+  <!-- RIGHT SIDE: OBD-II Data Panel   -->
+  <!-- Safe zone: x<=1240, y>=40       -->
+  <!-- Panel: 430px wide, starts x=770 -->
+  <!-- Right edge: 770+430=1200 < 1240 -->
+  <!-- ============================== -->
+  <g id="obdii-display" transform="translate(770 80)">
+
+    <!-- Panel background -->
+    <rect x="0" y="0" width="430" height="440" rx="12" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+
+    <!-- Panel header -->
+    <text x="24" y="34"
+          font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="13" font-weight="600" fill="#8b949e"
+          letter-spacing="1.5">LIVE PID DATA</text>
+
+    <!-- Column headers -->
+    <text x="24" y="62"
+          font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="12" fill="#8b949e">PID</text>
+    <text x="80" y="62"
+          font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="12" fill="#8b949e">NAME</text>
+    <text x="210" y="62"
+          font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="12" fill="#8b949e">VALUE</text>
+    <text x="340" y="62"
+          font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="12" fill="#8b949e">UNIT</text>
+
+    <!-- Separator line -->
+    <line x1="24" y1="72" x2="406" y2="72" stroke="#30363d" stroke-width="1"/>
+
+    <!-- Row 1: RPM -->
+    <text x="24" y="100"
+          font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="14" font-weight="600" fill="#009999">0x0C</text>
+    <text x="80" y="100"
+          font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="14" fill="#e6edf3">RPM</text>
+    <text x="210" y="100"
+          font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="18" font-weight="700" fill="#e6edf3">2,847</text>
+    <text x="340" y="100"
+          font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="14" fill="#8b949e">rpm</text>
+
+    <!-- Row 2: Speed -->
+    <text x="24" y="132"
+          font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="14" font-weight="600" fill="#009999">0x0D</text>
+    <text x="80" y="132"
+          font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="14" fill="#e6edf3">Speed</text>
+    <text x="210" y="132"
+          font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="18" font-weight="700" fill="#e6edf3">98</text>
+    <text x="340" y="132"
+          font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="14" fill="#8b949e">km/h</text>
+
+    <!-- Row 3: Coolant -->
+    <text x="24" y="164"
+          font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="14" font-weight="600" fill="#009999">0x05</text>
+    <text x="80" y="164"
+          font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="14" fill="#e6edf3">Coolant</text>
+    <text x="210" y="164"
+          font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="18" font-weight="700" fill="#e6edf3">87&#176;</text>
+    <text x="340" y="164"
+          font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="14" fill="#8b949e">&#176;C</text>
+
+    <!-- Row 4: Intake Air -->
+    <text x="24" y="196"
+          font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="14" font-weight="600" fill="#009999">0x0F</text>
+    <text x="80" y="196"
+          font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="14" fill="#e6edf3">Intake Air</text>
+    <text x="210" y="196"
+          font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="18" font-weight="700" fill="#e6edf3">42&#176;</text>
+    <text x="340" y="196"
+          font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="14" fill="#8b949e">&#176;C</text>
+
+    <!-- Row 5: MAF -->
+    <text x="24" y="228"
+          font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="14" font-weight="600" fill="#009999">0x11</text>
+    <text x="80" y="228"
+          font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="14" fill="#e6edf3">MAF</text>
+    <text x="210" y="228"
+          font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="18" font-weight="700" fill="#e6edf3">18.4</text>
+    <text x="340" y="228"
+          font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="14" fill="#8b949e">g/s</text>
+
+    <!-- Row 6: Fuel Trim -->
+    <text x="24" y="260"
+          font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="14" font-weight="600" fill="#009999">0x06</text>
+    <text x="80" y="260"
+          font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="14" fill="#e6edf3">Fuel Trim</text>
+    <text x="210" y="260"
+          font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="18" font-weight="700" fill="#e6edf3">+2.3</text>
+    <text x="340" y="260"
+          font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="14" fill="#8b949e">%</text>
+
+    <!-- Separator before AI section -->
+    <line x1="24" y1="280" x2="406" y2="280" stroke="#30363d" stroke-width="1"/>
+
+    <!-- AI Analysis preview -->
+    <g transform="translate(24 296)">
+      <text x="0" y="0"
+            font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+            font-size="12" font-weight="600" fill="#7c3aed"
+            letter-spacing="1">AI ANALYSIS</text>
+
+      <text x="0" y="22"
+            font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+            font-size="12" fill="#e6edf3" opacity="0.8">Session shows normal engine parameters.</text>
+      <text x="0" y="40"
+            font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+            font-size="12" fill="#e6edf3" opacity="0.8">Coolant temp stable at 87&#176;C. Fuel trim</text>
+      <text x="0" y="58"
+            font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+            font-size="12" fill="#e6edf3" opacity="0.8">within &#177;3% — no lean/rich condition.</text>
+    </g>
+
+    <!-- Tech badges at bottom of panel -->
+    <g transform="translate(24 396)">
+      <rect width="112" height="28" rx="4" fill="#009999" fill-opacity="0.1" stroke="#009999" stroke-opacity="0.3" stroke-width="1"/>
+      <text x="56" y="19"
+            font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+            font-size="11" font-weight="500" fill="#009999"
+            text-anchor="middle">TimescaleDB</text>
+
+      <g transform="translate(124 0)">
+        <rect width="80" height="28" rx="4" fill="#009999" fill-opacity="0.1" stroke="#009999" stroke-opacity="0.3" stroke-width="1"/>
+        <text x="40" y="19"
+              font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+              font-size="11" font-weight="500" fill="#009999"
+              text-anchor="middle">Docker</text>
+      </g>
+
+      <g transform="translate(216 0)">
+        <rect width="68" height="28" rx="4" fill="#009999" fill-opacity="0.1" stroke="#009999" stroke-opacity="0.3" stroke-width="1"/>
+        <text x="34" y="19"
+              font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+              font-size="11" font-weight="500" fill="#009999"
+              text-anchor="middle">React</text>
+      </g>
+
+      <g transform="translate(296 0)">
+        <rect width="72" height="28" rx="4" fill="#009999" fill-opacity="0.1" stroke="#009999" stroke-opacity="0.3" stroke-width="1"/>
+        <text x="36" y="19"
+              font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+              font-size="11" font-weight="500" fill="#009999"
+              text-anchor="middle">Express</text>
+      </g>
+    </g>
+  </g>
+
+  <!-- ======================== -->
+  <!-- BOTTOM: Accent Line      -->
+  <!-- Decorative — extends to edges -->
+  <!-- ======================== -->
+  <rect x="0" y="636" width="1280" height="4" rx="0" fill="url(#accent)"/>
+</svg>

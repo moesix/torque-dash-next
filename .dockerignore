@@ -9,3 +9,4 @@ apps/frontend/dist
 npm-debug.log
 *.log
 .DS_Store
+.husky

@@ -201,7 +201,7 @@ class AnalysisController {
       res.json(analyses);
     } catch (err) {
       console.error('[AnalysisController.listAnalyses]', err);
-      res.sendStatus(500);
+      res.status(500).json({ error: 'Internal server error' });
     }
   }
 
@@ -214,7 +214,7 @@ class AnalysisController {
       res.sendStatus(200);
     } catch (err) {
       console.error('[AnalysisController.deleteAnalysis]', err);
-      res.sendStatus(500);
+      res.status(500).json({ error: 'Internal server error' });
     }
   }
 

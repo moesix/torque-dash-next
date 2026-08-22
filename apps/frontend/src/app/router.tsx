@@ -1,4 +1,4 @@
-import type { RouteObject } from 'react-router-dom';
+import type { RouteObject } from 'react-router';
 import AppShell from '@/components/layout/AppShell';
 import Login from '@/features/auth/Login';
 import Register from '@/features/auth/Register';
