@@ -12,6 +12,7 @@
  */
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { Pool } = require('pg');
 
 const SQL_DIR = path.join(__dirname, '..', 'infra', 'timescale');
@@ -69,28 +70,108 @@ async function run() {
     const config = require('../config/config');
     const connectionString = process.env.DATABASE_URL || config.db.uri;
     const pool = new Pool({ connectionString });
+    try {
+
+    // Ensure the migration tracker exists. This table is managed directly by
+    // migrate.js and is intentionally NOT a migration file itself.
+    await ensureTrackerTable(pool);
 
     const statements = loadStatements();
     console.log(`[migrate] Executing ${statements.length} statements across migration files...`);
-    for (let i = 0; i < statements.length; i++) {
-        const { sql: stmt, file } = statements[i];
-        try {
-            await pool.query(stmt);
-            console.log(`[migrate] (${i + 1}/${statements.length}) [${file}] OK: ${stmt.slice(0, 60).replace(/\s+/g, ' ')}`);
-        } catch (err) {
-            if (isBenignError(err)) {
-                console.warn(`[migrate] (${i + 1}/${statements.length}) [${file}] SKIP (benign): ${err.message}`);
-            } else {
-                console.error(`[migrate] (${i + 1}/${statements.length}) [${file}] FAILED: ${err.message}`);
-                await pool.end();
-                process.exitCode = 1;
-                return;
+
+    // Group statements by their source file, preserving lexicographic order so
+    // that a file is only marked applied once ALL of its statements succeed.
+    const filesInOrder = [];
+    const byFile = new Map();
+    for (const st of statements) {
+        if (!byFile.has(st.file)) {
+            byFile.set(st.file, []);
+            filesInOrder.push(st.file);
+        }
+        byFile.get(st.file).push(st);
+    }
+
+    let globalIndex = 0;
+    for (const file of filesInOrder) {
+        const contentHash = hashFileContent(file);
+        if (await isFileApplied(pool, file, contentHash)) {
+            console.log(`[migrate] SKIP (already applied): ${file}`);
+            globalIndex += byFile.get(file).length;
+            continue;
+        }
+
+        const fileStatements = byFile.get(file);
+        for (const { sql: stmt, file: stmtFile } of fileStatements) {
+            globalIndex++;
+            try {
+                await pool.query(stmt);
+                console.log(`[migrate] (${globalIndex}/${statements.length}) [${stmtFile}] OK: ${stmt.slice(0, 60).replace(/\s+/g, ' ')}`);
+            } catch (err) {
+                if (isBenignError(err)) {
+                    console.warn(`[migrate] (${globalIndex}/${statements.length}) [${stmtFile}] SKIP (benign): ${err.message}`);
+                } else {
+                    console.error(`[migrate] (${globalIndex}/${statements.length}) [${stmtFile}] FAILED: ${err.message}`);
+                    process.exitCode = 1;
+                    return;
+                }
             }
         }
+
+        // All statements for this file succeeded (benign skips count as success),
+        // so record it. We only insert here — never on a non-benign failure.
+        // Upsert on `filename`: makes a concurrent-replica race (both INSERT the
+        // same filename) and a future content-edit re-run (new hash, same
+        // filename) safe no-ops instead of an uncaught UNIQUE violation.
+        await pool.query(
+            `INSERT INTO _migrations (filename, content_hash) VALUES ($1, $2)
+             ON CONFLICT (filename) DO UPDATE SET content_hash = EXCLUDED.content_hash, applied_at = now()`,
+            [file, contentHash]
+        );
+        console.log(`[migrate] RECORDED: ${file}`);
     }
 
     console.log('[migrate] Done.');
-    await pool.end();
+    } finally {
+        await pool.end();
+    }
+}
+
+/**
+ * Create the migration tracker table if it does not already exist.
+ * Idempotent via CREATE TABLE IF NOT EXISTS. This table is owned by migrate.js
+ * and must never be treated as a migration file.
+ */
+async function ensureTrackerTable(pool) {
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS _migrations (
+            id SERIAL PRIMARY KEY,
+            filename TEXT UNIQUE NOT NULL,
+            content_hash TEXT NOT NULL,
+            applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        );
+    `);
+}
+
+/**
+ * Compute a sha256 content hash of a migration file's raw bytes. Keying on
+ * (filename, content_hash) means an unchanged file is skipped, while a file
+ * whose CONTENT later changes (new hash) will be re-executed.
+ */
+function hashFileContent(filename) {
+    const raw = fs.readFileSync(path.join(SQL_DIR, filename), 'utf8');
+    return crypto.createHash('sha256').update(raw).digest('hex');
+}
+
+/**
+ * Return true if this exact (filename, content_hash) pair has already been
+ * applied and recorded in the _migrations tracker.
+ */
+async function isFileApplied(pool, filename, contentHash) {
+    const res = await pool.query(
+        'SELECT 1 FROM _migrations WHERE filename = $1 AND content_hash = $2 LIMIT 1',
+        [filename, contentHash]
+    );
+    return res.rowCount > 0;
 }
 
 if (require.main === module) {

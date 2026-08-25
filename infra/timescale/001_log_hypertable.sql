@@ -7,11 +7,11 @@ CREATE EXTENSION IF NOT EXISTS timescaledb;
 --    Disable compression temporarily — ALTER TABLE is not supported on
 --    compressed hypertables.
 ALTER TABLE "Logs" SET (timescaledb.compress = false);
-ALTER TABLE "Logs" DROP CONSTRAINT "Logs_pkey";
+ALTER TABLE "Logs" DROP CONSTRAINT IF EXISTS "Logs_pkey";
 ALTER TABLE "Logs" ADD PRIMARY KEY ("sessionId", timestamp);
 
 -- 2. Explicit dedupe constraint (helps bulkCreate ON CONFLICT + clarity)
-ALTER TABLE "Logs" ADD CONSTRAINT logs_session_timestamp_uniq UNIQUE ("sessionId", timestamp);
+ALTER TABLE "Logs" ADD CONSTRAINT IF NOT EXISTS logs_session_timestamp_uniq UNIQUE ("sessionId", timestamp);
 
 -- 3. Promoted hot columns (populated at ingest + backfilled)
 ALTER TABLE "Logs" ADD COLUMN IF NOT EXISTS "engine_rpm" double precision;
@@ -36,7 +36,13 @@ ALTER TABLE "Logs" SET (
   timescaledb.compress_segmentby = '"sessionId"',
   timescaledb.compress_orderby = '"timestamp" DESC'
 );
-SELECT add_compression_policy('"Logs"', INTERVAL '7 days');
+-- Idempotent: only register a compression policy if one isn't already present
+-- (re-running this file against an already-migrated DB must be a no-op).
+SELECT add_compression_policy('"Logs"', INTERVAL '7 days')
+WHERE NOT EXISTS (
+    SELECT 1 FROM timescaledb_information.jobs
+    WHERE proc_name = 'policy_compression' AND hypertable_name = 'Logs'
+);
 
 -- 7. Continuous aggregate over promoted columns (safe; backfilled)
 CREATE MATERIALIZED VIEW IF NOT EXISTS log_1min
@@ -51,7 +57,12 @@ SELECT "sessionId",
 FROM "Logs"
 GROUP BY "sessionId", bucket;
 
+-- Idempotent: only register a refresh policy if one isn't already present.
 SELECT add_continuous_aggregate_policy('log_1min',
        start_offset => INTERVAL '10 minutes',
        end_offset   => INTERVAL '1 minute',
-       schedule_interval => INTERVAL '1 minute');
+       schedule_interval => INTERVAL '1 minute')
+WHERE NOT EXISTS (
+    SELECT 1 FROM timescaledb_information.jobs
+    WHERE proc_name = 'policy_refresh_continuous_aggregate' AND hypertable_name = 'log_1min'
+);
