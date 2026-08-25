@@ -6,6 +6,7 @@ const { nanoid } = require('nanoid');
 const crypto = require('crypto');
 const runtime = require('../config/runtime');
 const Joi = require('joi');
+const { validateLlmThinkingMode, validateLlmMaxTokens, validateRetentionEnabled, validateRetentionDays } = require('../lib/validators');
 
 class UserController {
     static async login(req, res, next) {
@@ -253,9 +254,8 @@ class UserController {
             const { llmThinkingMode, llmReasoningEffort, llmMaxTokens, timezoneOffset } = req.body;
 
             if (llmThinkingMode !== undefined) {
-              if (typeof llmThinkingMode !== 'boolean') {
-                return res.status(400).json({ error: 'llmThinkingMode must be a boolean.' });
-              }
+              const r = validateLlmThinkingMode(llmThinkingMode);
+              if (!r.ok) return res.status(400).json({ error: r.error });
               updateData.llmThinkingMode = llmThinkingMode;
             }
             if (llmReasoningEffort !== undefined) {
@@ -265,11 +265,9 @@ class UserController {
               updateData.llmReasoningEffort = llmReasoningEffort;
             }
             if (llmMaxTokens !== undefined) {
-              const t = Number(llmMaxTokens);
-              if (!Number.isInteger(t) || t < 2048 || t > 32768) {
-                return res.status(400).json({ error: 'llmMaxTokens must be an integer between 2048 and 32768.' });
-              }
-              updateData.llmMaxTokens = t;
+              const r = validateLlmMaxTokens(llmMaxTokens);
+              if (!r.ok) return res.status(400).json({ error: r.error });
+              updateData.llmMaxTokens = r.value;
             }
 
             // Timezone offset (minutes from UTC, e.g. 480 for UTC+8)
@@ -283,20 +281,15 @@ class UserController {
 
             // Handle retentionEnabled if provided
             if (req.body.retentionEnabled !== undefined) {
-              if (typeof req.body.retentionEnabled !== 'boolean') {
-                return res.status(400).json({ error: 'retentionEnabled must be a boolean.' });
-              }
+              const r = validateRetentionEnabled(req.body.retentionEnabled);
+              if (!r.ok) return res.status(400).json({ error: r.error });
               updateData.retentionEnabled = req.body.retentionEnabled;
             }
 
             // Handle retentionDays if provided
             if (req.body.retentionDays !== undefined) {
-              if (typeof req.body.retentionDays !== 'number' || !Number.isInteger(req.body.retentionDays)) {
-                return res.status(400).json({ error: 'retentionDays must be an integer.' });
-              }
-              if (req.body.retentionDays < 90 || req.body.retentionDays > 365) {
-                return res.status(400).json({ error: 'retentionDays must be between 90 and 365.' });
-              }
+              const r = validateRetentionDays(req.body.retentionDays);
+              if (!r.ok) return res.status(400).json({ error: r.error });
               updateData.retentionDays = req.body.retentionDays;
             }
 
