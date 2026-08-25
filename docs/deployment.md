@@ -40,11 +40,25 @@ The application **will not start** without these:
 | `POSTGRES_PASSWORD` | `openssl rand -base64 24` | Database password. Use the same value for all three `POSTGRES_*` vars. |
 | `SESSION_KEYS` | `openssl rand -hex 24` | Express session secrets. For key rotation, use comma-separated values. |
 
+### Upload API token (required for production)
+
+As of 2026, token authentication is the required security baseline for Torque
+Pro uploads:
+
+- **Set `UPLOAD_API_TOKEN` in `.env` (recommended)** — generate with
+  `openssl rand -hex 24`. The env value wins over any Settings-UI token and
+  locks the UI while it is set.
+- **Or generate from the Settings UI** after first login (shown once).
+
+Once a token is configured anywhere, uploads without a matching
+`Authorization: Bearer <token>` header return `401`. Email-only ingestion
+occurs only when no token is configured at all — a discouraged bootstrap mode
+that is insecure for production.
+
 ### Optional but recommended
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `UPLOAD_API_TOKEN` | _(unset)_ | Bearer token for Torque Pro uploads. Generate with `openssl rand -hex 24`, or generate from the Settings UI after first login. When set, uploads **require** this token. |
 | `LLM_ENCRYPTION_KEY` | _(unset)_ | 64-char hex key for AES-256-GCM encryption of LLM API keys at rest. Generate with `openssl rand -hex 32`. Required for AI analysis feature. |
 | `COOKIE_SECURE` | `false` | Set to `true` behind a HTTPS reverse proxy (recommended for production). |
 
@@ -114,8 +128,9 @@ chain:
 1. Open **http://localhost:8080** in your browser.
 2. Register the first account at the sign-up page.
 3. Sign in with your credentials.
-4. (Optional) Go to **Settings** to generate an upload API token if you didn't
-   set one in `.env`.
+4. Configure the upload API token — **required for production** (see step 2's
+   "Upload API token" section): either set `UPLOAD_API_TOKEN` in `.env` before
+   launching, or generate one from **Settings** now.
 5. Configure Torque Pro (see below).
 
 ### Configure Torque Pro
@@ -231,8 +246,10 @@ cat backup_20260717.sql | docker compose exec -T db \
 
 ### Uploads failing with 401
 
-- If `UPLOAD_API_TOKEN` is set in `.env` or generated from the Settings UI,
-  Torque Pro must send the matching `Authorization: bearer <token>` header.
+- With `UPLOAD_API_TOKEN` configured (in `.env` or generated from the Settings
+  UI), Torque Pro must send the matching `Authorization: bearer <token>` header.
+- A token set in `.env` overrides any Settings-UI token and locks
+  the UI — make sure Torque Pro is configured with the env value.
 - Check the backend logs:
   `docker compose logs backend`
 

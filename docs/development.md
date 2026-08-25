@@ -65,7 +65,7 @@ Set these at the backend repo root (`.env` or exported in the shell).
 | `DISABLE_SYNC` | planned | — | Intended as an explicit kill-switch for `sequelize.sync()`. **Not yet wired** — today the sync gate is solely `NODE_ENV !== 'production'`. (Listed for forward compatibility; do not rely on it yet.) |
 | `UPLOAD_RATE_LIMIT_MAX` | no | `600` | Max `/upload` requests per `UPLOAD_RATE_LIMIT_WINDOW_MS` window, per client IP. Raised from the original 60/min to absorb Torque reconnect bursts. |
 | `UPLOAD_RATE_LIMIT_WINDOW_MS` | no | `60000` | Window length (ms) for the `/upload` rate limiter. |
-| `UPLOAD_API_TOKEN` | no | unset | If set, uploads **REQUIRE** `Authorization: Bearer <token>` — without it, uploads return 401. This is a security gate: email alone is no longer sufficient. Can also be generated from the Settings UI (UI token takes precedence). |
+| `UPLOAD_API_TOKEN` | yes (production) | unset | Uploads **REQUIRE** `Authorization: Bearer <token>` once a token is configured — without a matching header they return 401. Email alone is sufficient only when no token exists anywhere (discouraged bootstrap mode; insecure for production). Precedence: the env value always wins and locks the Settings UI (generate/clear return 403 while env-managed); without env, the Settings-UI/DB token applies. Generate with `openssl rand -hex 24`. Matching-token requests also bypass the per-IP upload rate limiter. |
 | `DISABLE_REGISTRATION` | no | unset | Hard kill-switch: when `'true'`, `UserController.register` returns `403` and `GET /api/settings` reports `disableRegistration: true` regardless of the runtime `Settings` toggle. |
 | `LLM_ENCRYPTION_KEY` | yes (AI) | unset | 64-char hex key for AES-256-GCM encryption of LLM API keys at rest. Generate with `openssl rand -hex 32`. Required when using the AI analysis feature. |
 
@@ -581,7 +581,7 @@ blockers are resolved and re-reviewed as PASS:
 - **Verification:** frontend via `npm run build` (`tsc --noEmit && vite build`),
   backend via `node -c` syntax checks.
 - **Additional features implemented:**
-  - Env-tunable upload rate limit with trusted-email burst exemption.
+  - Env-tunable upload rate limit with token-based burst exemption (a matching Bearer token bypasses the limiter).
   - Runtime-toggleable registration (`Settings` singleton +
     `DISABLE_REGISTRATION` env kill-switch + SPA `/settings` toggle).
   - **Upload API Token UI** on the `/settings` page (generate, view once, copy,
@@ -638,8 +638,9 @@ cd torque-dash-next
 
 # **Required:** generate session keys (app crashes on startup if missing)
 export SESSION_KEYS="$(openssl rand -hex 24)"
-# Strongly recommended: upload token for Torque Pro authentication
-# Can also be generated from the Settings UI after first login
+# **Required for production (2026 baseline):** upload API token for Torque
+# Pro authentication. Alternatively generate from the Settings UI after first
+# login (an env-set token overrides and locks the UI).
 export UPLOAD_API_TOKEN="$(openssl rand -hex 24)"
 
 docker compose up -d --build

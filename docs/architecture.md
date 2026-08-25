@@ -11,14 +11,15 @@ containerisation topology.
 
 Two clients talk to the same Express backend:
 
-1. **Torque Pro** (Android) — pushes OBD2 frames to an unauthenticated,
-   *email-gated* ingestion endpoint.
+1. **Torque Pro** (Android) — pushes OBD2 frames to the *email-gated*
+   ingestion endpoint, which additionally checks a Bearer upload token
+   (token configuration is the required production posture).
 2. **Browser SPA** (React/Vite) — reads data over an authenticated, CORS +
     cookie-based session API (express-session + connect-pg-simple store).
 
 ```mermaid
 flowchart LR
-    TP[Torque Pro Android app] -->|GET /api/upload?eml=...| ING[Express: UploadController]
+    TP[Torque Pro Android app] -->|GET /api/upload?eml=...<br/>Authorization: Bearer| ING[Express: UploadController]
     BR[Browser SPA - React/Vite] -->|CORS + express-session /api/*| API[Express: /api router]
 
     ING --> UC[lib/userCache - email->user]
@@ -69,6 +70,15 @@ which enforces ownership (or `?shareId=` for shared sessions) and returns
 ## 2. Backend Internals
 
 ### 2.1 `UploadController` (`controllers/UploadController.js`)
+- **Bearer-token auth (2026 baseline):** once an upload token is configured,
+  requests without a matching `Authorization: Bearer <token>` header are
+  rejected with `401` JSON — email alone is insufficient. The env
+  `UPLOAD_API_TOKEN` always wins over the Settings-UI/DB token and locks the UI
+  (generate/clear return `403` while env-managed); without env, the Settings-UI/
+  DB token applies. Matching-token requests bypass the per-IP upload rate
+  limiter. Token configuration is the required production posture; email-only
+  ingestion occurs only when no token exists anywhere (a discouraged bootstrap
+  mode, insecure for production).
 - **Email-gated:** resolves the `eml` query param to a `User` via
   `lib/userCache` (positive **and** negative TTL cache, 300s). Unknown emails
   get `403` and are **never buffered or forwarded**.
@@ -700,12 +710,14 @@ See `docs/deployment.md` for the full deployment guide.
 | `PUT /api/vehicles/:vehicleId` | cookie | update a vehicle (body: partial fields) |
 | `DELETE /api/vehicles/:vehicleId` | cookie | delete a vehicle (sessions unassigned via SET NULL) |
 | `PATCH /api/vehicles/:vehicleId/default` | cookie | set a vehicle as the user's default (unsets all others) |
-| `POST /api/upload` (`/upload` from Torque) | email-gated + **Bearer token required when `UPLOAD_API_TOKEN` is set** | ingest (401 without token) |
+| `POST /api/upload` (`/upload` from Torque) | email-gated + **Bearer token required** (when a token is configured — the required production posture) | ingest (`401` without matching token) |
 | `GET /health` | none | probe |
 
 > See `routes/api.js` for the authoritative route table. The SPA auth contract
 > is now **resolved** — all endpoints return JSON/401 over `/api`. See
-> `docs/development.md → Known Issues` for history.
+> `docs/development.md → Known Issues` for history. Upload-token configuration
+> is the required production posture as of 2026; email-only ingestion occurs
+> only when no token is configured anywhere (discouraged bootstrap mode).
 
 **Session list pagination and filtering:** `GET /api/sessions` accepts `limit`
 (default 50, max 200) and `offset` query parameters, plus an optional `vehicleId`
