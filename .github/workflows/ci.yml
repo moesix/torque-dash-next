@@ -16,6 +16,9 @@ concurrency:
 jobs:
   backend-checks:
     runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgres://ci:ci@localhost:5432/ci
+      SESSION_KEYS: ci-test-key-for-config-loading
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -31,6 +34,9 @@ jobs:
 
       - name: Run backend tests
         run: npm test
+
+      - name: Test coverage
+        run: npm run test:coverage
 
       - name: Run ESLint
         run: npm run lint
@@ -50,7 +56,18 @@ jobs:
 
       - name: Install frontend dependencies
         working-directory: apps/frontend
-        run: npm ci
+        run: npm ci --legacy-peer-deps
+
+      # Frontend lint is a deliberate placeholder that exits 0: typescript-eslint
+      # does not support TypeScript >=7 yet (typescript-eslint#10940). The script
+      # prints the reason on every run. Re-enable when support ships.
+      - name: Lint frontend
+        working-directory: apps/frontend
+        run: npm run lint
+
+      - name: Test frontend
+        working-directory: apps/frontend
+        run: npm test
 
       - name: Typecheck frontend
         working-directory: apps/frontend

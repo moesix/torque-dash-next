@@ -5,7 +5,9 @@ const passport = require('passport');
 const { nanoid } = require('nanoid');
 const crypto = require('crypto');
 const runtime = require('../config/runtime');
+const { userByIdCache } = require('../config/passport');
 const Joi = require('joi');
+const { validateLlmThinkingMode, validateLlmMaxTokens, validateRetentionEnabled, validateRetentionDays } = require('../lib/validators');
 
 class UserController {
     static async login(req, res, next) {
@@ -20,10 +22,20 @@ class UserController {
             });
         })(req, res, next);
     }
-    static logout(req, res) {
+    // Logout must ALSO destroy the express-session record so the
+    // connect-pg-simple store row dies NOW, not at TTL (plan 054 intent).
+    // Response contract stays { ok: true } — the SPA logout flow depends on
+    // it; both failure modes (passport logout error, store destroy error)
+    // are log-only.
+    static async logout(req, res) {
         req.logout((err) => {
-            if (err) return res.status(500).json({ error: 'Logout failed' });
-            return res.json({ ok: true });
+            if (err) console.error('[UserController] logout:', err.message);
+            req.session.destroy((destroyErr) => {
+                if (destroyErr) {
+                    console.error('[UserController] session.destroy failed:', destroyErr.message);
+                }
+                return res.json({ ok: true });
+            });
         });
     }
     static async register(req, res) {
@@ -41,6 +53,11 @@ class UserController {
             // Get userdata from request
             let { email, password } = req.body;
 
+            // Normalize identity boundary: lowercase BEFORE the duplicate-check
+            // findOne AND the create, so mixed-case input can never re-split
+            // an identity that migration 015 already folded.
+            email = String(email || '').toLowerCase();
+
             // Validate if user data ok
             const { error } = User.validate(req.body);
             if (error) {
@@ -50,7 +67,7 @@ class UserController {
             // Check if user is already registered
             let user = await User.findOne({ where: { email: email } });
             if (user) {
-                return res.status(400).json({ error: 'This email is already registered' });
+                return res.status(409).json({ error: 'Registration failed. Please try a different email.' });
             }
 
             // Save new user to db
@@ -151,27 +168,24 @@ class UserController {
         try {
             const settings = await Settings.getSingleton();
             const envDisabled = process.env.DISABLE_REGISTRATION === 'true';
-            res.set('Cache-Control', 'private, max-age=30');
+            res.set('Cache-Control', 'public, max-age=30');
             res.json({
                 disableRegistration: settings.disableRegistration || envDisabled,
-                hasUploadApiToken: Boolean(settings.uploadApiToken || runtime.isFromEnv()),
                 tokenFromEnv: runtime.isFromEnv(),
-                hasLlmProvider: Boolean(settings.llmProvider),
-                llmProvider: settings.llmProvider || null,
-                llmModel: settings.llmModel || null,
-                llmEndpoint: settings.llmEndpoint || null,
-                hasLlmApiKey: Boolean(settings.llmApiKeyEnc),
-                vehicleMake: settings.vehicleMake || null,
-                vehicleModel: settings.vehicleModel || null,
-                vehicleYear: settings.vehicleYear || null,
-                engineCc: settings.engineCc || null,
-                llmThinkingMode: settings.llmThinkingMode ?? true,
-                llmReasoningEffort: settings.llmReasoningEffort || 'high',
-                llmMaxTokens: settings.llmMaxTokens || 16384,
-                timezoneOffset: settings.timezoneOffset ?? 0,
-                retentionEnabled: settings.retentionEnabled ?? false,
-                retentionDays: settings.retentionDays ?? 365,
             });
+        } catch (err) {
+            console.error(err.message || err);
+            res.status(500).json({ error: 'Internal server error' });
+        }
+    }
+    static async getSettingsFull(req, res) {
+        try {
+            const settings = await Settings.getSingleton();
+            const envDisabled = process.env.DISABLE_REGISTRATION === 'true';
+            res.set('Cache-Control', 'private, max-age=30');
+            res.json(settingsView(settings, {
+                disableRegistration: settings.disableRegistration || envDisabled,
+            }));
         } catch (err) {
             console.error(err.message || err);
             res.status(500).json({ error: 'Internal server error' });
@@ -253,9 +267,8 @@ class UserController {
             const { llmThinkingMode, llmReasoningEffort, llmMaxTokens, timezoneOffset } = req.body;
 
             if (llmThinkingMode !== undefined) {
-              if (typeof llmThinkingMode !== 'boolean') {
-                return res.status(400).json({ error: 'llmThinkingMode must be a boolean.' });
-              }
+              const r = validateLlmThinkingMode(llmThinkingMode);
+              if (!r.ok) return res.status(400).json({ error: r.error });
               updateData.llmThinkingMode = llmThinkingMode;
             }
             if (llmReasoningEffort !== undefined) {
@@ -265,11 +278,9 @@ class UserController {
               updateData.llmReasoningEffort = llmReasoningEffort;
             }
             if (llmMaxTokens !== undefined) {
-              const t = Number(llmMaxTokens);
-              if (!Number.isInteger(t) || t < 2048 || t > 32768) {
-                return res.status(400).json({ error: 'llmMaxTokens must be an integer between 2048 and 32768.' });
-              }
-              updateData.llmMaxTokens = t;
+              const r = validateLlmMaxTokens(llmMaxTokens);
+              if (!r.ok) return res.status(400).json({ error: r.error });
+              updateData.llmMaxTokens = r.value;
             }
 
             // Timezone offset (minutes from UTC, e.g. 480 for UTC+8)
@@ -283,20 +294,15 @@ class UserController {
 
             // Handle retentionEnabled if provided
             if (req.body.retentionEnabled !== undefined) {
-              if (typeof req.body.retentionEnabled !== 'boolean') {
-                return res.status(400).json({ error: 'retentionEnabled must be a boolean.' });
-              }
+              const r = validateRetentionEnabled(req.body.retentionEnabled);
+              if (!r.ok) return res.status(400).json({ error: r.error });
               updateData.retentionEnabled = req.body.retentionEnabled;
             }
 
             // Handle retentionDays if provided
             if (req.body.retentionDays !== undefined) {
-              if (typeof req.body.retentionDays !== 'number' || !Number.isInteger(req.body.retentionDays)) {
-                return res.status(400).json({ error: 'retentionDays must be an integer.' });
-              }
-              if (req.body.retentionDays < 90 || req.body.retentionDays > 365) {
-                return res.status(400).json({ error: 'retentionDays must be between 90 and 365.' });
-              }
+              const r = validateRetentionDays(req.body.retentionDays);
+              if (!r.ok) return res.status(400).json({ error: r.error });
               updateData.retentionDays = req.body.retentionDays;
             }
 
@@ -352,27 +358,10 @@ class UserController {
 
             // Re-fetch the full settings row to return complete state
             const current = await Settings.getSingleton();
-            res.json({
+            res.json(settingsView(current, {
                 disableRegistration: current.disableRegistration || envDisabled,
-                hasUploadApiToken: Boolean(current.uploadApiToken || runtime.isFromEnv()),
-                tokenFromEnv: runtime.isFromEnv(),
-                hasLlmProvider: Boolean(current.llmProvider),
-                llmProvider: current.llmProvider || null,
-                llmModel: current.llmModel || null,
-                llmEndpoint: current.llmEndpoint || null,
-                hasLlmApiKey: Boolean(current.llmApiKeyEnc),
-                vehicleMake: current.vehicleMake || null,
-                vehicleModel: current.vehicleModel || null,
-                vehicleYear: current.vehicleYear || null,
-                engineCc: current.engineCc || null,
-                llmThinkingMode: current.llmThinkingMode ?? true,
-                llmReasoningEffort: current.llmReasoningEffort || 'high',
-                llmMaxTokens: current.llmMaxTokens || 16384,
-                timezoneOffset: current.timezoneOffset ?? 0,
-                retentionEnabled: current.retentionEnabled ?? false,
-                retentionDays: current.retentionDays ?? 365,
                 retentionPolicyApplied: policyApplied,
-            });
+            }));
         } catch (err) {
             console.error(err.message || err);
             res.status(500).json({ error: 'Internal server error' });
@@ -428,6 +417,10 @@ class UserController {
             // Update password (beforeUpdate hook will hash it)
             await user.update({ password: newPassword });
 
+            // Invalidate the deserializeUser cache so the next request re-reads
+            // this user from the DB instead of serving a pre-change snapshot.
+            userByIdCache.del(user.id);
+
             // Regenerate session to invalidate all other sessions for this user
             req.session.regenerate((err) => {
                 if (err) {
@@ -449,4 +442,36 @@ class UserController {
     }
 }
 
+// ── Settings projection helper ──────────────────────────────────────────────
+// Single source of truth for the settings response shape. Callers pass extras
+// (e.g. disableRegistration override, retentionPolicyApplied) via the second
+// argument which is spread on top of the base fields.
+function settingsView(settings, extras = {}) {
+    return {
+        disableRegistration: settings.disableRegistration || false,
+        hasUploadApiToken: Boolean(settings.uploadApiToken || runtime.isFromEnv()),
+        tokenFromEnv: runtime.isFromEnv(),
+        hasLlmProvider: Boolean(settings.llmProvider),
+        llmProvider: settings.llmProvider || null,
+        llmModel: settings.llmModel || null,
+        llmEndpoint: settings.llmEndpoint || null,
+        hasLlmApiKey: Boolean(settings.llmApiKeyEnc),
+        vehicleMake: settings.vehicleMake || null,
+        vehicleModel: settings.vehicleModel || null,
+        vehicleYear: settings.vehicleYear || null,
+        engineCc: settings.engineCc || null,
+        llmThinkingMode: settings.llmThinkingMode ?? true,
+        llmReasoningEffort: settings.llmReasoningEffort || 'high',
+        llmMaxTokens: settings.llmMaxTokens || 16384,
+        timezoneOffset: settings.timezoneOffset ?? 0,
+        retentionEnabled: settings.retentionEnabled ?? false,
+        retentionDays: settings.retentionDays ?? 365,
+        ...extras,
+    };
+}
+
 module.exports = UserController;
+
+// Expose the settings projection helper so tests assert against the real
+// response shape (single source of truth) instead of local re-implementations.
+module.exports.settingsView = settingsView;

@@ -1,0 +1,2 @@
+-- Upload API token column (already added in 002_settings.sql).
+-- This file exists for migration numbering consistency.

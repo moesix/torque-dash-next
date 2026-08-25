@@ -51,6 +51,16 @@ export default function PlaybackControls({ frames }: Props) {
     setCursorTime(Number(e.target.value));
   };
 
+  // Pressing Play once the cursor has reached the end would otherwise advance
+  // past `end` on the first tick and pause again immediately (nothing visible
+  // happens). Restart from the beginning instead.
+  const handlePlayPause = () => {
+    if (!isPlaying && cursorTime != null && cursorTime >= end) {
+      setCursorTime(start); // replay from the beginning
+    }
+    isPlaying ? pause() : play();
+  };
+
   const span = end - start;
   const pct =
     span > 0 && cursorTime != null
@@ -64,7 +74,7 @@ export default function PlaybackControls({ frames }: Props) {
       <div className="flex flex-wrap items-center gap-3">
         <button
           type="button"
-          onClick={() => (isPlaying ? pause() : play())}
+          onClick={handlePlayPause}
           className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white
             shadow-xs transition hover:bg-indigo-700
             focus:outline-none focus:ring-2 focus:ring-indigo-500/20

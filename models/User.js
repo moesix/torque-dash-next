@@ -17,13 +17,18 @@ module.exports = (sequelize, DataTypes) => {
             type: DataTypes.STRING,
             unique: true
         },
+        tokenVersion: {
+            type: DataTypes.INTEGER,
+            defaultValue: 0,
+            allowNull: false,
+        },
         forwardUrls: {
             type: DataTypes.ARRAY(DataTypes.STRING)
         }
     }, {
         hooks: {
-            beforeCreate: hashPassword,
-            beforeUpdate: hashPassword,
+            beforeCreate: [hashPassword, normalizeEmail],
+            beforeUpdate: [hashPassword, normalizeEmail],
         }
     }
     );
@@ -67,4 +72,13 @@ async function hashPassword (user) {
     const salt = await bcrypt.genSalt(SALT_FACTOR);
     let hash = await bcrypt.hash(user.password, salt);
     await user.setDataValue('password', hash);
+}
+
+// Normalize the identity boundary: emails are always stored lowercase so
+// lookups (login, upload resolveUser, register dup-check) match migration
+// 015's folded rows. Runs after hashPassword in both create/update chains.
+async function normalizeEmail (user) {
+    if (user.changed('email') && user.email) {
+        user.email = user.email.toLowerCase();
+    }
 }

@@ -1,236 +1,152 @@
 'use strict';
 
-const { test } = require('node:test');
+// Set dummy env vars BEFORE any module loading so config.js doesn't throw.
+process.env.DATABASE_URL = process.env.DATABASE_URL || 'postgres://x:x@localhost/x';
+process.env.SESSION_KEYS = process.env.SESSION_KEYS || 'abc123';
+
+const { test, describe } = require('node:test');
 const assert = require('node:assert');
-const express = require('express');
 
-// ── Helpers ───────────────────────────────────────────────────────────────
+// ── Pre-populate require.cache for ../models ────────────────────────
+// SessionController requires ../models at the top level.  models/index.js
+// creates a real Sequelize instance, which we don't need in unit tests.
+// We pre-populate the require cache with mock models so the controller
+// gets our stubs instead of loading the real module.
 
-/**
- * Minimal Express app that mimics SessionController routing for testing
- * validation and parameter patterns without a real database.
- */
-function createTestApp() {
-  const app = express();
-  app.use(express.json());
+const mockModels = {
+  Session: {
+    findOne: async () => null,
+    findAll: async () => [],
+    count: async () => 0,
+    update: async () => [0],
+    create: async () => ({}),
+    destroy: async () => 0,
+  },
+  Log: {
+    count: async () => 0,
+    findAll: async () => [],
+    destroy: async () => 0,
+  },
+  User: { findOne: async () => null },
+  Vehicle: { findOne: async () => null },
+  sequelize: {
+    transaction: async (fn) => fn({}),
+    query: async () => [],
+    fn: () => {},
+    col: () => {},
+  },
+  Sequelize: { Op: { and: Symbol('and'), gt: Symbol('gt'), lte: Symbol('lte') } },
+};
 
-  // Mock auth middleware — sets req.user.id
-  app.use((req, _res, next) => {
-    req.user = { id: 1 };
-    next();
-  });
+// Resolve the absolute path that `require('../models')` resolves to from
+// controllers/SessionController.js, then inject our mock into the cache.
+const modelsPath = require.resolve('../models');
+require.cache[modelsPath] = {
+  id: modelsPath,
+  filename: modelsPath,
+  loaded: true,
+  exports: mockModels,
+};
 
-  // ── Plan 022: copy null-check ──────────────────────────────────────
-  app.post('/sessions/:sessionId/copy', (req, res) => {
-    // Simulates the copy method: findOne returns null for bad IDs
-    const session = null; // pretend session not found
-    if (!session) return res.sendStatus(404);
-    res.sendStatus(200);
-  });
+// ── Now safe to require the controller ──────────────────────────────
+const SessionController = require('../controllers/SessionController');
 
-  // ── Plan 023: rename/addLocation affected-count ────────────────────
-  app.patch('/sessions/:sessionId/rename', (req, res) => {
-    // Simulates Session.update returning 0 affected rows
-    const affectedCount = 0;
-    if (affectedCount === 0) return res.sendStatus(404);
-    res.sendStatus(200);
-  });
+// ── Helpers ─────────────────────────────────────────────────────────
 
-  app.put('/sessions/:sessionId/location', (req, res) => {
-    const affectedCount = 0;
-    if (affectedCount === 0) return res.sendStatus(404);
-    res.sendStatus(200);
-  });
-
-  // ── Plan 024: cut validation ───────────────────────────────────────
-  app.delete('/sessions/:sessionId/cut', (req, res) => {
-    const { from, to } = req.body;
-
-    if (!from || !to) {
-      return res.status(400).json({ error: 'Missing required fields: from, to' });
-    }
-
-    const startDate = new Date(from);
-    const endDate = new Date(to);
-
-    if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
-      return res.status(400).json({ error: 'Invalid date format for from/to' });
-    }
-
-    if (startDate > endDate) {
-      return res.status(400).json({ error: 'from must be before or equal to to' });
-    }
-
-    res.sendStatus(200);
-  });
-
-  return app;
+function makeStubReq(overrides = {}) {
+  return {
+    user: { id: 1 },
+    params: { sessionId: 's1' },
+    body: {},
+    query: {},
+    ...overrides,
+  };
 }
 
-function startServer(app) {
-  return new Promise((resolve) => {
-    const server = app.listen(0, '127.0.0.1', () => {
-      const { port } = server.address();
-      resolve({ server, base: `http://127.0.0.1:${port}` });
-    });
-  });
+function makeStubRes() {
+  const calls = { status: null, body: null, statusCode: null };
+  const res = {
+    status(code) { calls.statusCode = code; calls.status = code; return res; },
+    json(obj) { calls.body = obj; return res; },
+    sendStatus(code) { calls.statusCode = code; calls.status = code; return res; },
+    send(data) { calls.body = data; return res; },
+    setHeader() { return res; },
+    set() { return res; },
+    write() { return res; },
+    end() { return res; },
+  };
+  return { res, calls };
 }
 
-// ── Plan 022: copy null-check tests ───────────────────────────────────────
+// ── Tests ───────────────────────────────────────────────────────────
 
-test('Plan 022: POST /sessions/:nonexistent/copy returns 404', async () => {
-  const app = createTestApp();
-  const { server, base } = await startServer(app);
-  try {
-    const r = await fetch(`${base}/sessions/nonexistent/copy`, { method: 'POST' });
-    assert.strictEqual(r.status, 404);
-  } finally {
-    server.close();
-  }
-});
+describe('SessionController (with mocked models)', () => {
 
-// ── Plan 023: rename/addLocation silent-success tests ─────────────────────
+  // ── rename ──────────────────────────────────────────────────────
 
-test('Plan 023: PATCH /sessions/:nonexistent/rename returns 404 when 0 rows affected', async () => {
-  const app = createTestApp();
-  const { server, base } = await startServer(app);
-  try {
-    const r = await fetch(`${base}/sessions/nonexistent/rename`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: 'New Name' }),
-    });
-    assert.strictEqual(r.status, 404);
-  } finally {
-    server.close();
-  }
-});
+  test('rename returns 404 when affectedCount is 0', async () => {
+    const req = makeStubReq({ params: { sessionId: 'nonexistent' }, body: { name: 'New' } });
+    const { res, calls } = makeStubRes();
+    await SessionController.rename(req, res);
+    assert.strictEqual(calls.statusCode, 404);
+  });
 
-test('Plan 023: PUT /sessions/:nonexistent/location returns 404 when 0 rows affected', async () => {
-  const app = createTestApp();
-  const { server, base } = await startServer(app);
-  try {
-    const r = await fetch(`${base}/sessions/nonexistent/location`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ locations: { start: {}, end: {} } }),
-    });
-    assert.strictEqual(r.status, 404);
-  } finally {
-    server.close();
-  }
-});
+  // ── updateNotes ─────────────────────────────────────────────────
 
-// ── Plan 024: cut validation tests ────────────────────────────────────────
+  test('updateNotes returns 400 for non-string notes', async () => {
+    const req = makeStubReq({ body: { notes: 123 } });
+    const { res, calls } = makeStubRes();
+    await SessionController.updateNotes(req, res);
+    assert.strictEqual(calls.statusCode, 400);
+  });
 
-test('Plan 024: cut without from returns 400', async () => {
-  const app = createTestApp();
-  const { server, base } = await startServer(app);
-  try {
-    const r = await fetch(`${base}/sessions/1/cut`, {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ to: '2026-01-02' }),
-    });
-    assert.strictEqual(r.status, 400);
-    const body = await r.json();
-    assert.ok(body.error.includes('Missing'));
-  } finally {
-    server.close();
-  }
-});
+  // ── cut validation ──────────────────────────────────────────────
 
-test('Plan 024: cut without to returns 400', async () => {
-  const app = createTestApp();
-  const { server, base } = await startServer(app);
-  try {
-    const r = await fetch(`${base}/sessions/1/cut`, {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from: '2026-01-01' }),
-    });
-    assert.strictEqual(r.status, 400);
-    const body = await r.json();
-    assert.ok(body.error.includes('Missing'));
-  } finally {
-    server.close();
-  }
-});
+  test('cut returns 400 when from is missing', async () => {
+    const req = makeStubReq({ body: { to: '2026-01-02' } });
+    const { res, calls } = makeStubRes();
+    await SessionController.cut(req, res);
+    assert.strictEqual(calls.statusCode, 400);
+  });
 
-test('Plan 024: cut with empty body returns 400', async () => {
-  const app = createTestApp();
-  const { server, base } = await startServer(app);
-  try {
-    const r = await fetch(`${base}/sessions/1/cut`, {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({}),
-    });
-    assert.strictEqual(r.status, 400);
-  } finally {
-    server.close();
-  }
-});
+  test('cut returns 400 when to is missing', async () => {
+    const req = makeStubReq({ body: { from: '2026-01-01' } });
+    const { res, calls } = makeStubRes();
+    await SessionController.cut(req, res);
+    assert.strictEqual(calls.statusCode, 400);
+  });
 
-test('Plan 024: cut with invalid date format returns 400', async () => {
-  const app = createTestApp();
-  const { server, base } = await startServer(app);
-  try {
-    const r = await fetch(`${base}/sessions/1/cut`, {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from: 'not-a-date', to: 'also-not-a-date' }),
-    });
-    assert.strictEqual(r.status, 400);
-    const body = await r.json();
-    assert.ok(body.error.includes('Invalid date'));
-  } finally {
-    server.close();
-  }
-});
+  test('cut returns 400 when dates are garbage', async () => {
+    const req = makeStubReq({ body: { from: 'not-a-date', to: 'also-not' } });
+    const { res, calls } = makeStubRes();
+    await SessionController.cut(req, res);
+    assert.strictEqual(calls.statusCode, 400);
+  });
 
-test('Plan 024: cut with from > to returns 400', async () => {
-  const app = createTestApp();
-  const { server, base } = await startServer(app);
-  try {
-    const r = await fetch(`${base}/sessions/1/cut`, {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from: '2026-01-10', to: '2026-01-01' }),
-    });
-    assert.strictEqual(r.status, 400);
-    const body = await r.json();
-    assert.ok(body.error.includes('from must be before'));
-  } finally {
-    server.close();
-  }
-});
+  test('cut returns 400 when from > to', async () => {
+    const req = makeStubReq({ body: { from: '2026-01-10', to: '2026-01-01' } });
+    const { res, calls } = makeStubRes();
+    await SessionController.cut(req, res);
+    assert.strictEqual(calls.statusCode, 400);
+  });
 
-test('Plan 024: cut with valid dates returns 200', async () => {
-  const app = createTestApp();
-  const { server, base } = await startServer(app);
-  try {
-    const r = await fetch(`${base}/sessions/1/cut`, {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from: '2026-01-01', to: '2026-01-02' }),
-    });
-    assert.strictEqual(r.status, 200);
-  } finally {
-    server.close();
-  }
-});
+  // ── filter validation ───────────────────────────────────────────
 
-// ── Plan 021: transaction pass-through (structural test) ──────────────────
+  test('filter returns 400 when filterNumber < 2', async () => {
+    const req = makeStubReq({ body: { filterNumber: 1 } });
+    const { res, calls } = makeStubRes();
+    await SessionController.filter(req, res);
+    assert.strictEqual(calls.statusCode, 400);
+  });
 
-test('Plan 021: copy/join methods use transaction parameter (grep-based)', async () => {
-  const fs = require('fs');
-  const content = fs.readFileSync('controllers/SessionController.js', 'utf8');
+  // ── delete ──────────────────────────────────────────────────────
+  // Fix: now returns 404 JSON (not 401) when session is not found.
 
-  // The actual code uses raw SQL with sequelize.query inside transactions,
-  // so we verify the transaction callback structure exists
-  assert.ok(
-    content.includes('sequelize.transaction'),
-    'SessionController should use sequelize.transaction'
-  );
+  test('delete returns 404 JSON when session not found (ownership miss)', async () => {
+    const req = makeStubReq({ params: { sessionId: 'nonexistent' } });
+    const { res, calls } = makeStubRes();
+    await SessionController.delete(req, res);
+    assert.strictEqual(calls.statusCode, 404);
+    assert.deepStrictEqual(calls.body, { error: 'Session not found' });
+  });
 });

@@ -13,7 +13,6 @@
 const fs = require('fs');
 const path = require('path');
 const { Pool } = require('pg');
-const config = require('../config/config');
 
 const SQL_DIR = path.join(__dirname, '..', 'infra', 'timescale');
 
@@ -22,7 +21,6 @@ function isBenignError(err) {
     const msg = (err && err.message) ? err.message : '';
     return (
         /already exists/i.test(msg) ||
-        /does not exist/i.test(msg) ||
         /duplicate.*constraint/i.test(msg) ||
         /multiple primary keys/i.test(msg) ||
         /relation "log_1min" already exists/i.test(msg) ||
@@ -68,6 +66,7 @@ function loadStatements() {
 }
 
 async function run() {
+    const config = require('../config/config');
     const connectionString = process.env.DATABASE_URL || config.db.uri;
     const pool = new Pool({ connectionString });
 
@@ -94,7 +93,22 @@ async function run() {
     await pool.end();
 }
 
-run().catch((err) => {
-    console.error('[migrate] Unexpected error:', err);
-    process.exitCode = 1;
-});
+if (require.main === module) {
+    run().catch((err) => {
+        console.error('[migrate] Unexpected error:', err);
+        process.exitCode = 1;
+    });
+}
+
+/**
+ * Return the sorted list of migration SQL filenames (e.g. '001_log_hypertable.sql').
+ * Used by tests and diagnostics.
+ */
+function listMigrationFiles() {
+    return fs
+        .readdirSync(SQL_DIR)
+        .filter((f) => f.endsWith('.sql'))
+        .sort();
+}
+
+module.exports = { listMigrationFiles, isBenignError };

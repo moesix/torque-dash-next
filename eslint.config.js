@@ -19,7 +19,7 @@ module.exports = [
   },
   {
     ignores: [
-      'apps/frontend/dist/',
+      'apps/frontend/',
       'node_modules/',
     ],
   },

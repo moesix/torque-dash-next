@@ -21,9 +21,11 @@ A self-hosted dashboard for [Torque Pro](https://torque-bhp.com/) vehicle teleme
 | **BYOK AI analysis** | Connect your own LLM (OpenAI, Anthropic, DeepSeek, Ollama, or any OpenAI-compatible endpoint) for per-session diagnostic insights. |
 | **DeepSeek first-class** | `deepseek-v4-flash` / `deepseek-v4-pro` with chain-of-thought Thinking Mode and configurable reasoning effort (High / Max). |
 | **PID decode engine** | Auto-discovers every OBD-II parameter from Torque's `values` JSONB — no schema changes when you add new PIDs. |
-| **Session management** | Auto-named trips (`Trip DDMMYYYY HH:MM AM/PM`), inline rename, shareable links. |
+| **Session management** | Auto-named trips (`Trip DDMMYYYY HH:MM AM/PM`), inline rename, shareable links, freeform notes with auto-save. |
+| **Multi-vehicle support** | Define named vehicle profiles (make, model, year, engine size), assign sessions to vehicles, filter session list by vehicle. |
+| **Cross-vehicle analysis history** | Browse and export all AI analyses across sessions and vehicles in one view — paginated, filterable, exportable as Markdown. |
 | **Configurable data retention** | Opt-in TimescaleDB retention policy auto-deletes telemetry older than 90/120/180/365 days — off by default (all data kept indefinitely), toggled from the Settings page. |
-| **API-key upload auth** | Optional `UPLOAD_API_TOKEN` Bearer authentication for Torque Pro uploads — requests presenting a matching token skip the per-IP rate limiter so reconnect bursts are never throttled. |
+| **API-key upload auth** | Token authentication is **required** for Torque Pro uploads (`UPLOAD_API_TOKEN` — the 2026 security baseline); requests presenting a matching token also skip the per-IP rate limiter so reconnect bursts are never throttled. |
 | **React Router v8** | Frontend routing on `react-router` 8.3.0 (exact pin, replacing `react-router-dom`), resolving the remaining react-router Dependabot advisories including the v8-CSRF advisory fixed only in 8.3.0. |
 
 ## Quick start
@@ -38,13 +40,16 @@ curl -O https://raw.githubusercontent.com/moesix/torque-dash-next/master/.env.ex
 cp .env.example .env
 nano .env
 
+# Generate an upload API token (required for production) and set it in .env
+openssl rand -hex 24  # for UPLOAD_API_TOKEN
+
 # Start the stack
 docker compose up -d
 ```
 
 Then open **http://localhost:8080**.
 
-> The app **will not start** without `DATABASE_URL` and `SESSION_KEYS`. Generate them with `openssl rand -base64 24` and `openssl rand -hex 24` respectively. See the full config reference below.
+> The app **will not start** without `DATABASE_URL` and `SESSION_KEYS`. Generate them with `openssl rand -base64 24` and `openssl rand -hex 24` respectively. As of 2026, `UPLOAD_API_TOKEN` is the required security baseline for uploads: generate it with `openssl rand -hex 24` and set it in `.env`, or generate one from the Settings page after first login. See the full config reference below.
 
 ## Connect Torque Pro
 
@@ -156,7 +161,7 @@ After creating all user accounts, disable public registration via the Settings U
 | `COOKIE_SAMESITE` | `lax` | `SameSite` policy for session cookies. |
 | `CORS_ORIGINS` | _(empty)_ | Comma-separated allowed origins for cross-origin API access. Also serves as the CSRF trust list. |
 | `PUBLIC_ORIGIN` | _(unset)_ | Overrides the expected CSRF origin. Set when nginx terminates HTTPS but forwards HTTP to the backend. |
-| `UPLOAD_API_TOKEN` | _(unset)_ | If set, uploads require `Authorization: Bearer <token>`. Can also be generated from the Settings UI. |
+| `UPLOAD_API_TOKEN` | **REQUIRED for production** | Uploads require `Authorization: Bearer <token>`; without a matching header they return 401. Set here — the env value wins and locks the Settings UI — or generate from the Settings page after first login. |
 | `UPLOAD_RATE_LIMIT_MAX` | `600` | Max uploads per window per IP. |
 | `UPLOAD_RATE_LIMIT_WINDOW_MS` | `60000` | Upload rate-limit window in milliseconds. |
 | `AUTH_RATE_LIMIT_MAX` | `10` | Max login/register requests per window per IP. |
@@ -174,7 +179,7 @@ For detailed deployment instructions, troubleshooting, and reverse proxy setup, 
 
 ## Security
 
-**Upload authentication:** When `UPLOAD_API_TOKEN` is set, all uploads must include `Authorization: Bearer <token>`. Email alone is no longer sufficient. If upgrading, add your token in Torque Pro → *Settings → Advanced → HTTP Auth Token*. Requests presenting a matching token **bypass the upload rate limiter** — the known uploader's reconnect bursts are never `429`'d, and the exemption is keyed on the secret token, not a spoofable query param.
+**Upload authentication:** Uploads require `Authorization: Bearer <token>` with your configured `UPLOAD_API_TOKEN` — token authentication is mandatory (the 2026 baseline), and email alone is never sufficient once a token exists. Email-only ingestion happens only when no token is configured anywhere (env or Settings UI) — a discouraged bootstrap mode that is insecure for production and should be closed off before exposing the server. If upgrading, add your token in Torque Pro → *Settings → Advanced → HTTP Auth Token*. Requests presenting a matching token **bypass the upload rate limiter** — the known uploader's reconnect bursts are never `429`'d, and the exemption is keyed on the secret token, not a spoofable query param.
 
 **Password changes:** Users can change their password via `POST /api/users/change-password`. This validates the current password, enforces a minimum length of 8 characters, and invalidates all other sessions. Bcrypt salt factor is 10.
 

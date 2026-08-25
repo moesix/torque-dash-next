@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node app.js",
     "lint": "eslint .",
-    "test": "node --test",
+    "test": "node --test 'test/*.test.js' && node scripts/checkMirrors.js && node scripts/checkTestIntegrity.js",
+    "test:coverage": "c8 node --test 'test/*.test.js' && node scripts/checkMirrors.js && node scripts/checkTestIntegrity.js",
     "prepare": "husky || true"
   },
   "keywords": [],
@@ -14,6 +15,7 @@
   "license": "MIT",
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "c8": "^12.0.0",
     "eslint": "^10.8.0",
     "globals": "^17.9.0",
     "husky": "^9.1.7",
@@ -22,7 +24,6 @@
   },
   "dependencies": {
     "bcrypt": "^6.0.0",
-    "connect-flash": "^0.1.1",
     "connect-pg-simple": "^10.0.0",
     "cors": "^2.8.6",
     "express": "^4.21.2",
@@ -30,7 +31,7 @@
     "express-session": "^1.19.0",
     "helmet": "^8.3.0",
     "joi": "^18.2.3",
-    "nanoid": "^3.3.7",
+    "nanoid": "^3.3.18",
     "passport": "^0.7.0",
     "passport-local": "^1.0.0",
     "pg": "^8.22.0",
