@@ -624,3 +624,6 @@ function csvEscape(val) {
 }
 
 module.exports = SessionController;
+module.exports.formatDuration = formatDuration;
+module.exports.sanitizeFilename = sanitizeFilename;
+module.exports.csvEscape = csvEscape;
