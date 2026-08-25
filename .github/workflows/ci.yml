@@ -16,6 +16,9 @@ concurrency:
 jobs:
   backend-checks:
     runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgres://ci:ci@localhost:5432/ci
+      SESSION_KEYS: ci-test-key-for-config-loading
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -31,6 +34,9 @@ jobs:
 
       - name: Run backend tests
         run: npm test
+
+      - name: Test coverage
+        run: npm run test:coverage
 
       - name: Run ESLint
         run: npm run lint
