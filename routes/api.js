@@ -134,3 +134,4 @@ router.delete('/sessions/:sessionId/analyses/:analysisId', authenticate, Analysi
 
 
 module.exports = router;
+module.exports.makeLimiter = makeLimiter;
