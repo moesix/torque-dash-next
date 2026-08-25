@@ -6,7 +6,6 @@ process.env.SESSION_KEYS = process.env.SESSION_KEYS || 'abc123';
 
 const { test, describe } = require('node:test');
 const assert = require('node:assert');
-const path = require('path');
 
 // ── Pre-populate require.cache for ../models ────────────────────────
 // SessionController requires ../models at the top level.  models/index.js
