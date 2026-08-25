@@ -39,7 +39,7 @@ class AnalysisController {
       const seconds = durationSec % 60;
       const durationStr = [hours, minutes, seconds].map(n => String(n).padStart(2, '0')).join(':');
 
-      // 4. Fetch telemetry sample (first 50 + last 50 + random 100 for large sessions)
+      // 4. Fetch telemetry sample (first 50 + last 50 + evenly-spaced 100 for large sessions)
       const [countResult] = await sequelize.query(
         `SELECT COUNT(*) AS cnt FROM "Logs" WHERE "sessionId" = :sessionId`,
         { replacements: { sessionId: session.id } }
@@ -56,8 +56,8 @@ class AnalysisController {
           raw: true,
         });
       } else {
-        // Large session: first 50 + last 50 + random 100 in between
-        const [firstBatch, lastBatch, randomBatch] = await Promise.all([
+        // Large session: first 50 + last 50 + evenly-spaced 100 in between
+        const [firstBatch, lastBatch] = await Promise.all([
           Log.findAll({
             where: { sessionId: session.id },
             attributes: ['timestamp', 'lat', 'lon', 'engine_rpm', 'vehicle_speed', 'values'],
@@ -72,15 +72,28 @@ class AnalysisController {
             limit: 50,
             raw: true,
           }),
-          /* Random 100 via raw SQL — Sequelize doesn't have ORDER BY RANDOM() */
-          sequelize.query(`
-            SELECT "timestamp", lat, lon, engine_rpm, vehicle_speed, values
-            FROM "Logs"
-            WHERE "sessionId" = :sessionId
-            ORDER BY random()
-            LIMIT 100
-          `, { replacements: { sessionId: session.id }, type: sequelize.QueryTypes.SELECT }),
         ]);
+
+        // Deterministic even coverage across the whole session: index-only id scan,
+        // evenly-spaced pick in JS, then one primary-key fetch for the sampled rows.
+        const idRows = await sequelize.query(
+          `SELECT id FROM "Logs" WHERE "sessionId" = :sessionId ORDER BY id`,
+          { replacements: { sessionId: session.id }, type: sequelize.QueryTypes.SELECT }
+        );
+        const ids = idRows.map(r => r.id);
+        const target = Math.min(100, ids.length);
+        const step = Math.max(1, Math.floor(ids.length / target));
+        const sampledIds = [];
+        for (let i = 0; i < ids.length && sampledIds.length < target; i += step) {
+          sampledIds.push(ids[i]);
+        }
+        let randomBatch = [];
+        if (sampledIds.length > 0) {
+          randomBatch = await sequelize.query(
+            `SELECT * FROM "Logs" WHERE id IN (:ids) ORDER BY id`,
+            { replacements: { ids: sampledIds }, type: sequelize.QueryTypes.SELECT }
+          );
+        }
         sample = [...firstBatch, ...randomBatch, ...lastBatch];
       }
 
@@ -96,21 +109,28 @@ class AnalysisController {
       res.setHeader('Connection', 'keep-alive');
       res.flushHeaders();
 
-      // 7. Call LLM and stream response
-      const { response: llmRes, abortController: llmAbort } = await analyze(prompt, settings);
+      // 7. Abort as soon as the client goes away — covers prompt build +
+      // provider connect, not just the mid-stream phase.
+      const clientGone = new AbortController();
+      req.on('close', () => clientGone.abort());
 
-      // Cancel LLM API call if client disconnects mid-stream (saves cost)
-      req.on('close', () => {
-        llmAbort.abort();
-      });
+      const { response: llmRes, abortController: llmAbort, timeout } =
+        await analyze(prompt, settings);
+      clientGone.signal.addEventListener('abort', () => llmAbort.abort(), { once: true });
 
       let fullResponse = '';
       let fullReasoning = '';
 
-      for await (const evt of streamEvents(llmRes)) {
-        if (evt.type === 'content') fullResponse += evt.text;
-        else if (evt.type === 'reasoning') fullReasoning += evt.text;
-        res.write(`data: ${JSON.stringify(evt)}\n\n`);
+      // The 120s provider timeout stays armed through the whole body read;
+      // always disarm it when streaming finishes or throws.
+      try {
+        for await (const evt of streamEvents(llmRes)) {
+          if (evt.type === 'content') fullResponse += evt.text;
+          else if (evt.type === 'reasoning') fullReasoning += evt.text;
+          res.write(`data: ${JSON.stringify(evt)}\n\n`);
+        }
+      } finally {
+        clearTimeout(timeout);
       }
 
       // 8. Cache the analysis (BEFORE signaling done so listAnalyses finds it)
@@ -276,12 +296,25 @@ class AnalysisController {
         return res.status(400).json({ error: 'LLM provider not configured' });
       }
 
+      // Abort as soon as the client goes away — covers prompt build +
+      // provider connect, not just the mid-stream phase.
+      const clientGone = new AbortController();
+      req.on('close', () => clientGone.abort());
+
       const testPrompt = 'Say "Connection successful" and nothing else.';
-      const { response: llmRes } = await analyze(testPrompt, settings, { maxTokens: 20 });
+      const { response: llmRes, abortController: llmAbort, timeout } =
+        await analyze(testPrompt, settings, { maxTokens: 20 });
+      clientGone.signal.addEventListener('abort', () => llmAbort.abort(), { once: true });
 
       let text = '';
-      for await (const evt of streamEvents(llmRes)) {
-        text += evt.text;
+      // The 120s provider timeout stays armed through the whole body read;
+      // always disarm it when streaming finishes or throws.
+      try {
+        for await (const evt of streamEvents(llmRes)) {
+          text += evt.text;
+        }
+      } finally {
+        clearTimeout(timeout);
       }
 
       res.json({ ok: true, response: text.trim(), provider: settings.llmProvider });

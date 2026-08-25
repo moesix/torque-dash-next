@@ -130,7 +130,7 @@ class SessionController {
             // Single aggregate query for start/end + max speed/RPM.
             const summaries = await aggregateSummaries([session.id]);
             const s = summaries.get(session.id) || {};
-            const out = decorateWithSummaries(session, s);
+            const out = safeSharedSession(session, s);
             res.json(out);
         }
         catch (err) {
@@ -146,18 +146,26 @@ class SessionController {
             });
             if(!user) return res.status(404).json({ error: 'User not found' });
 
-            // Get all sessions for user (no eager Log load)
-            let sessions = await Session.findAll({
-                where: { userId: user.id }
-            });
+            // One page of sessions (defaults: 50 per page, newest first).
+            const limit = Math.min(parseInt(req.query.limit, 10) || 50, 200);
+            const offset = parseInt(req.query.offset, 10) || 0;
 
-            // ONE grouped aggregate query across every session id — never per-session.
-            const summaries = await aggregateSummaries(sessions.map(s => s.id));
-            const out = sessions.map(session => {
-                const s = summaries.get(session.id) || {};
-                return decorateWithSummaries(session, s);
+            const where = { userId: user.id };
+            let sessions = await Session.findAll({
+                where,
+                limit,
+                offset,
+                order: [['createdAt', 'DESC']],
             });
-            res.json(out);
+            const total = await Session.count({ where });
+
+            // Aggregate ONLY the fetched page's ids — never the owner's full history.
+            const summaries = await aggregateSummaries(sessions.map(s => s.id));
+            const out = sessions.map(session =>
+                safeSharedSession(session, summaries.get(session.id) || {})
+            );
+            res.set('Cache-Control', 'public, max-age=30');
+            res.json({ sessions: out, total, limit, offset });
         }
         catch (err) {
             console.error('[SessionController]', err);

@@ -42,6 +42,11 @@ class UserController {
             // Get userdata from request
             let { email, password } = req.body;
 
+            // Normalize identity boundary: lowercase BEFORE the duplicate-check
+            // findOne AND the create, so mixed-case input can never re-split
+            // an identity that migration 015 already folded.
+            email = String(email || '').toLowerCase();
+
             // Validate if user data ok
             const { error } = User.validate(req.body);
             if (error) {

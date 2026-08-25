@@ -13,7 +13,6 @@
  */
 const Log = require('../models').Log;
 const Session = require('../models').Session;
-const sequelize = require('../models').sequelize;
 
 const BATCH_SIZE = 1000;
 const FLUSH_MS = 1000;
@@ -36,6 +35,12 @@ function toLogRow(item) {
 }
 
 let flushing = false;
+
+// JS-side LEAST/GREATEST equivalents that COALESCE NULLs (either side null
+// yields the other candidate; both non-null yields the min/max).
+function minDate(a, b) { if (a == null) return b; if (b == null) return a; return b < a ? b : a; }
+function maxDate(a, b) { if (a == null) return b; if (b == null) return a; return b > a ? b : a; }
+function maxNum(a, b)  { if (a == null) return b; if (b == null) return a; return b > a ? b : a; }
 
 async function flush() {
     if (flushing || buffer.length === 0) return;
@@ -66,22 +71,40 @@ async function flush() {
         flushing = false;
     }
 
-    // Denormalize summary columns on affected sessions using LEAST/GREATEST
-    // so concurrent ingests never overwrite a wider range.
-    // Runs OUTSIDE the main try/catch so a summary-update failure never
-    // re-queues rows that were already successfully written to the Log table.
+    // Merge this batch's min/max into the denormalized summary columns so
+    // list views read Sessions instead of scanning Logs. Values are computed
+    // in JS from the batch we already hold and bound as parameters — no SQL
+    // aliases, no literal fragments (a previous version referenced a nonexistent
+    // "sub" alias and silently failed on every flush). Stats are derived from
+    // toLogRow-shaped rows ({ timestamp, engine_rpm, vehicle_speed }) because
+    // the raw buffered items use different key names (time/engineRpm/...).
     try {
-        const sessionIds = [...new Set(batch.map(r => r.sessionId))];
-        if (sessionIds.length > 0) {
-            await Session.update({
-                firstTimestamp: sequelize.literal(`LEAST(COALESCE("Sessions"."firstTimestamp", sub.min_ts), sub.min_ts)`),
-                lastTimestamp: sequelize.literal(`GREATEST(COALESCE("Sessions"."lastTimestamp", sub.max_ts), sub.max_ts)`),
-                maxRpm: sequelize.literal(`GREATEST(COALESCE("Sessions"."maxRpm", sub.max_rpm), sub.max_rpm)`),
-                maxSpeed: sequelize.literal(`GREATEST(COALESCE("Sessions"."maxSpeed", sub.max_speed), sub.max_speed)`),
-            }, {
-                where: { id: sessionIds },
-                replacements: {},
+        const rows = batch.map(toLogRow);
+        const stats = new Map(); // sessionId -> {minTs, maxTs, maxRpm, maxSpeed}
+        for (const r of rows) {
+            let s = stats.get(r.sessionId);
+            if (!s) stats.set(r.sessionId, s = {});
+            if (r.timestamp != null && (s.minTs === undefined || r.timestamp < s.minTs)) s.minTs = r.timestamp;
+            if (r.timestamp != null && (s.maxTs === undefined || r.timestamp > s.maxTs)) s.maxTs = r.timestamp;
+            if (r.engine_rpm != null && (s.maxRpm === undefined || r.engine_rpm > s.maxRpm)) s.maxRpm = r.engine_rpm;
+            if (r.vehicle_speed != null && (s.maxSpeed === undefined || r.vehicle_speed > s.maxSpeed)) s.maxSpeed = r.vehicle_speed;
+        }
+
+        // One update per affected session, merging against current column values.
+        // COALESCE handles the NULL (never-backfilled) case; LEAST/GREATEST run
+        // in JS because both candidates are known here.
+        for (const [sessionId, s] of stats) {
+            const existing = await Session.findByPk(sessionId, {
+                attributes: ['id', 'firstTimestamp', 'lastTimestamp', 'maxRpm', 'maxSpeed'],
             });
+            if (!existing) continue;
+            const merged = {
+                firstTimestamp: minDate(existing.firstTimestamp, s.minTs),
+                lastTimestamp: maxDate(existing.lastTimestamp, s.maxTs),
+                maxRpm: maxNum(existing.maxRpm, s.maxRpm ?? null),
+                maxSpeed: maxNum(existing.maxSpeed, s.maxSpeed ?? null),
+            };
+            await Session.update(merged, { where: { id: sessionId } });
         }
     } catch (err) {
         console.error('[ingestBuffer] summary update failed:', err.message);

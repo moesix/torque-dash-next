@@ -54,6 +54,12 @@ function loadWithMocks(mockModels) {
   const originalSCCache = require.cache[scPath];
   delete require.cache[scPath];
 
+  // Also manage the ingestBuffer module cache so tests can drive the REAL
+  // flush() against mocked models (fresh module => fresh empty buffer).
+  const ibPath = require.resolve('../services/ingestBuffer');
+  const originalIBCache = require.cache[ibPath];
+  delete require.cache[ibPath];
+
   return {
     restore() {
       if (originalCache) {
@@ -65,6 +71,11 @@ function loadWithMocks(mockModels) {
         require.cache[scPath] = originalSCCache;
       } else {
         delete require.cache[scPath];
+      }
+      if (originalIBCache) {
+        require.cache[ibPath] = originalIBCache;
+      } else {
+        delete require.cache[ibPath];
       }
     }
   };
@@ -257,6 +268,161 @@ describe('ingestBuffer — has LEAST/GREATEST summary merge', () => {
     assert.ok(bufSrc.includes('GREATEST'), 'ingestBuffer should use GREATEST for lastTimestamp/maxRpm/maxSpeed merge');
     assert.ok(bufSrc.includes('COALESCE'), 'ingestBuffer should use COALESCE to handle NULL existing values');
     assert.ok(bufSrc.includes('Session.update'), 'ingestBuffer should call Session.update');
+    // Regression guards for plan 073: the old literal-SQL block referenced a
+    // nonexistent "sub" alias and silently failed every flush. The merge must
+    // stay in JS with plain bound parameters — no SQL literal fragments.
+    assert.ok(!bufSrc.includes('sequelize.literal'),
+      'ingestBuffer must not use sequelize.literal (broken sub-alias history)');
+    assert.ok(!bufSrc.includes('sub.'),
+      'ingestBuffer must not reference a "sub." SQL alias');
+  });
+});
+
+describe('flush — real-path summary merge through ingestBuffer', () => {
+  // Drives the ACTUAL flush() with mocked models capturing arguments.
+  function makeFlushMocks({ findByPkResult }) {
+    const updateCalls = [];
+    const findByPkCalls = [];
+    let bulkCreateCalls = 0;
+    return {
+      updateCalls,
+      findByPkCalls,
+      mockModels: {
+        Session: {
+          findByPk: async (id, opts) => {
+            findByPkCalls.push({ id, opts });
+            return typeof findByPkResult === 'function' ? findByPkResult(id) : findByPkResult;
+          },
+          update: async (vals, opts) => { updateCalls.push({ vals, opts }); return [1]; },
+        },
+        Log: {
+          bulkCreate: async (rows) => { bulkCreateCalls += rows.length; return rows; },
+        },
+      },
+      getBulkCreateCalls: () => bulkCreateCalls,
+    };
+  }
+
+  test('wider batch bounds merge into existing session — exact update args', async () => {
+    const T1 = new Date('2026-05-01T10:00:00Z'); // existing firstTimestamp
+    const T2 = new Date('2026-05-01T12:00:00Z'); // existing lastTimestamp
+    const before = new Date('2026-05-01T09:00:00Z');
+    const after = new Date('2026-05-01T13:00:00Z');
+
+    const { mockModels, updateCalls, findByPkCalls } = makeFlushMocks({
+      // Plan spec: existing row has narrower bounds and smaller maxima.
+      findByPkResult: { id: 7, firstTimestamp: T1, lastTimestamp: T2, maxRpm: 3000, maxSpeed: 80 },
+    });
+
+    const { restore } = loadWithMocks(mockModels);
+    try {
+      const { ingest, flush } = require('../services/ingestBuffer');
+
+      // Three rows spanning wider bounds than the existing columns:
+      // one timestamp before T1, one after T2, rpm 5000 (>3000), speed 120 (>80).
+      ingest({ userId: 1, sessionId: 7, time: before, lon: 0, lat: 0, values: {}, engineRpm: 5000, vehicleSpeed: 60 });
+      ingest({ userId: 1, sessionId: 7, time: T2, lon: 0, lat: 0, values: {}, engineRpm: 1000, vehicleSpeed: 120 });
+      ingest({ userId: 1, sessionId: 7, time: after, lon: 0, lat: 0, values: {}, engineRpm: 2500, vehicleSpeed: 90 });
+
+      await flush();
+
+      assert.strictEqual(findByPkCalls.length, 1, 'one findByPk per affected session');
+      assert.strictEqual(findByPkCalls[0].id, 7);
+      assert.deepStrictEqual(findByPkCalls[0].opts.attributes,
+        ['id', 'firstTimestamp', 'lastTimestamp', 'maxRpm', 'maxSpeed']);
+
+      assert.strictEqual(updateCalls.length, 1, 'Session.update called exactly ONCE');
+      assert.deepStrictEqual(updateCalls[0].vals, {
+        firstTimestamp: before, // min(batch, existing)
+        lastTimestamp: after,   // max(batch, existing)
+        maxRpm: 5000,           // GREATEST(3000, 5000)
+        maxSpeed: 120,          // GREATEST(80, 120)
+      });
+      assert.deepStrictEqual(updateCalls[0].opts, { where: { id: 7 } });
+    } finally {
+      restore();
+    }
+  });
+
+  test('NULL existing columns coalesce — merged equals batch stats verbatim', async () => {
+    const tA = new Date('2026-06-01T08:15:00Z');
+    const tB = new Date('2026-06-01T09:45:00Z');
+
+    const { mockModels, updateCalls } = makeFlushMocks({
+      // Never-backfilled session: all denormalized columns NULL.
+      findByPkResult: { id: 8, firstTimestamp: null, lastTimestamp: null, maxRpm: null, maxSpeed: null },
+    });
+
+    const { restore } = loadWithMocks(mockModels);
+    try {
+      const { ingest, flush } = require('../services/ingestBuffer');
+
+      ingest({ userId: 1, sessionId: 8, time: tB, lon: 0, lat: 0, values: {}, engineRpm: 4500, vehicleSpeed: 95 });
+      ingest({ userId: 1, sessionId: 8, time: tA, lon: 0, lat: 0, values: {}, engineRpm: 2000, vehicleSpeed: 50 });
+
+      await flush();
+
+      assert.strictEqual(updateCalls.length, 1, 'Session.update called exactly ONCE');
+      assert.deepStrictEqual(updateCalls[0].vals, {
+        firstTimestamp: tA,  // COALESCE(NULL, batchMin) -> batchMin
+        lastTimestamp: tB,   // COALESCE(NULL, batchMax) -> batchMax
+        maxRpm: 4500,        // COALESCE(NULL, 4500)     -> 4500
+        maxSpeed: 95,        // COALESCE(NULL, 95)       -> 95
+      }, 'NULL columns must be replaced by batch stats verbatim');
+      assert.deepStrictEqual(updateCalls[0].opts, { where: { id: 8 } });
+    } finally {
+      restore();
+    }
+  });
+
+  test('missing session (findByPk null) — no update, no throw', async () => {
+    const { mockModels, updateCalls } = makeFlushMocks({ findByPkResult: null });
+
+    const { restore } = loadWithMocks(mockModels);
+    try {
+      const { ingest, flush } = require('../services/ingestBuffer');
+
+      ingest({ userId: 1, sessionId: 999, time: new Date('2026-07-01T00:00:00Z'), lon: 0, lat: 0, values: {}, engineRpm: 1500, vehicleSpeed: 40 });
+      ingest({ userId: 1, sessionId: 999, time: new Date('2026-07-01T00:30:00Z'), lon: 0, lat: 0, values: {}, engineRpm: 1600, vehicleSpeed: 55 });
+
+      // Must resolve without throwing despite the session not existing.
+      await flush();
+
+      assert.strictEqual(updateCalls.length, 0,
+        'Session.update must NOT be called when the session is missing');
+    } finally {
+      restore();
+    }
+  });
+
+  test('batch without rpm/speed keeps existing maxima (null-normalized merge)', async () => {
+    const tA = new Date('2026-08-01T06:00:00Z');
+    const tB = new Date('2026-08-01T06:10:00Z');
+
+    const { mockModels, updateCalls } = makeFlushMocks({
+      findByPkResult: { id: 11, firstTimestamp: tA, lastTimestamp: tB, maxRpm: 3200, maxSpeed: 88 },
+    });
+
+    const { restore } = loadWithMocks(mockModels);
+    try {
+      const { ingest, flush } = require('../services/ingestBuffer');
+
+      // Rows carry no engineRpm / vehicleSpeed at all (nulls).
+      ingest({ userId: 1, sessionId: 11, time: tA, lon: 0, lat: 0, values: {}, engineRpm: null, vehicleSpeed: null });
+      ingest({ userId: 1, sessionId: 11, time: tB, lon: 0, lat: 0, values: {}, engineRpm: undefined, vehicleSpeed: undefined });
+
+      await flush();
+
+      assert.strictEqual(updateCalls.length, 1);
+      assert.deepStrictEqual(updateCalls[0].vals, {
+        firstTimestamp: tA,
+        lastTimestamp: tB,
+        maxRpm: 3200,  // existing preserved when batch contributes nothing
+        maxSpeed: 88,
+      }, 'absent batch metrics must not clobber existing column values');
+    } finally {
+      restore();
+    }
   });
 });
 

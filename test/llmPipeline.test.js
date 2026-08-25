@@ -1,8 +1,36 @@
 'use strict';
 
+// Set a valid encryption key BEFORE any module loading so encrypt/decrypt
+// round-trips work offline (mirrors analysisJournal.test.js's env-first rule).
+process.env.LLM_ENCRYPTION_KEY = process.env.LLM_ENCRYPTION_KEY ||
+  Buffer.alloc(32, 'k').toString('base64');
+
 const { test, describe } = require('node:test');
 const assert = require('node:assert');
-const { getBaseUrl, PROVIDERS } = require('../lib/llmProviders');
+const fs = require('node:fs');
+const path = require('node:path');
+
+// ── Mock ./ssrfGuard BEFORE ../lib/llmProviders loads ──────────────────────
+// Lets the timeout-lifecycle suite drive analyzeOpenAICompatible /
+// analyzeAnthropic through their real code paths with no network access.
+const ssrfGuardPath = require.resolve('../lib/ssrfGuard');
+let fakeResponse = null;
+require.cache[ssrfGuardPath] = {
+  id: ssrfGuardPath,
+  filename: ssrfGuardPath,
+  loaded: true,
+  exports: {
+    isSafeUrl: async () => true,
+    safeFetch: async () => {
+      if (!fakeResponse) throw new Error('safeFetch called without a stubbed response');
+      return fakeResponse;
+    },
+  },
+};
+
+const {
+  getBaseUrl, PROVIDERS, prepareApiKey, analyze,
+} = require('../lib/llmProviders');
 
 // ── getBaseUrl ─────────────────────────────────────────────────────────────
 
@@ -79,65 +107,149 @@ describe('endpoint hijack prevention', () => {
   });
 });
 
-// ── Sampling logic (pure JS) ───────────────────────────────────────────────
+// ── Deterministic even sampling (implementation-backed structural checks) ──
+// The old suite tested a local copy of the selection math; these asserts pin
+// the real AnalysisController implementation instead (single source of truth).
 
-describe('keyset-based sampling', () => {
-  function sampleIds(ids, sampleSize = 100) {
-    const step = Math.max(1, Math.floor(ids.length / sampleSize));
-    return ids.filter((_, i) => i % step === 0).slice(0, sampleSize);
+describe('deterministic even sampling (implementation)', () => {
+  const controllerSrc = fs.readFileSync(
+    path.join(__dirname, '..', 'controllers', 'AnalysisController.js'),
+    'utf8'
+  );
+
+  test('no ORDER BY random() remains in the sample query', () => {
+    assert.doesNotMatch(controllerSrc, /ORDER BY random\(\)/i);
+  });
+
+  test('sample selection is driven by an index-only id scan', () => {
+    assert.match(
+      controllerSrc,
+      /SELECT id FROM "Logs" WHERE "sessionId" = :sessionId ORDER BY id/
+    );
+  });
+
+  test('sampled rows are fetched by primary key in one query', () => {
+    assert.match(controllerSrc, /WHERE id IN \(:ids\) ORDER BY id/);
+  });
+
+  test('even-spacing selection capped at 100 samples', () => {
+    assert.match(controllerSrc, /const target = Math\.min\(100, ids\.length\)/);
+    assert.match(controllerSrc, /Math\.max\(1, Math\.floor\(ids\.length \/ target\)\)/);
+    assert.match(controllerSrc, /for \(let i = 0; i < ids\.length && sampledIds\.length < target; i \+= step\)/);
+  });
+
+  test('firstBatch/randomBatch/lastBatch merge order preserved', () => {
+    assert.match(controllerSrc, /sample = \[\.\.\.firstBatch, \.\.\.randomBatch, \.\.\.lastBatch\]/);
+  });
+});
+
+// ── Timeout lifecycle (behavioral over mocked safeFetch + structural) ──────
+
+describe('timeout lifecycle (body-phase)', () => {
+  const providersSrc = fs.readFileSync(
+    path.join(__dirname, '..', 'lib', 'llmProviders.js'),
+    'utf8'
+  );
+
+  function openAISettings() {
+    return { llmProvider: 'openai', llmApiKeyEnc: prepareApiKey('sk-test') };
   }
 
-  test('1000 ids → produces exactly 100 sampled ids', () => {
-    const ids = Array.from({ length: 1000 }, (_, i) => i + 1);
-    const sampled = sampleIds(ids);
-    assert.strictEqual(sampled.length, 100);
+  function anthropicSettings() {
+    return { llmProvider: 'anthropic', llmApiKeyEnc: prepareApiKey('sk-test') };
+  }
+
+  // Replace setTimeout/clearTimeout with recording stubs so no real 120s
+  // timer is ever armed and we can observe exactly when handles are cleared.
+  function stubTimers(t) {
+    const armed = [];
+    const cleared = [];
+    t.mock.method(globalThis, 'setTimeout', (fn, ms) => {
+      const handle = { fake: true, id: armed.length + 1 };
+      armed.push({ fn, ms, handle });
+      return handle;
+    });
+    t.mock.method(globalThis, 'clearTimeout', (handle) => {
+      cleared.push(handle);
+    });
+    return { armed, cleared };
+  }
+
+  test('structural: exactly two clearTimeout calls, both inside !res.ok branches', () => {
+    const matches = providersSrc.match(/clearTimeout\(timeout\)/g) || [];
+    assert.strictEqual(matches.length, 2);
+
+    const lines = providersSrc.split('\n');
+    let guarded = 0;
+    lines.forEach((line, i) => {
+      if (line.includes('clearTimeout(timeout)')) {
+        const window = lines.slice(Math.max(0, i - 4), i).join('\n');
+        if (window.includes('if (!res.ok)')) guarded++;
+      }
+    });
+    assert.strictEqual(guarded, 2);
   });
 
-  test('sampled ids are evenly spaced', () => {
-    const ids = Array.from({ length: 1000 }, (_, i) => i + 1);
-    const sampled = sampleIds(ids);
-    // Step should be 10 (1000/100)
-    assert.strictEqual(sampled[0], 1);
-    assert.strictEqual(sampled[1], 11);
-    assert.strictEqual(sampled[2], 21);
-    assert.strictEqual(sampled[99], 991);
+  test('structural: both analyze functions return the timeout handle', () => {
+    const returns = providersSrc.match(/return \{ response: res, abortController: ac, timeout \}/g) || [];
+    assert.strictEqual(returns.length, 2);
   });
 
-  test('50 ids → returns all 50 (under sampleSize)', () => {
-    const ids = Array.from({ length: 50 }, (_, i) => i + 1);
-    const sampled = sampleIds(ids);
-    assert.strictEqual(sampled.length, 50);
-    assert.deepStrictEqual(sampled, ids);
+  test('ok response keeps the timeout armed — consumer clears it after the body read', async (t) => {
+    const { armed, cleared } = stubTimers(t);
+    fakeResponse = { ok: true };
+
+    const result = await analyze('hi', openAISettings());
+
+    // Armed once for the full 120s and handed back to the caller…
+    assert.strictEqual(armed.length, 1);
+    assert.strictEqual(armed[0].ms, 120_000);
+    assert.strictEqual(result.timeout, armed[0].handle);
+    // …and NOT cleared when response headers arrive (the old bug).
+    assert.strictEqual(cleared.length, 0);
+    assert.strictEqual(result.response, fakeResponse);
+    assert.strictEqual(typeof result.abortController.abort, 'function');
+
+    // Consumer-side cleanup (controller's finally block):
+    clearTimeout(result.timeout);
+    assert.deepStrictEqual(cleared, [result.timeout]);
   });
 
-  test('1 id → returns 1', () => {
-    const sampled = sampleIds([42]);
-    assert.strictEqual(sampled.length, 1);
-    assert.strictEqual(sampled[0], 42);
+  test('!res.ok clears the timeout before throwing (no body to wait for)', async (t) => {
+    const { armed, cleared } = stubTimers(t);
+    fakeResponse = { ok: false, status: 500, text: async () => 'boom' };
+
+    await assert.rejects(
+      () => analyze('hi', openAISettings()),
+      /LLM API error 500: boom/
+    );
+
+    assert.strictEqual(cleared.length, 1);
+    assert.strictEqual(cleared[0], armed[0].handle);
   });
 
-  test('0 ids → returns empty', () => {
-    const sampled = sampleIds([]);
-    assert.strictEqual(sampled.length, 0);
+  test('anthropic: ok response returns the timeout handle uncleared', async (t) => {
+    const { armed, cleared } = stubTimers(t);
+    fakeResponse = { ok: true };
+
+    const result = await analyze('hi', anthropicSettings());
+
+    assert.strictEqual(armed.length, 1);
+    assert.strictEqual(result.timeout, armed[0].handle);
+    assert.strictEqual(cleared.length, 0);
   });
 
-  test('200 ids → produces 100 sampled ids', () => {
-    const ids = Array.from({ length: 200 }, (_, i) => i + 1);
-    const sampled = sampleIds(ids);
-    assert.strictEqual(sampled.length, 100);
-    // Step should be 2
-    assert.strictEqual(sampled[0], 1);
-    assert.strictEqual(sampled[1], 3);
-    assert.strictEqual(sampled[2], 5);
-  });
+  test('anthropic: !res.ok clears the timeout before throwing', async (t) => {
+    const { armed, cleared } = stubTimers(t);
+    fakeResponse = { ok: false, status: 401, text: async () => 'bad key' };
 
-  test('300 ids → produces 100 sampled ids at step 3', () => {
-    const ids = Array.from({ length: 300 }, (_, i) => i + 1);
-    const sampled = sampleIds(ids);
-    assert.strictEqual(sampled.length, 100);
-    assert.strictEqual(sampled[0], 1);
-    assert.strictEqual(sampled[1], 4);
-    assert.strictEqual(sampled[2], 7);
+    await assert.rejects(
+      () => analyze('hi', anthropicSettings()),
+      /Anthropic API error 401: bad key/
+    );
+
+    assert.strictEqual(cleared.length, 1);
+    assert.strictEqual(cleared[0], armed[0].handle);
   });
 });
 

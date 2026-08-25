@@ -7,7 +7,7 @@ module.exports = function(passport){
             // Search if user in db
             let user;
             try{
-                user = await User.findOne({ where: { email: email }}) 
+                user = await User.findOne({ where: { email: email.toLowerCase() }})
                 if(!user){
                     return done(null, false, { message: 'Incorrect username or password.' });
                 }

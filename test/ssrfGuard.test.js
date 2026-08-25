@@ -106,6 +106,19 @@ test('isPublicIp: ::ffff:0.0.0.0 → private (mapped unspecified)', () => {
     assert.strictEqual(isPublicIp('::ffff:0.0.0.0'), false);
 });
 
+test('hex-form mapped loopback ::ffff:7f00:1 → private', () => {
+    assert.strictEqual(isPublicIp('::ffff:7f00:1'), false);   // 127.0.0.1
+});
+test('hex-form mapped private ::ffff:a00:5 → private', () => {
+    assert.strictEqual(isPublicIp('::ffff:a00:5'), false);    // 10.0.0.5
+});
+test('zero-padded hex mapped ::ffff:0a00:0005 → private', () => {
+    assert.strictEqual(isPublicIp('::ffff:0a00:0005'), false);
+});
+test('hex-form mapped public ::ffff:808:808 → public', () => {
+    assert.strictEqual(isPublicIp('::ffff:808:808'), true);   // 8.8.8.8
+});
+
 test('isPublicIp: unparseable string → false (fail-closed)', () => {
     assert.strictEqual(isPublicIp('not-an-ip'), false);
 });

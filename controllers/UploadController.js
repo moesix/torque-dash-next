@@ -12,6 +12,7 @@ const runtime = require('../config/runtime');
 // Returns the user, or null if unknown (unknown emails are cached as negatives).
 async function resolveUser(eml) {
     if (!eml) return null;
+    eml = eml.toLowerCase(); // normalize identity boundary (unifies cache keys too)
     const cached = userCache.get(eml);
     if (cached !== undefined) return cached; // may be null (negative cache hit)
     const user = await User.findOne({ where: { email: eml } });
@@ -44,6 +45,15 @@ class UploadController {
             // ── END AUTHENTICATION ─────────────────────────────────────────
 
             let { eml, v, session, id, time, kff1005, kff1006, ...values } = req.query;
+
+            // Validate `session` BEFORE any DB access — a missing/garbage value
+            // must never reach Sequelize (it would throw → 500 → device retry storm).
+            if (!session || typeof session !== 'string' || session.length > 255) {
+                return res.status(400).json({
+                    error: 'session parameter is required and must be a string (max 255 chars).'
+                });
+            }
+
             let lon = kff1005;
             let lat = kff1006;
 
@@ -73,7 +83,7 @@ class UploadController {
 
             // Resolve session (find-or-create) — caches the resolved numeric FK.
             let currentSession = await Session.findOrCreate({
-                where: { sessionId: session },
+                where: { sessionId: session, userId: user.id },
                 defaults: {
                     userId: user.id,
                     vehicleId: vehicle ? vehicle.id : null,
@@ -89,7 +99,10 @@ class UploadController {
                 const d = new Date(Number(time));
                 const ts = new Date(d.getTime() + offsetMinutes * 60000);
                 const pad = (n) => String(n).padStart(2, '0');
-                const name = `Trip ${pad(ts.getDate())}${pad(ts.getMonth() + 1)}${ts.getFullYear()} ${ts.getHours() % 12 || 12}:${pad(ts.getMinutes())}${ts.getHours() >= 12 ? 'PM' : 'AM'}`;
+                // UTC getters on the shifted timestamp: the shift makes UTC
+                // components equal the target wall clock, so naming is
+                // host-timezone-independent.
+                const name = `Trip ${pad(ts.getUTCDate())}${pad(ts.getUTCMonth() + 1)}${ts.getUTCFullYear()} ${ts.getUTCHours() % 12 || 12}:${pad(ts.getUTCMinutes())}${ts.getUTCHours() >= 12 ? 'PM' : 'AM'}`;
                 await sess.update({ name });
             }
 
@@ -132,3 +145,5 @@ class UploadController {
 }
 
 module.exports = UploadController;
+// Exported for direct unit testing of the module-private resolver.
+module.exports.resolveUser = resolveUser;
