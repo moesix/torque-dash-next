@@ -1,150 +1,264 @@
 'use strict';
 
+// Set dummy env vars BEFORE any module loading so config.js doesn't throw.
+process.env.DATABASE_URL = process.env.DATABASE_URL || 'postgres://x:x@localhost/x';
+process.env.SESSION_KEYS = process.env.SESSION_KEYS || 'abc123';
+
 const { describe, it } = require('node:test');
 const assert = require('node:assert');
 
-/**
- * Mirrors the llmMaxTokens validation block in controllers/UserController.js
- * (updateSettings) so the bounds can be tested without a database or HTTP.
- * Returns { valid: true, value } on success (value coerced via Number, same
- * as the controller) or { valid: false } when out of range / not an integer.
- */
-function validateMaxTokens(raw) {
-  if (raw === undefined) return { valid: true, value: undefined };
-  const t = Number(raw);
-  if (!Number.isInteger(t) || t < 2048 || t > 32768) {
-    return { valid: false };
-  }
-  return { valid: true, value: t };
-}
+// Pre-populate require.cache for ../models so the controller can load
+// without connecting to a real database.
+const mockModels = {
+  Session: { findOne: async () => null, findAll: async () => [], count: async () => 0, update: async () => [0] },
+  Log: { count: async () => 0, findAll: async () => [], destroy: async () => 0 },
+  User: { findOne: async () => null },
+  Vehicle: { findOne: async () => null },
+  sequelize: { transaction: async (fn) => fn({}), query: async () => [], fn: () => {}, col: () => {} },
+  Sequelize: { Op: {} },
+};
+const modelsPath = require.resolve('../models');
+require.cache[modelsPath] = { id: modelsPath, filename: modelsPath, loaded: true, exports: mockModels };
 
-describe('llmMaxTokens validation', () => {
-  it('rejects values below 2048', () => {
-    assert.strictEqual(validateMaxTokens(2047).valid, false);
-    assert.strictEqual(validateMaxTokens(0).valid, false);
-    assert.strictEqual(validateMaxTokens(-100).valid, false);
+const {
+  validateLlmThinkingMode,
+  validateLlmMaxTokens,
+  validateRetentionEnabled,
+  validateRetentionDays,
+} = require('../lib/validators');
+const {
+  formatDuration,
+  sanitizeFilename,
+  csvEscape,
+} = require('../controllers/SessionController');
+
+// ── LLM thinking mode ──────────────────────────────────────────────
+
+describe('validateLlmThinkingMode', () => {
+  it('accepts true', () => {
+    assert.deepStrictEqual(validateLlmThinkingMode(true), { ok: true });
   });
 
-  it('rejects values above 32768', () => {
-    assert.strictEqual(validateMaxTokens(32769).valid, false);
-    assert.strictEqual(validateMaxTokens(100000).valid, false);
+  it('accepts false', () => {
+    assert.deepStrictEqual(validateLlmThinkingMode(false), { ok: true });
   });
 
-  it('rejects non-integers', () => {
-    assert.strictEqual(validateMaxTokens(16384.5).valid, false);
-    assert.strictEqual(validateMaxTokens('abc').valid, false);
-    assert.strictEqual(validateMaxTokens(NaN).valid, false);
-    assert.strictEqual(validateMaxTokens(null).valid, false);
+  it('rejects non-boolean values', () => {
+    const r = validateLlmThinkingMode('yes');
+    assert.strictEqual(r.ok, false);
+    assert.strictEqual(r.error, 'llmThinkingMode must be a boolean.');
   });
 
-  it('accepts boundary values (2048, 32768)', () => {
-    assert.deepStrictEqual(validateMaxTokens(2048), { valid: true, value: 2048 });
-    assert.deepStrictEqual(validateMaxTokens(32768), { valid: true, value: 32768 });
+  it('rejects null', () => {
+    assert.strictEqual(validateLlmThinkingMode(null).ok, false);
   });
 
-  it('accepts default value 16384', () => {
-    assert.deepStrictEqual(validateMaxTokens(16384), { valid: true, value: 16384 });
-  });
-
-  it('coerces numeric strings like the controller Number() cast', () => {
-    assert.deepStrictEqual(validateMaxTokens('16384'), { valid: true, value: 16384 });
-    assert.strictEqual(validateMaxTokens('2047').valid, false);
-  });
-
-  it('treats undefined as omitted (no-op)', () => {
-    assert.deepStrictEqual(validateMaxTokens(undefined), { valid: true, value: undefined });
+  it('rejects number', () => {
+    assert.strictEqual(validateLlmThinkingMode(1).ok, false);
   });
 });
 
-// ── Retention validation ──────────────────────────────────────────────
-// Mirrors the retentionEnabled/retentionDays validation block in
-// controllers/UserController.js (updateSettings) so the plan's HTTP-level
-// cases can be tested without a database or HTTP (same pattern as
-// validateMaxTokens above). Returns { valid: true } on success or
-// { valid: false, error } with the exact controller error message.
-function validateRetention(body) {
-  if (body.retentionEnabled !== undefined) {
-    if (typeof body.retentionEnabled !== 'boolean') {
-      return { valid: false, error: 'retentionEnabled must be a boolean.' };
-    }
-  }
-  if (body.retentionDays !== undefined) {
-    if (typeof body.retentionDays !== 'number' || !Number.isInteger(body.retentionDays)) {
-      return { valid: false, error: 'retentionDays must be an integer.' };
-    }
-    if (body.retentionDays < 90 || body.retentionDays > 365) {
-      return { valid: false, error: 'retentionDays must be between 90 and 365.' };
-    }
-  }
-  return { valid: true };
-}
+// ── LLM max tokens ─────────────────────────────────────────────────
 
-// Mirrors the getSettings/updateSettings response mapping so the response
-// shape case can be asserted without booting the app: retentionEnabled must
-// surface as a boolean and retentionDays as a number, defaulting to the
-// migration/model defaults (false, 365) like the controller's ?? fallbacks.
-function buildSettingsResponse(settings) {
-  return {
-    retentionEnabled: settings.retentionEnabled ?? false,
-    retentionDays: settings.retentionDays ?? 365,
-  };
-}
+describe('validateLlmMaxTokens', () => {
+  it('rejects values below 2048', () => {
+    assert.strictEqual(validateLlmMaxTokens(2047).ok, false);
+    assert.strictEqual(validateLlmMaxTokens(0).ok, false);
+    assert.strictEqual(validateLlmMaxTokens(-100).ok, false);
+  });
 
-describe('retention validation', () => {
+  it('rejects values above 32768', () => {
+    assert.strictEqual(validateLlmMaxTokens(32769).ok, false);
+    assert.strictEqual(validateLlmMaxTokens(100000).ok, false);
+  });
+
+  it('rejects non-integers', () => {
+    assert.strictEqual(validateLlmMaxTokens(16384.5).ok, false);
+    assert.strictEqual(validateLlmMaxTokens('abc').ok, false);
+    assert.strictEqual(validateLlmMaxTokens(NaN).ok, false);
+    assert.strictEqual(validateLlmMaxTokens(null).ok, false);
+  });
+
+  it('accepts boundary values (2048, 32768)', () => {
+    assert.deepStrictEqual(validateLlmMaxTokens(2048), { ok: true, value: 2048 });
+    assert.deepStrictEqual(validateLlmMaxTokens(32768), { ok: true, value: 32768 });
+  });
+
+  it('accepts default value 16384', () => {
+    assert.deepStrictEqual(validateLlmMaxTokens(16384), { ok: true, value: 16384 });
+  });
+
+  it('coerces numeric strings like the controller Number() cast', () => {
+    assert.deepStrictEqual(validateLlmMaxTokens('16384'), { ok: true, value: 16384 });
+    assert.strictEqual(validateLlmMaxTokens('2047').ok, false);
+  });
+});
+
+// ── Retention enabled ───────────────────────────────────────────────
+
+describe('validateRetentionEnabled', () => {
   it('rejects non-boolean retentionEnabled', () => {
-    const r = validateRetention({ retentionEnabled: 'yes' });
-    assert.strictEqual(r.valid, false);
+    const r = validateRetentionEnabled('yes');
+    assert.strictEqual(r.ok, false);
     assert.strictEqual(r.error, 'retentionEnabled must be a boolean.');
   });
 
+  it('accepts boolean true', () => {
+    assert.deepStrictEqual(validateRetentionEnabled(true), { ok: true });
+  });
+
+  it('accepts boolean false', () => {
+    assert.deepStrictEqual(validateRetentionEnabled(false), { ok: true });
+  });
+
+  it('rejects null', () => {
+    assert.strictEqual(validateRetentionEnabled(null).ok, false);
+  });
+
+  it('rejects number', () => {
+    assert.strictEqual(validateRetentionEnabled(1).ok, false);
+  });
+});
+
+// ── Retention days ──────────────────────────────────────────────────
+
+describe('validateRetentionDays', () => {
   it('rejects non-integer retentionDays', () => {
-    const r = validateRetention({ retentionDays: 36.5 });
-    assert.strictEqual(r.valid, false);
+    const r = validateRetentionDays(36.5);
+    assert.strictEqual(r.ok, false);
     assert.strictEqual(r.error, 'retentionDays must be an integer.');
   });
 
   it('rejects retentionDays below 90', () => {
-    const r = validateRetention({ retentionDays: 89 });
-    assert.strictEqual(r.valid, false);
+    const r = validateRetentionDays(89);
+    assert.strictEqual(r.ok, false);
     assert.strictEqual(r.error, 'retentionDays must be between 90 and 365.');
   });
 
   it('rejects retentionDays above 365', () => {
-    const r = validateRetention({ retentionDays: 366 });
-    assert.strictEqual(r.valid, false);
+    const r = validateRetentionDays(366);
+    assert.strictEqual(r.ok, false);
     assert.strictEqual(r.error, 'retentionDays must be between 90 and 365.');
   });
 
   it('accepts a valid retentionDays value (180)', () => {
-    assert.strictEqual(validateRetention({ retentionDays: 180 }).valid, true);
+    assert.deepStrictEqual(validateRetentionDays(180), { ok: true });
   });
 
   it('accepts boundary retentionDays values (90, 365)', () => {
-    assert.strictEqual(validateRetention({ retentionDays: 90 }).valid, true);
-    assert.strictEqual(validateRetention({ retentionDays: 365 }).valid, true);
+    assert.deepStrictEqual(validateRetentionDays(90), { ok: true });
+    assert.deepStrictEqual(validateRetentionDays(365), { ok: true });
   });
 
   it('rejects null retentionDays (typeof null is object, not number)', () => {
-    const r = validateRetention({ retentionDays: null });
-    assert.strictEqual(r.valid, false);
+    const r = validateRetentionDays(null);
+    assert.strictEqual(r.ok, false);
     assert.strictEqual(r.error, 'retentionDays must be an integer.');
   });
+});
 
-  it('accepts combined payload (retentionEnabled false with valid retentionDays)', () => {
-    const r = validateRetention({ retentionEnabled: false, retentionDays: 180 });
-    assert.strictEqual(r.valid, true);
-  });
+// ── Settings response shape (buildSettingsResponse mirror) ──────────
 
-  it('accepts boolean retentionEnabled true', () => {
-    assert.strictEqual(validateRetention({ retentionEnabled: true }).valid, true);
-  });
+describe('settings response shape', () => {
+  function buildSettingsResponse(settings) {
+    return {
+      retentionEnabled: settings.retentionEnabled ?? false,
+      retentionDays: settings.retentionDays ?? 365,
+    };
+  }
 
-  it('settings response includes retentionEnabled (boolean) and retentionDays (number)', () => {
+  it('defaults to boolean retentionEnabled and number retentionDays', () => {
     const res = buildSettingsResponse({});
     assert.strictEqual(typeof res.retentionEnabled, 'boolean');
     assert.strictEqual(typeof res.retentionDays, 'number');
+  });
+
+  it('passes through provided values', () => {
     const full = buildSettingsResponse({ retentionEnabled: true, retentionDays: 180 });
     assert.strictEqual(full.retentionEnabled, true);
     assert.strictEqual(full.retentionDays, 180);
+  });
+});
+
+// ── formatDuration (imported from real SessionController) ───────────
+
+describe('formatDuration', () => {
+  it('returns null when either bound is missing', () => {
+    assert.strictEqual(formatDuration(null, '2026-01-01'), null);
+    assert.strictEqual(formatDuration('2026-01-01', null), null);
+    assert.strictEqual(formatDuration(undefined, undefined), null);
+  });
+
+  it('returns null for negative duration', () => {
+    assert.strictEqual(formatDuration('2026-01-10', '2026-01-01'), null);
+  });
+
+  it('formats seconds only', () => {
+    const r = formatDuration('2026-01-01T00:00:00Z', '2026-01-01T00:00:45Z');
+    assert.strictEqual(r, '45s');
+  });
+
+  it('formats hours, minutes, seconds', () => {
+    const r = formatDuration('2026-01-01T00:00:00Z', '2026-01-01T01:02:03Z');
+    assert.strictEqual(r, '1h 2m 3s');
+  });
+
+  it('formats days, hours, minutes, seconds', () => {
+    const r = formatDuration('2026-01-01T00:00:00Z', '2026-01-04T01:02:03Z');
+    assert.strictEqual(r, '3d 1h 2m 3s');
+  });
+});
+
+// ── sanitizeFilename (imported from real SessionController) ─────────
+
+describe('sanitizeFilename', () => {
+  it('replaces spaces with hyphens', () => {
+    assert.strictEqual(sanitizeFilename('hello world'), 'hello-world');
+  });
+
+  it('strips path-dangerous characters', () => {
+    assert.strictEqual(sanitizeFilename('a/b\\c:d'), 'abcd');
+  });
+
+  it('caps at 100 characters', () => {
+    const long = 'x'.repeat(200);
+    assert.strictEqual(sanitizeFilename(long).length, 100);
+  });
+
+  it('returns "session" for empty string', () => {
+    assert.strictEqual(sanitizeFilename(''), 'session');
+  });
+});
+
+// ── csvEscape (imported from real SessionController) ────────────────
+
+describe('csvEscape', () => {
+  it('returns empty string for null/undefined', () => {
+    assert.strictEqual(csvEscape(null), '');
+    assert.strictEqual(csvEscape(undefined), '');
+  });
+
+  it('passes through simple strings unchanged', () => {
+    assert.strictEqual(csvEscape('hello'), 'hello');
+  });
+
+  it('wraps values containing commas in double quotes', () => {
+    assert.strictEqual(csvEscape('a,b'), '"a,b"');
+  });
+
+  it('escapes embedded double quotes', () => {
+    assert.strictEqual(csvEscape('a"b'), '"a""b"');
+  });
+
+  it('prefixes formula-injection chars with single quote', () => {
+    assert.strictEqual(csvEscape('=1+1'), "'=1+1");
+    assert.strictEqual(csvEscape('+cmd'), "'+cmd");
+    assert.strictEqual(csvEscape('-cmd'), "'-cmd");
+    assert.strictEqual(csvEscape('@cmd'), "'@cmd");
+    assert.strictEqual(csvEscape('|cmd'), "'|cmd");
+  });
+
+  it('handles numeric values', () => {
+    assert.strictEqual(csvEscape(42), '42');
   });
 });

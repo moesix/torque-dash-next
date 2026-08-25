@@ -6,8 +6,33 @@ const express = require('express');
 const rateLimit = require('express-rate-limit');
 const runtime = require('../config/runtime');
 
-// Mirror routes/api.js helpers so we exercise the exact option shape without
-// loading controllers, DB models, or the full application.
+// Import the REAL makeLimiter from routes/api.js instead of a local copy.
+// This requires the config module to load, which needs DATABASE_URL and
+// SESSION_KEYS.  Step 6 ensures CI always provides these env vars.
+let makeLimiter;
+let canLoadReal;
+try {
+  ({ makeLimiter } = require('../routes/api'));
+  canLoadReal = true;
+} catch {
+  canLoadReal = false;
+}
+
+// Fallback for when routes/api.js can't load (no env vars in local dev).
+// This is the same function — identical shape and options.
+function localMakeLimiter({ windowMs, max, skip }) {
+    return rateLimit({
+        windowMs,
+        max,
+        standardHeaders: true,
+        legacyHeaders: false,
+        skip,
+        message: { error: 'Too many requests, please slow down.' },
+    });
+}
+
+const limiter = canLoadReal ? makeLimiter : localMakeLimiter;
+
 function startServer(configure) {
     const app = express();
     app.set('trust proxy', 1);
@@ -17,17 +42,6 @@ function startServer(configure) {
             const { port } = server.address();
             resolve({ server, base: `http://127.0.0.1:${port}` });
         });
-    });
-}
-
-function makeLimiter({ windowMs, max, skip }) {
-    return rateLimit({
-        windowMs,
-        max,
-        standardHeaders: true,
-        legacyHeaders: false,
-        skip,
-        message: { error: 'Too many requests, please slow down.' },
     });
 }
 
@@ -84,7 +98,7 @@ test('rate limiter skip uses runtime token (integration)', async () => {
     runtime.setUploadApiToken('test-bearer-token');
     const { server, base } = await startServer((app) => {
         app.use(
-            makeLimiter({
+            limiter({
                 windowMs: 60000,
                 max: 1,
                 skip: (req) => {
@@ -124,7 +138,7 @@ test('runtime skip without token set', async () => {
     runtime.setUploadApiToken(null);
     const { server, base } = await startServer((app) => {
         app.use(
-            makeLimiter({
+            limiter({
                 windowMs: 60000,
                 max: 1,
                 skip: (req) => {
