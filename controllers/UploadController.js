@@ -108,21 +108,18 @@ class UploadController {
             // Respond immediately — do NOT await the DB flush.
             res.status(200).send('OK!');
 
-            // Fire-and-forget forwardUrls (SSRF-guarded, native fetch, 3s timeout).
+            // Fire-and-forget forwardUrls (SSRF-guarded via safeFetch, 3s timeout).
             // Deliberately outside the request path: never awaited.
             if (Array.isArray(user.forwardUrls) && user.forwardUrls.length) {
                 setImmediate(async () => {
                     for (const url of user.forwardUrls) {
                         try {
-                            if (await ssrfGuard.isSafeUrl(url)) {
-                                await fetch(url, {
-                                    method: 'GET',
-                                    signal: AbortSignal.timeout(3000)
-                                }).catch(() => {});
-                            }
-                            // unsafe URLs are skipped silently
+                            await ssrfGuard.safeFetch(url, {
+                                method: 'GET',
+                                signal: AbortSignal.timeout(3000)
+                            });
                         } catch (e) {
-                            // isSafeUrl rejected / unexpected error — skip this URL
+                            // unsafe URLs / network errors — skip this URL
                         }
                     }
                 });

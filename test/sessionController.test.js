@@ -140,14 +140,13 @@ describe('SessionController (with mocked models)', () => {
   });
 
   // ── delete ──────────────────────────────────────────────────────
-  // NOTE: current code returns 401 (not 404) when session is not found.
-  // The status code fix is deferred to plan 063; we assert what EXISTS.
+  // Fix: now returns 404 JSON (not 401) when session is not found.
 
-  test('delete returns 401 when session not found (ownership miss)', async () => {
+  test('delete returns 404 JSON when session not found (ownership miss)', async () => {
     const req = makeStubReq({ params: { sessionId: 'nonexistent' } });
     const { res, calls } = makeStubRes();
     await SessionController.delete(req, res);
-    assert.strictEqual(calls.statusCode, 401);
-    assert.strictEqual(calls.body, 'Session not found');
+    assert.strictEqual(calls.statusCode, 404);
+    assert.deepStrictEqual(calls.body, { error: 'Session not found' });
   });
 });

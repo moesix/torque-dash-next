@@ -51,7 +51,7 @@ class UserController {
             // Check if user is already registered
             let user = await User.findOne({ where: { email: email } });
             if (user) {
-                return res.status(400).json({ error: 'This email is already registered' });
+                return res.status(409).json({ error: 'Registration failed. Please try a different email.' });
             }
 
             // Save new user to db
@@ -152,27 +152,24 @@ class UserController {
         try {
             const settings = await Settings.getSingleton();
             const envDisabled = process.env.DISABLE_REGISTRATION === 'true';
-            res.set('Cache-Control', 'private, max-age=30');
+            res.set('Cache-Control', 'public, max-age=30');
             res.json({
                 disableRegistration: settings.disableRegistration || envDisabled,
-                hasUploadApiToken: Boolean(settings.uploadApiToken || runtime.isFromEnv()),
                 tokenFromEnv: runtime.isFromEnv(),
-                hasLlmProvider: Boolean(settings.llmProvider),
-                llmProvider: settings.llmProvider || null,
-                llmModel: settings.llmModel || null,
-                llmEndpoint: settings.llmEndpoint || null,
-                hasLlmApiKey: Boolean(settings.llmApiKeyEnc),
-                vehicleMake: settings.vehicleMake || null,
-                vehicleModel: settings.vehicleModel || null,
-                vehicleYear: settings.vehicleYear || null,
-                engineCc: settings.engineCc || null,
-                llmThinkingMode: settings.llmThinkingMode ?? true,
-                llmReasoningEffort: settings.llmReasoningEffort || 'high',
-                llmMaxTokens: settings.llmMaxTokens || 16384,
-                timezoneOffset: settings.timezoneOffset ?? 0,
-                retentionEnabled: settings.retentionEnabled ?? false,
-                retentionDays: settings.retentionDays ?? 365,
             });
+        } catch (err) {
+            console.error(err.message || err);
+            res.status(500).json({ error: 'Internal server error' });
+        }
+    }
+    static async getSettingsFull(req, res) {
+        try {
+            const settings = await Settings.getSingleton();
+            const envDisabled = process.env.DISABLE_REGISTRATION === 'true';
+            res.set('Cache-Control', 'private, max-age=30');
+            res.json(settingsView(settings, {
+                disableRegistration: settings.disableRegistration || envDisabled,
+            }));
         } catch (err) {
             console.error(err.message || err);
             res.status(500).json({ error: 'Internal server error' });
@@ -345,27 +342,10 @@ class UserController {
 
             // Re-fetch the full settings row to return complete state
             const current = await Settings.getSingleton();
-            res.json({
+            res.json(settingsView(current, {
                 disableRegistration: current.disableRegistration || envDisabled,
-                hasUploadApiToken: Boolean(current.uploadApiToken || runtime.isFromEnv()),
-                tokenFromEnv: runtime.isFromEnv(),
-                hasLlmProvider: Boolean(current.llmProvider),
-                llmProvider: current.llmProvider || null,
-                llmModel: current.llmModel || null,
-                llmEndpoint: current.llmEndpoint || null,
-                hasLlmApiKey: Boolean(current.llmApiKeyEnc),
-                vehicleMake: current.vehicleMake || null,
-                vehicleModel: current.vehicleModel || null,
-                vehicleYear: current.vehicleYear || null,
-                engineCc: current.engineCc || null,
-                llmThinkingMode: current.llmThinkingMode ?? true,
-                llmReasoningEffort: current.llmReasoningEffort || 'high',
-                llmMaxTokens: current.llmMaxTokens || 16384,
-                timezoneOffset: current.timezoneOffset ?? 0,
-                retentionEnabled: current.retentionEnabled ?? false,
-                retentionDays: current.retentionDays ?? 365,
                 retentionPolicyApplied: policyApplied,
-            });
+            }));
         } catch (err) {
             console.error(err.message || err);
             res.status(500).json({ error: 'Internal server error' });
@@ -440,6 +420,34 @@ class UserController {
             res.status(500).json({ error: 'Internal server error' });
         }
     }
+}
+
+// ── Settings projection helper ──────────────────────────────────────────────
+// Single source of truth for the settings response shape. Callers pass extras
+// (e.g. disableRegistration override, retentionPolicyApplied) via the second
+// argument which is spread on top of the base fields.
+function settingsView(settings, extras = {}) {
+    return {
+        disableRegistration: settings.disableRegistration || false,
+        hasUploadApiToken: Boolean(settings.uploadApiToken || runtime.isFromEnv()),
+        tokenFromEnv: runtime.isFromEnv(),
+        hasLlmProvider: Boolean(settings.llmProvider),
+        llmProvider: settings.llmProvider || null,
+        llmModel: settings.llmModel || null,
+        llmEndpoint: settings.llmEndpoint || null,
+        hasLlmApiKey: Boolean(settings.llmApiKeyEnc),
+        vehicleMake: settings.vehicleMake || null,
+        vehicleModel: settings.vehicleModel || null,
+        vehicleYear: settings.vehicleYear || null,
+        engineCc: settings.engineCc || null,
+        llmThinkingMode: settings.llmThinkingMode ?? true,
+        llmReasoningEffort: settings.llmReasoningEffort || 'high',
+        llmMaxTokens: settings.llmMaxTokens || 16384,
+        timezoneOffset: settings.timezoneOffset ?? 0,
+        retentionEnabled: settings.retentionEnabled ?? false,
+        retentionDays: settings.retentionDays ?? 365,
+        ...extras,
+    };
 }
 
 module.exports = UserController;

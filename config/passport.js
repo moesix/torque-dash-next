@@ -28,16 +28,22 @@ module.exports = function(passport){
         })
     );
 
-    // called when user logs in, stores user id in cookie
+    // called when user logs in, stores user id + tokenVersion in cookie
     passport.serializeUser((user, done) => {
-        done(null, user.id);
-      });
-      
-    // called when request from client is made, loads user data into req.user based on cookie's user id
-    passport.deserializeUser(async (id, done) => {
+        done(null, { id: user.id, tv: user.tokenVersion || 0 });
+    });
+    
+    // called when request from client is made, loads user data into req.user based on cookie's user id + tokenVersion
+    passport.deserializeUser(async (session, done) => {
         try{
-            let user = await User.findByPk(id);
+            let user = await User.findByPk(session.id);
             if(user){
+                // Check tokenVersion to invalidate stale sessions (e.g. after password change)
+                const userTv = user.tokenVersion || 0;
+                const sessionTv = session.tv || 0;
+                if (userTv !== sessionTv) {
+                    return done(null, false);
+                }
                 done(null, user.get());
             }
             else{

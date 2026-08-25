@@ -12,6 +12,8 @@
  * loss on a persistently failing DB — acknowledge this in ops runbooks.
  */
 const Log = require('../models').Log;
+const Session = require('../models').Session;
+const sequelize = require('../models').sequelize;
 
 const BATCH_SIZE = 1000;
 const FLUSH_MS = 1000;
@@ -41,7 +43,12 @@ async function flush() {
     const batch = buffer.splice(0, buffer.length); // synchronous snapshot
     try {
         const rows = batch.map(toLogRow);
-        await Log.bulkCreate(rows, { ignoreDuplicates: true });
+        // Flush in chunks of at most BATCH_SIZE to avoid exceeding the
+        // PostgreSQL parameter limit (typically 32767 bind params).
+        for (let i = 0; i < rows.length; i += BATCH_SIZE) {
+            const chunk = rows.slice(i, i + BATCH_SIZE);
+            await Log.bulkCreate(chunk, { ignoreDuplicates: true, returning: false });
+        }
     } catch (err) {
         console.error('[ingestBuffer] flush failed, re-queueing:', err.message);
         for (const item of batch) {
@@ -57,6 +64,27 @@ async function flush() {
         }
     } finally {
         flushing = false;
+    }
+
+    // Denormalize summary columns on affected sessions using LEAST/GREATEST
+    // so concurrent ingests never overwrite a wider range.
+    // Runs OUTSIDE the main try/catch so a summary-update failure never
+    // re-queues rows that were already successfully written to the Log table.
+    try {
+        const sessionIds = [...new Set(batch.map(r => r.sessionId))];
+        if (sessionIds.length > 0) {
+            await Session.update({
+                firstTimestamp: sequelize.literal(`LEAST(COALESCE("Sessions"."firstTimestamp", sub.min_ts), sub.min_ts)`),
+                lastTimestamp: sequelize.literal(`GREATEST(COALESCE("Sessions"."lastTimestamp", sub.max_ts), sub.max_ts)`),
+                maxRpm: sequelize.literal(`GREATEST(COALESCE("Sessions"."maxRpm", sub.max_rpm), sub.max_rpm)`),
+                maxSpeed: sequelize.literal(`GREATEST(COALESCE("Sessions"."maxSpeed", sub.max_speed), sub.max_speed)`),
+            }, {
+                where: { id: sessionIds },
+                replacements: {},
+            });
+        }
+    } catch (err) {
+        console.error('[ingestBuffer] summary update failed:', err.message);
     }
 }
 

@@ -5,6 +5,16 @@ const Vehicle = require('../models').Vehicle;
 const sequelize = require('../models').sequelize;
 const Op = require('../models').Sequelize.Op;
 const { nanoid } = require('nanoid');
+const { discoverPidKeys } = require('../lib/pidRegistry');
+const {
+  renameSchema,
+  notesSchema,
+  cutSchema,
+  filterSchema,
+  copySchema,
+  joinSchema,
+  addLocationSchema,
+} = require('../lib/validators');
 
 class SessionController {
     static async delete(req, res) {
@@ -12,7 +22,7 @@ class SessionController {
             let userId = req.user.id;
             let sessionId = req.params.sessionId
             let session = await Session.destroy({ where: {id: sessionId, userId: userId } });
-            if(!session) return res.status(401).send('Session not found');
+            if(!session) return res.status(404).json({ error: 'Session not found' });
             res.sendStatus(200);
         }
         catch (err) {
@@ -35,17 +45,12 @@ class SessionController {
                     required: false,
                 }]
             });
-            if(!session) return res.status(404).send('Resource not found');
+            if(!session) return res.status(404).json({ error: 'Session not found' });
 
             // Single aggregate query for start/end + max speed/RPM.
             const summaries = await aggregateSummaries([session.id]);
             const s = summaries.get(session.id) || {};
-            const out = session.toJSON();
-            out.startDate = s.start || null;
-            out.endDate = s.end || null;
-            out.duration = formatDuration(s.start, s.end);
-            out.maxSpeed = (s.maxSpeed != null) ? s.maxSpeed : null;
-            out.maxRpm = (s.maxRpm != null) ? s.maxRpm : null;
+            const out = decorateWithSummaries(session, s);
             out.vehicleId = session.vehicleId || null;
             out.vehicleName = session.Vehicle?.name || null;
             res.json(out);
@@ -92,12 +97,7 @@ class SessionController {
             const summaries = await aggregateSummaries(sessions.map(s => s.id));
             const out = sessions.map(session => {
                 const s = summaries.get(session.id) || {};
-                const json = session.toJSON();
-                json.startDate = s.start || null;
-                json.endDate = s.end || null;
-                json.duration = formatDuration(s.start, s.end);
-                json.maxSpeed = (s.maxSpeed != null) ? s.maxSpeed : null;
-                json.maxRpm = (s.maxRpm != null) ? s.maxRpm : null;
+                const json = decorateWithSummaries(session, s);
                 json.vehicleId = session.vehicleId || null;
                 json.vehicleName = session.Vehicle?.name || null;
                 return json;
@@ -116,7 +116,7 @@ class SessionController {
             let user = await User.findOne({
                 where: { shareId: req.params.shareId }
             });
-            if(!user) return res.sendStatus(404);
+            if(!user) return res.status(404).json({ error: 'User not found' });
 
             // Get session for user (no eager Log load)
             let session = await Session.findOne({
@@ -125,17 +125,12 @@ class SessionController {
                     id: req.params.sessionId
                 }
             });
-            if(!session) return res.sendStatus(404);
+            if(!session) return res.status(404).json({ error: 'Session not found' });
 
             // Single aggregate query for start/end + max speed/RPM.
             const summaries = await aggregateSummaries([session.id]);
             const s = summaries.get(session.id) || {};
-            const out = session.toJSON();
-            out.startDate = s.start || null;
-            out.endDate = s.end || null;
-            out.duration = formatDuration(s.start, s.end);
-            out.maxSpeed = (s.maxSpeed != null) ? s.maxSpeed : null;
-            out.maxRpm = (s.maxRpm != null) ? s.maxRpm : null;
+            const out = decorateWithSummaries(session, s);
             res.json(out);
         }
         catch (err) {
@@ -149,7 +144,7 @@ class SessionController {
             let user = await User.findOne({
                 where: { shareId: req.params.shareId }
             });
-            if(!user) return res.sendStatus(404);
+            if(!user) return res.status(404).json({ error: 'User not found' });
 
             // Get all sessions for user (no eager Log load)
             let sessions = await Session.findAll({
@@ -160,13 +155,7 @@ class SessionController {
             const summaries = await aggregateSummaries(sessions.map(s => s.id));
             const out = sessions.map(session => {
                 const s = summaries.get(session.id) || {};
-                const json = session.toJSON();
-                json.startDate = s.start || null;
-                json.endDate = s.end || null;
-                json.duration = formatDuration(s.start, s.end);
-                json.maxSpeed = (s.maxSpeed != null) ? s.maxSpeed : null;
-                json.maxRpm = (s.maxRpm != null) ? s.maxRpm : null;
-                return json;
+                return decorateWithSummaries(session, s);
             });
             res.json(out);
         }
@@ -177,6 +166,10 @@ class SessionController {
     }
     static async rename(req, res) {
         try {
+            const { error: valErr } = renameSchema.validate(req.body);
+            if (valErr) {
+                return res.status(400).json({ error: valErr.details[0].message });
+            }
             const [affectedCount] = await Session.update(
                 { name: req.body.name },
                 { where: { 
@@ -195,13 +188,12 @@ class SessionController {
     }
     static async updateNotes(req, res) {
         try {
-            const { notes } = req.body;
-            if (notes !== undefined && notes !== null && typeof notes !== 'string') {
-                return res.status(400).json({ error: 'notes must be a string or null.' });
+            const { error: valErr } = notesSchema.validate(req.body);
+            if (valErr) {
+                return res.status(400).json({ error: valErr.details[0].message });
             }
-            const session = await Session.findOne({
-                where: { id: req.params.sessionId, userId: req.user.id }
-            });
+            const { notes } = req.body;
+            const session = await loadOwnedSession(req.params.sessionId, req.user.id);
             if (!session) return res.status(404).json({ error: 'Session not found' });
             await session.update({ notes: notes || null });
             res.json({ ok: true, notes: session.notes });
@@ -212,20 +204,12 @@ class SessionController {
     }
     static async addLocation(req, res) {
         try {
-            let session = await Session.findOne({
-                where: {
-                    id: req.params.sessionId,
-                    userId: req.user.id
-                }
-            });
-            if(!session) return res.sendStatus(404);
-            // ── VALIDATION ──────────────────────────────────────────────
-            if (!req.body.locations || !req.body.locations.start || !req.body.locations.end) {
-                return res.status(400).json({
-                    error: 'locations.start and locations.end are required'
-                });
+            let session = await loadOwnedSession(req.params.sessionId, req.user.id);
+            if(!session) return res.status(404).json({ error: 'Session not found' });
+            const { error: valErr } = addLocationSchema.validate(req.body);
+            if (valErr) {
+                return res.status(400).json({ error: valErr.details[0].message });
             }
-            // ── END VALIDATION ──────────────────────────────────────────
             await Session.update(
                 { startLocation: req.body.locations.start,
                   endLocation: req.body.locations.end },
@@ -244,18 +228,18 @@ class SessionController {
     }
     static async copy(req, res) {
         try {
+            const { error: valErr } = copySchema.validate(req.body);
+            if (valErr) {
+                return res.status(400).json({ error: valErr.details[0].message });
+            }
             // Session lookup and null check BEFORE the transaction
-            let session = await Session.findOne({
-                where: { 
-                    userId: req.user.id,
-                    id: req.params.sessionId
-                }
-            });
+            let session = await loadOwnedSession(req.params.sessionId, req.user.id);
             if (!session) return res.status(404).json({ error: 'Session not found' });
 
+            let sessionCopy;
             await sequelize.transaction( async (t) => {
                 // Create a copy of the session
-                let sessionCopy = await Session.create({
+                sessionCopy = await Session.create({
                     sessionId: nanoid(),
                     name: req.body.name,
                     startLocation: session.startLocation,
@@ -274,6 +258,7 @@ class SessionController {
                     }
                 );
             });
+            await recomputeSummary(sessionCopy.id);
             res.sendStatus(200);
         }
         catch (err) {
@@ -283,20 +268,13 @@ class SessionController {
     }
     static async filter(req, res) {
         try {
-            let filterNumber = parseInt(req.body.filterNumber, 10);
-            // Validate filterNumber prevents data destruction (modulo by zero or one)
-            if (isNaN(filterNumber) || filterNumber < 2) {
-                return res.status(400).json({
-                    error: 'filterNumber must be an integer >= 2'
-                });
+            const { error: valErr } = filterSchema.validate(req.body);
+            if (valErr) {
+                return res.status(400).json({ error: valErr.details[0].message });
             }
-            let session = await Session.findOne({ 
-                where: { 
-                    id: req.params.sessionId, 
-                    userId: req.user.id 
-                }
-            });
-            if(!session) return res.sendStatus(404);
+            let filterNumber = parseInt(req.body.filterNumber, 10);
+            let session = await loadOwnedSession(req.params.sessionId, req.user.id);
+            if(!session) return res.status(404).json({ error: 'Session not found' });
             // Quick count check — if filterNumber exceeds total logs, nothing to do
             const logCount = await Log.count({ where: { sessionId: session.id } });
             if(filterNumber > logCount) return res.sendStatus(200);
@@ -319,6 +297,7 @@ class SessionController {
             `, {
                 replacements: { sessionId: session.id, filterNumber: filterNumber }
             });
+            await recomputeSummary(session.id);
             res.sendStatus(200);
         }
         catch (err) {
@@ -328,30 +307,14 @@ class SessionController {
     }
     static async cut(req, res) {
         try {
+            const { error: valErr } = cutSchema.validate(req.body);
+            if (valErr) {
+                return res.status(400).json({ error: valErr.details[0].message });
+            }
             let { from, to } = req.body
 
-            if (!from || !to) {
-                return res.status(400).json({ error: 'Missing required fields: from, to' });
-            }
-
-            const startDate = new Date(from);
-            const endDate = new Date(to);
-
-            if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
-                return res.status(400).json({ error: 'Invalid date format for from/to' });
-            }
-
-            if (startDate > endDate) {
-                return res.status(400).json({ error: 'from must be before or equal to to' });
-            }
-
-            let session = await Session.findOne({ 
-                where: { 
-                    id: req.params.sessionId, 
-                    userId: req.user.id 
-                }
-            });
-            if(!session) return res.sendStatus(404);
+            let session = await loadOwnedSession(req.params.sessionId, req.user.id);
+            if(!session) return res.status(404).json({ error: 'Session not found' });
             
             // delete logs
             await Log.destroy({ where: {
@@ -363,6 +326,7 @@ class SessionController {
                       }
                 }
             }});
+            await recomputeSummary(session.id);
             res.sendStatus(200);
         }
         catch (err) {
@@ -372,24 +336,19 @@ class SessionController {
     }
     static async join(req, res) {
         try {
+            const { error: valErr } = joinSchema.validate(req.body);
+            if (valErr) {
+                return res.status(400).json({ error: valErr.details[0].message });
+            }
             let { joinSessionId, name } = req.body
-            let sessionOne = await Session.findOne({ 
-                where: { 
-                    id: req.params.sessionId, 
-                    userId: req.user.id
-                }
-            });
-            let sessionTwo = await Session.findOne({
-                where: { 
-                    id: joinSessionId, 
-                    userId: req.user.id
-                }
-            })
-            if(!sessionOne || !sessionTwo) return res.sendStatus(404); 
+            let sessionOne = await loadOwnedSession(req.params.sessionId, req.user.id);
+            let sessionTwo = await loadOwnedSession(joinSessionId, req.user.id);
+            if(!sessionOne || !sessionTwo) return res.status(404).json({ error: 'Session not found' }); 
 
+            let joinSession;
             await sequelize.transaction( async (t) => {
                 // create new session
-                let joinSession = await Session.create({
+                joinSession = await Session.create({
                     sessionId: nanoid(),
                     name: name,
                     userId: req.user.id
@@ -400,7 +359,8 @@ class SessionController {
                         `INSERT INTO "Logs" ("sessionId", timestamp, lon, lat, values, engine_rpm, vehicle_speed)
                          SELECT :targetSessionId, timestamp, lon, lat, values, engine_rpm, vehicle_speed
                          FROM "Logs"
-                         WHERE "sessionId" = :sourceSessionId`,
+                         WHERE "sessionId" = :sourceSessionId
+                         ON CONFLICT ("sessionId", timestamp) DO NOTHING`,
                         {
                             replacements: { targetSessionId: joinSession.id, sourceSessionId: sessionOne.id },
                             transaction: t
@@ -410,7 +370,8 @@ class SessionController {
                         `INSERT INTO "Logs" ("sessionId", timestamp, lon, lat, values, engine_rpm, vehicle_speed)
                          SELECT :targetSessionId, timestamp, lon, lat, values, engine_rpm, vehicle_speed
                          FROM "Logs"
-                         WHERE "sessionId" = :sourceSessionId`,
+                         WHERE "sessionId" = :sourceSessionId
+                         ON CONFLICT ("sessionId", timestamp) DO NOTHING`,
                         {
                             replacements: { targetSessionId: joinSession.id, sourceSessionId: sessionTwo.id },
                             transaction: t
@@ -418,6 +379,7 @@ class SessionController {
                     )
                 ]);
             });
+            await recomputeSummary(joinSession.id);
             res.sendStatus(200);
         }
         catch (err) {
@@ -428,22 +390,11 @@ class SessionController {
     static async exportCsv(req, res) {
         try {
             // 1. Ownership check
-            const session = await Session.findOne({
-                where: { id: req.params.sessionId, userId: req.user.id }
-            });
+            const session = await loadOwnedSession(req.params.sessionId, req.user.id);
             if (!session) return res.status(404).json({ error: 'Session not found' });
 
             // 2. Discover all k* PID keys via jsonb_object_keys SQL
-            const [keyRows] = await sequelize.query(`
-                SELECT DISTINCT key FROM (
-                    SELECT jsonb_object_keys(values) AS key
-                    FROM "Logs" WHERE "sessionId" = :sessionId
-                ) sub
-                WHERE key ~ '^k' AND length(key) > 1
-                ORDER BY key
-            `, { replacements: { sessionId: session.id } });
-
-            const pidKeys = keyRows.map(r => r.key);
+            const pidKeys = await discoverPidKeys(session.id, sequelize);
 
             // 3. Set headers for streaming CSV download
             const filename = sanitizeFilename(session.name || `session-${session.id}`);
@@ -494,7 +445,10 @@ class SessionController {
                         csvEscape(row.vehicle_speed),
                         ...pidKeys.map(k => csvEscape(values[k]))
                     ];
-                    res.write(cells.join(',') + '\n');
+                    const ok = res.write(cells.join(',') + '\n');
+                    if (!ok) {
+                        await new Promise(resolve => res.once('drain', resolve));
+                    }
                 }
 
                 cursor = { timestamp: batch[batch.length - 1].timestamp, id: batch[batch.length - 1].id };
@@ -530,9 +484,7 @@ class SessionController {
                 }
             }
 
-            const session = await Session.findOne({
-                where: { id: req.params.sessionId, userId: req.user.id },
-            });
+            const session = await loadOwnedSession(req.params.sessionId, req.user.id);
             if (!session) return res.status(404).json({ error: 'Session not found' });
 
             await session.update({ vehicleId: vehicleId || null });
@@ -552,26 +504,50 @@ async function aggregateSummaries(sessionIds) {
     const map = new Map();
     if (!sessionIds || sessionIds.length === 0) return map;
 
-    const rows = await Log.findAll({
-        where: { sessionId: sessionIds },
-        attributes: [
-            'sessionId',
-            [sequelize.fn('min', sequelize.col('timestamp')), 'start'],
-            [sequelize.fn('max', sequelize.col('timestamp')), 'end'],
-            [sequelize.fn('max', sequelize.col('vehicle_speed')), 'maxSpeed'],
-            [sequelize.fn('max', sequelize.col('engine_rpm')), 'maxRpm']
-        ],
-        group: ['sessionId']
+    // Read denormalized columns from Session first
+    const sessions = await Session.findAll({
+        where: { id: sessionIds },
+        attributes: ['id', 'firstTimestamp', 'lastTimestamp', 'maxRpm', 'maxSpeed'],
+        raw: true,
     });
 
-    for (const row of rows) {
-        const d = row.dataValues;
-        map.set(d.sessionId, {
-            start: d.start || null,
-            end: d.end || null,
-            maxSpeed: (d.maxSpeed != null) ? d.maxSpeed : null,
-            maxRpm: (d.maxRpm != null) ? d.maxRpm : null
+    const missingIds = [];
+    for (const s of sessions) {
+        if (s.firstTimestamp != null) {
+            map.set(s.id, {
+                start: s.firstTimestamp,
+                end: s.lastTimestamp,
+                maxSpeed: s.maxSpeed,
+                maxRpm: s.maxRpm,
+            });
+        } else {
+            missingIds.push(s.id);
+        }
+    }
+
+    // Fallback to Log aggregate for sessions with NULL denormalized columns
+    if (missingIds.length > 0) {
+        const rows = await Log.findAll({
+            where: { sessionId: missingIds },
+            attributes: [
+                'sessionId',
+                [sequelize.fn('min', sequelize.col('timestamp')), 'start'],
+                [sequelize.fn('max', sequelize.col('timestamp')), 'end'],
+                [sequelize.fn('max', sequelize.col('vehicle_speed')), 'maxSpeed'],
+                [sequelize.fn('max', sequelize.col('engine_rpm')), 'maxRpm']
+            ],
+            group: ['sessionId']
         });
+
+        for (const row of rows) {
+            const d = row.dataValues;
+            map.set(d.sessionId, {
+                start: d.start || null,
+                end: d.end || null,
+                maxSpeed: (d.maxSpeed != null) ? d.maxSpeed : null,
+                maxRpm: (d.maxRpm != null) ? d.maxRpm : null
+            });
+        }
     }
     return map;
 }
@@ -627,3 +603,62 @@ module.exports = SessionController;
 module.exports.formatDuration = formatDuration;
 module.exports.sanitizeFilename = sanitizeFilename;
 module.exports.csvEscape = csvEscape;
+module.exports.loadOwnedSession = loadOwnedSession;
+module.exports.decorateWithSummaries = decorateWithSummaries;
+module.exports.aggregateSummaries = aggregateSummaries;
+module.exports.recomputeSummary = recomputeSummary;
+module.exports.safeSharedSession = safeSharedSession;
+
+// ── Shared helpers ──────────────────────────────────────────────────────────
+
+async function loadOwnedSession(sessionId, userId) {
+    return Session.findOne({ where: { id: sessionId, userId } });
+}
+
+function decorateWithSummaries(session, summary) {
+    const out = session.toJSON ? session.toJSON() : session;
+    out.startDate = summary.start || null;
+    out.endDate = summary.end || null;
+    out.duration = formatDuration(summary.start, summary.end);
+    out.maxSpeed = summary.maxSpeed ?? null;
+    out.maxRpm = summary.maxRpm ?? null;
+    return out;
+}
+
+async function recomputeSummary(sessionId) {
+    if (!sessionId) return;
+    const log = await Log.findOne({
+        where: { sessionId },
+        attributes: [
+            [sequelize.fn('min', sequelize.col('timestamp')), 'start'],
+            [sequelize.fn('max', sequelize.col('timestamp')), 'end'],
+            [sequelize.fn('max', sequelize.col('vehicle_speed')), 'maxSpeed'],
+            [sequelize.fn('max', sequelize.col('engine_rpm')), 'maxRpm'],
+        ],
+        raw: true,
+    });
+    if (!log) return;
+    await Session.update(
+        {
+            firstTimestamp: log.start || null,
+            lastTimestamp: log.end || null,
+            maxRpm: log.maxRpm || null,
+            maxSpeed: log.maxSpeed || null,
+        },
+        { where: { id: sessionId } }
+    );
+}
+
+function safeSharedSession(session, summary) {
+    const EXCLUDE = new Set(['notes', 'sessionId', 'vehicleId', 'vehicleName', 'userId', 'updatedAt']);
+    const out = {};
+    for (const [key, value] of Object.entries(session)) {
+        if (!EXCLUDE.has(key)) out[key] = value;
+    }
+    out.startDate = summary.start || null;
+    out.endDate = summary.end || null;
+    out.duration = formatDuration(summary.start, summary.end);
+    out.maxSpeed = summary.maxSpeed ?? null;
+    out.maxRpm = summary.maxRpm ?? null;
+    return out;
+}

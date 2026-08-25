@@ -21,7 +21,9 @@ A self-hosted dashboard for [Torque Pro](https://torque-bhp.com/) vehicle teleme
 | **BYOK AI analysis** | Connect your own LLM (OpenAI, Anthropic, DeepSeek, Ollama, or any OpenAI-compatible endpoint) for per-session diagnostic insights. |
 | **DeepSeek first-class** | `deepseek-v4-flash` / `deepseek-v4-pro` with chain-of-thought Thinking Mode and configurable reasoning effort (High / Max). |
 | **PID decode engine** | Auto-discovers every OBD-II parameter from Torque's `values` JSONB — no schema changes when you add new PIDs. |
-| **Session management** | Auto-named trips (`Trip DDMMYYYY HH:MM AM/PM`), inline rename, shareable links. |
+| **Session management** | Auto-named trips (`Trip DDMMYYYY HH:MM AM/PM`), inline rename, shareable links, freeform notes with auto-save. |
+| **Multi-vehicle support** | Define named vehicle profiles (make, model, year, engine size), assign sessions to vehicles, filter session list by vehicle. |
+| **Cross-vehicle analysis history** | Browse and export all AI analyses across sessions and vehicles in one view — paginated, filterable, exportable as Markdown. |
 | **Configurable data retention** | Opt-in TimescaleDB retention policy auto-deletes telemetry older than 90/120/180/365 days — off by default (all data kept indefinitely), toggled from the Settings page. |
 | **API-key upload auth** | Optional `UPLOAD_API_TOKEN` Bearer authentication for Torque Pro uploads — requests presenting a matching token skip the per-IP rate limiter so reconnect bursts are never throttled. |
 | **React Router v8** | Frontend routing on `react-router` 8.3.0 (exact pin, replacing `react-router-dom`), resolving the remaining react-router Dependabot advisories including the v8-CSRF advisory fixed only in 8.3.0. |

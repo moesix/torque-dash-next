@@ -26,8 +26,8 @@ the React/Vite frontend (`apps/frontend/`).
 npm install
 ```
 Installs Express 4, Sequelize 6, `pg`, Passport, Joi, bcrypt, express-session,
-connect-pg-simple, cors, connect-flash, helmet, lodash, nanoid, plus dev tooling
-(eslint, morgan, nodemon).
+connect-pg-simple, cors, helmet, nanoid, plus dev tooling
+(eslint, @eslint/js, globals, husky, lint-staged, nodemon).
 
 ### Frontend (`apps/frontend/`)
 ```sh
@@ -164,6 +164,19 @@ new entities. Key conventions:
 - No Express `router` registration in the controller — routes are defined in
   `routes/api.js`.
 
+### 6.2a Extracted Helpers (`SessionController.js`)
+`SessionController` extracts shared logic into standalone functions (exported
+on the module):
+
+| Helper | Purpose |
+|--------|---------|
+| `loadOwnedSession(sessionId, userId)` | Single `Session.findOne` with ownership scoping — used by `updateNotes`, `cut`, `filter`, `copy`, `join`, `reassignVehicle`. |
+| `decorateWithSummaries(session, summary)` | Merges aggregate fields (`startDate`, `endDate`, `duration`, `maxSpeed`, `maxRpm`) onto a session JSON object. |
+| `aggregateSummaries(sessionIds)` | Single `GROUP BY` query across multiple session IDs — computes `min(timestamp)`, `max(timestamp)`, `max(vehicle_speed)`, `max(engine_rpm)` in one pass. Replaces the legacy pattern of loading full `Log` arrays per session. |
+| `formatDuration(start, end)` | Formats a `[start, end]` pair into a compact human string (e.g. `"1h 2m 5s"`). |
+| `sanitizeFilename(name)` | Strips path-dangerous chars from session names for `Content-Disposition` filenames. |
+| `csvEscape(val)` | Escapes a single CSV cell, including Excel formula injection guard. |
+
 ### 6.3 Routes (`routes/api.js`)
 - Route → controller mapping is explicit in `routes/api.js`:
   ```js
@@ -180,6 +193,45 @@ new entities. Key conventions:
 ### 6.4 Migration SQL (`infra/timescale/009_add_vehicles.sql`)
 - Raw SQL with `IF NOT EXISTS` / idempotent guards. Lexicographic filename
   ordering determines execution order (e.g. `008_` runs before `009_`).
+
+### 6.5 Joi Validation Pattern (`lib/validators.js`)
+Input validation is centralised in `lib/validators.js` using **Joi** schemas.
+Controllers import the relevant schema and call `.validate(req.body)` early,
+returning `400` with the first error detail on failure:
+
+```js
+const { renameSchema } = require('../lib/validators');
+// ...
+const { error: valErr } = renameSchema.validate(req.body);
+if (valErr) {
+    return res.status(400).json({ error: valErr.details[0].message });
+}
+```
+
+**Exported schemas:**
+
+| Schema | Used by | Purpose |
+|--------|---------|---------|
+| `renameSchema` | `SessionController.rename` | `{ name: string, 1–255 chars }` |
+| `notesSchema` | `SessionController.updateNotes` | `{ notes: string\|null, max 10000 }` |
+| `cutSchema` | `SessionController.cut` | `{ from, to }` ISO dates with `from ≤ to` custom validator |
+| `filterSchema` | `SessionController.filter` | `{ filterNumber: int 2–100000 }` |
+| `copySchema` | `SessionController.copy` | `{ name: string, required }` |
+| `joinSchema` | `SessionController.join` | `{ joinSessionId: positive int, name: string }` |
+| `addLocationSchema` | `SessionController.addLocation` | `{ locations: { start, end } }` strings |
+| `vehicleCreateSchema` | `VehicleController.create` | Vehicle fields: `name` required, `make`/`model`/`year`/`engineCc`/`vin` optional |
+| `vehicleUpdateSchema` | `VehicleController.update` | Same as create, all optional, `min(1)` — at least one field required |
+| `telemetryRangeSchema` | (available) | `{ from, to }` ISO dates + `limit` (1–10000, default 5000) + `offset` (≥0) |
+
+**Pure validation helpers** (legacy, used in `UserController.updateSettings`):
+
+| Helper | Validates |
+|--------|-----------|
+| `validateProvider(v)` | LLM provider against `PROVIDER_ALLOWLIST` (`openai`, `anthropic`, `ollama`, `deepseek`, `custom`) |
+| `validateLlmThinkingMode(v)` | Boolean |
+| `validateLlmMaxTokens(v)` | Integer 2048–32768 |
+| `validateRetentionEnabled(v)` | Boolean |
+| `validateRetentionDays(v)` | Integer 90–365 |
 
 ---
 
@@ -334,20 +386,35 @@ on every commit:
 > First-time setup: run `npm install` (or `npm run prepare`) to initialise the
 > husky hooks directory (`.husky/`).
 
-### 9.3 CI Pipeline
+### 9.3 Test Commands
+
+**Backend** (Node built-in test runner):
+```sh
+npm test              # runs: node --test (discovers test/*.test.js)
+npm run test:coverage # runs: c8 node --test (coverage via c8)
+```
+
+**Frontend** (Vitest):
+```sh
+cd apps/frontend
+npm test         # runs: vitest run
+npm run test:watch  # runs: vitest (watch mode)
+```
+
+### 9.4 CI Pipeline
 
 A **GitHub Actions** workflow (`.github/workflows/ci.yml`) runs on every push
 or pull request to the `development` branch:
 
-- **Backend checks:** `npm ci` → `npm test` → `npm run lint`.
-- **Frontend checks:** `npm ci` → `npx tsc --noEmit` (typecheck) → `npm run build`.
+- **Backend checks:** `npm ci` → `npm test` → `npm run test:coverage` → `npm run lint`.
+- **Frontend checks:** `npm ci` → `npm run lint` (best-effort — `typescript-eslint` TS 7.0 support pending) → `npm test` (vitest) → `npx tsc --noEmit` (typecheck) → `npm run build`.
 
 The workflow uses `actions/checkout@v7` and `actions/setup-node@v7` with npm
 caching and **Node 22** (`node-version: '22'`, matching the `node:22-bookworm-slim`
-runtime images). The lint step is now **enforced** — the previous `continue-on-error: true`
+runtime images). The backend lint step is **enforced** — the previous `continue-on-error: true`
 has been removed, so ESLint failures correctly block the build.
 
-### 9.4 Versioning
+### 9.5 Versioning
 
 A **Version Bump** workflow (`.github/workflows/version-bump.yml`) runs on every
 push to `master`. It:
@@ -407,10 +474,13 @@ blockers are resolved and re-reviewed as PASS:
 
 ### Medium priority
 
-- **SSRG guard has a DNS-rebinding TOCTOU.** `lib/ssrfGuard.isSafeUrl` resolves
+- **SSRF guard has a DNS-rebinding TOCTOU.** `lib/ssrfGuard.isSafeUrl` resolves
   the hostname and validates the IP, but `UploadController` then calls
   `fetch(url)` with the **original hostname**, which re-resolves at connect time
   (attacker can swap the DNS record to an internal IP between check and fetch).
+  **Partially addressed:** the guard now validates against a resolved IP
+  snapshot, reducing the window, but a full fix (pin the resolved IP in the
+  request) is still pending.
   **Fix:** resolve once, validate, then connect to the **validated IP** (e.g.
   pass an `URL` with the resolved address, or pin the resolved IP in the
   request).
@@ -539,7 +609,10 @@ blockers are resolved and re-reviewed as PASS:
 - **Configurable Data Retention Policy (Plan 046)** — `retentionEnabled` (BOOLEAN, default false — opt-in) and `retentionDays` (INTEGER, default 365, range 90–365) on the Settings singleton (migration `011_add_retention_settings.sql`). `PUT /api/settings` validates both fields (400 on non-boolean / non-integer / out-of-range) and applies a TimescaleDB `add_retention_policy`/`remove_retention_policy` on the `Logs` hypertable using a remove-then-add idempotent pattern; the response includes `retentionPolicyApplied`. Frontend Settings page gains a "Data Retention" card (enable Switch + 90/120/180/365-day select, local error state, rollback on save failure). Validation mirrored in `test/settingsValidation.test.js` (10 new cases; suite now **61 tests**).
 - **Bleeding-edge dependency upgrade (Plan 047)** — backend (root `package.json`): `joi` 18.2.3, `express-rate-limit` 8.6.2, `pg` 8.22.0, `cors` 2.8.6, `express-session` 1.19.0, `nodemon` 3.1.14, `globals` 17.9.0, `lint-staged` 17.3.0. Frontend: `react`/`react-dom` 19.2.8, `react-router` **8.3.0** (exact pin — replaces `react-router-dom`, resolves GHSA-qwww-vcr4-c8h2), `vite` 8.2.0, `@vitejs/plugin-react` 5.2.0, `typescript` 7.0.2, `tailwindcss` 4.3.3 + `@tailwindcss/vite` 4.3.3, `zustand` 5.0.14, `@tanstack/react-query` 5.101.4, `react-markdown` 10.1.0, `react-leaflet` 5.0.0, `@types/react` 19.2.18, `@types/react-dom` 19.2.4. Infra: both Dockerfiles on `node:22-bookworm-slim`, CI workflows on Node 22, `timescale/timescaledb:2.29.1-pg16` in compose.
 - **Tremor replaced with native Tailwind (Plan 049)** — the `@tremor/react` dependency was removed; every Tremor component was reimplemented with plain Tailwind utilities, including a new accessible `Toggle` switch (`components/ui/Toggle.tsx`, sr-only label). `index.css` dropped the Tremor safelist directives and typography tokens. Bundle shrunk ~65 kB; all chunks now <400 kB (largest ~380 kB echarts) via Rolldown `codeSplitting` groups in `vite.config.ts`. See `docs/architecture.md` §3.8.
-- **Remaining open issues:** SSRF TOCTOU (documented in section 10 above — Known Issues / Follow-up Items).
+- **Remaining open issues:** SSRF TOCTOU (partially addressed — see section 10 above).
+- **Cross-vehicle analysis history** — `GET /api/analyses` lists all analyses across sessions (paginated, optional vehicle filter); `GET /api/analyses/export` streams all analyses as a Markdown file; `GET /api/sessions/:sessionId/analyses/:analysisId` returns a single analysis with full response/reasoning.
+- **Extracted controller helpers** — `SessionController` now uses `loadOwnedSession()`, `decorateWithSummaries()`, and `aggregateSummaries()` to eliminate duplicate code and the N+1 query pattern.
+- **Joi validation schemas** — `lib/validators.js` centralises input validation with Joi schemas for session operations (rename, notes, cut, filter, copy, join, addLocation) and vehicle CRUD (create/update), plus pure validation helpers for LLM settings.
 
 ---
 
@@ -626,3 +699,16 @@ forwards `/api` to the backend (the included `apps/frontend/nginx.conf` does thi
 >
 > Apply it via your database console or include it in your migration run. It is
 > **idempotent** — safe to re-run.
+
+### Express 5 migration (future)
+
+The app uses Express 4.22.x. Express 5 (5.2.x) is the current major. Known
+breaking changes relevant here:
+- `app.use('*', ...)` wildcard must become `app.use((req, res) => ...)` (no
+  path argument) or `app.use('/*splat', ...)`.
+- Async error propagation is built-in (no need for try/catch wrappers in
+  route handlers — Express 5 catches rejected promises automatically).
+- `req.query` returns a plain object (no prototype).
+
+Migration is deferred until integration tests exist (plan 050/069). The
+wildcard at `app.js:92` is the only breaking pattern.

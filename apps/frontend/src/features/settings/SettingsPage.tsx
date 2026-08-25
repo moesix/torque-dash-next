@@ -4,6 +4,7 @@ import type { Settings } from '@/lib/types';
 import Toggle from '@/components/ui/Toggle';
 import AiProviderCard from './AiProviderCard';
 import VehicleManager from './VehicleManager';
+import AnalysisHistory from '@/components/ai/AnalysisHistory';
 
 export default function SettingsPage() {
   const [disableRegistration, setDisableRegistration] = useState(false);
@@ -237,6 +238,7 @@ export default function SettingsPage() {
       </div>
 
       <AiProviderCard settings={llmSettings} onUpdate={setLlmSettings} />
+      <AnalysisHistory />
       <VehicleManager />
 
       <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-6 shadow-xs">

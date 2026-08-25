@@ -1,10 +1,13 @@
+const { Op } = require('sequelize');
 const Session = require('../models').Session;
 const Log = require('../models').Log;
 const Analysis = require('../models').Analysis;
+const Vehicle = require('../models').Vehicle;
 const Settings = require('../models').Settings;
 const sequelize = require('../models').sequelize;
-const { analyze } = require('../lib/llmProviders');
+const { analyze, streamEvents } = require('../lib/llmProviders');
 const { buildAnalysisPrompt } = require('../lib/llmPrompt');
+const { discoverPidKeys } = require('../lib/pidRegistry');
 
 class AnalysisController {
   static async analyzeSession(req, res) {
@@ -22,15 +25,7 @@ class AnalysisController {
       }
 
       // 3. Discover PID keys
-      const [keyRows] = await sequelize.query(`
-        SELECT DISTINCT key FROM (
-          SELECT jsonb_object_keys(values) AS key
-          FROM "Logs" WHERE "sessionId" = :sessionId
-        ) sub
-        WHERE key ~ '^k' AND length(key) > 1
-        ORDER BY key
-      `, { replacements: { sessionId: session.id } });
-      const pidKeys = keyRows.map(r => r.key);
+      const pidKeys = await discoverPidKeys(session.id, sequelize);
 
       // 3b. Compute session duration from createdAt to last log timestamp
       const [lastLog] = await sequelize.query(`
@@ -109,50 +104,13 @@ class AnalysisController {
         llmAbort.abort();
       });
 
-      const reader = llmRes.body.getReader();
-      const decoder = new TextDecoder();
       let fullResponse = '';
       let fullReasoning = '';
-      let buffer = '';
 
-      while (true) { // eslint-disable-line no-constant-condition
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          const data = line.slice(6).trim();
-          if (data === '[DONE]') {
-            break;
-          }
-          try {
-            const parsed = JSON.parse(data);
-            // OpenAI-style: choices[0].delta.content
-            const delta = parsed.choices?.[0]?.delta?.content;
-            // DeepSeek reasoning models: content is null, text comes via reasoning_content
-            const reasoning = parsed.choices?.[0]?.delta?.reasoning_content;
-            // Anthropic-style: delta.text from content_block_delta events
-            const text = delta || reasoning || parsed.delta?.text;
-            if (text) {
-              if (delta) {
-                fullResponse += text;
-              } else if (reasoning) {
-                fullReasoning += text;
-              } else {
-                // Anthropic-style (no delta/reasoning distinction) — treat as content
-                fullResponse += text;
-              }
-              const type = delta ? 'content' : (reasoning ? 'reasoning' : 'content');
-              res.write(`data: ${JSON.stringify({ type, text })}\n\n`);
-            }
-          } catch {
-            // Skip malformed chunks
-          }
-        }
+      for await (const evt of streamEvents(llmRes)) {
+        if (evt.type === 'content') fullResponse += evt.text;
+        else if (evt.type === 'reasoning') fullReasoning += evt.text;
+        res.write(`data: ${JSON.stringify(evt)}\n\n`);
       }
 
       // 8. Cache the analysis (BEFORE signaling done so listAnalyses finds it)
@@ -195,7 +153,7 @@ class AnalysisController {
         where: { sessionId: session.id, userId: req.user.id },
         order: [['createdAt', 'DESC']],
         limit: 20,
-        attributes: ['id', 'provider', 'model', 'response', 'reasoning', 'tokenUsage', 'createdAt'],
+        attributes: ['id', 'provider', 'model', 'createdAt'],
       });
 
       res.json(analyses);
@@ -218,6 +176,99 @@ class AnalysisController {
     }
   }
 
+  static async listAllAnalyses(req, res) {
+    try {
+      const limit = Math.min(parseInt(req.query.limit, 10) || 50, 200);
+      const offset = parseInt(req.query.offset, 10) || 0;
+      const vehicleId = req.query.vehicleId ? Number(req.query.vehicleId) : null;
+
+      // Build where clause
+      const where = { userId: req.user.id };
+      if (vehicleId) {
+        // Join through Session to filter by vehicle
+        const sessions = await Session.findAll({
+          where: { userId: req.user.id, vehicleId },
+          attributes: ['id'],
+        });
+        where.sessionId = { [Op.in]: sessions.map(s => s.id) };
+      }
+
+      const analyses = await Analysis.findAll({
+        where,
+        order: [['createdAt', 'DESC']],
+        limit, offset,
+        attributes: ['id', 'sessionId', 'provider', 'model', 'createdAt'],
+        include: [{
+          model: Session,
+          as: 'Session',
+          attributes: ['id', 'name', 'vehicleId'],
+          include: [{ model: Vehicle, as: 'Vehicle', attributes: ['id', 'name'] }],
+        }],
+      });
+
+      const total = await Analysis.count({ where });
+      res.json({ analyses, total, limit, offset });
+    } catch (err) {
+      console.error('[AnalysisController.listAllAnalyses]', err);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  }
+
+  static async getAnalysis(req, res) {
+    try {
+      const analysis = await Analysis.findOne({
+        where: { id: req.params.analysisId, userId: req.user.id },
+        attributes: ['id', 'sessionId', 'provider', 'model', 'response', 'reasoning', 'createdAt'],
+      });
+      if (!analysis) return res.status(404).json({ error: 'Analysis not found' });
+      res.json(analysis);
+    } catch (err) {
+      console.error('[AnalysisController.getAnalysis]', err);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  }
+
+  static async exportAnalyses(req, res) {
+    try {
+      const where = { userId: req.user.id };
+      if (req.query.vehicleId) {
+        const sessions = await Session.findAll({
+          where: { userId: req.user.id, vehicleId: Number(req.query.vehicleId) },
+          attributes: ['id'],
+        });
+        where.sessionId = { [Op.in]: sessions.map(s => s.id) };
+      }
+
+      const analyses = await Analysis.findAll({
+        where,
+        order: [['createdAt', 'DESC']],
+        attributes: ['id', 'sessionId', 'provider', 'model', 'response', 'reasoning', 'createdAt'],
+        include: [{ model: Session, as: 'Session', attributes: ['name'] }],
+      });
+
+      res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
+      res.setHeader('Content-Disposition', 'attachment; filename="analyses.md"');
+      res.write('# AI Analysis History\n\n');
+
+      for (const a of analyses) {
+        res.write(`## ${a.Session?.name || 'Unknown Session'} — ${a.createdAt.toISOString().split('T')[0]}\n\n`);
+        res.write(`**Provider:** ${a.provider} | **Model:** ${a.model}\n\n`);
+        res.write(a.response + '\n\n');
+        if (a.reasoning) {
+          res.write('<details><summary>Reasoning</summary>\n\n');
+          res.write(a.reasoning + '\n\n');
+          res.write('</details>\n\n');
+        }
+        res.write('---\n\n');
+      }
+      res.end();
+    } catch (err) {
+      console.error('[AnalysisController.exportAnalyses]', err);
+      if (!res.headersSent) res.status(500).json({ error: 'Export failed' });
+      else res.end();
+    }
+  }
+
   static async testConnection(req, res) {
     try {
       const settings = await Settings.getSingleton();
@@ -228,31 +279,9 @@ class AnalysisController {
       const testPrompt = 'Say "Connection successful" and nothing else.';
       const { response: llmRes } = await analyze(testPrompt, settings, { maxTokens: 20 });
 
-      const reader = llmRes.body.getReader();
-      const decoder = new TextDecoder();
       let text = '';
-      let buffer = '';
-
-      while (true) { // eslint-disable-line no-constant-condition
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          const data = line.slice(6).trim();
-          if (data === '[DONE]') break;
-          try {
-            const parsed = JSON.parse(data);
-            const delta = parsed.choices?.[0]?.delta?.content;
-            const reasoning = parsed.choices?.[0]?.delta?.reasoning_content;
-            const chunk = delta || reasoning || parsed.delta?.text;
-            if (chunk) text += chunk;
-          } catch {
-            // partial chunk during streaming — skip unparseable fragments
-          }
-        }
+      for await (const evt of streamEvents(llmRes)) {
+        text += evt.text;
       }
 
       res.json({ ok: true, response: text.trim(), provider: settings.llmProvider });

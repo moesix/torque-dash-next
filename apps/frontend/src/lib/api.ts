@@ -5,6 +5,7 @@ import type {
   Settings,
   GenerateUploadTokenResponse,
   Analysis,
+  AnalysisPreview,
   UpdateLlmSettings,
   TestLlmResponse,
   Vehicle,
@@ -227,9 +228,9 @@ export async function analyzeSession(
   return res.body!;
 }
 
-/** List past analyses for a session. */
-export async function listAnalyses(sessionId: string): Promise<Analysis[] | undefined> {
-  return request<Analysis[]>(`/api/sessions/${sessionId}/analyses`);
+/** List past analyses for a session (previews — no response body). */
+export async function listAnalyses(sessionId: string): Promise<AnalysisPreview[] | undefined> {
+  return request<AnalysisPreview[]>(`/api/sessions/${sessionId}/analyses`);
 }
 
 /** Delete a cached analysis. */
@@ -237,6 +238,37 @@ export async function deleteAnalysis(sessionId: string, analysisId: number): Pro
   await request(`/api/sessions/${sessionId}/analyses/${analysisId}`, {
     method: 'DELETE',
   });
+}
+
+// ── Cross-vehicle analysis history ──────────────────────────────────
+
+export interface PaginatedAnalyses {
+  analyses: AnalysisPreview[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+/** List all analyses across sessions (optionally filtered by vehicle). */
+export async function getAllAnalyses(
+  limit = 50,
+  offset = 0,
+  vehicleId?: number,
+): Promise<PaginatedAnalyses | undefined> {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  if (vehicleId) params.set('vehicleId', String(vehicleId));
+  return request<PaginatedAnalyses>(`/api/analyses?${params}`);
+}
+
+/** Get a single analysis by ID (full detail). */
+export async function getAnalysis(id: number): Promise<Analysis | undefined> {
+  return request<Analysis>(`/api/analyses/${id}`);
+}
+
+/** Export analyses as a markdown file download. */
+export async function exportAnalyses(vehicleId?: number): Promise<void> {
+  const params = vehicleId ? `?vehicleId=${vehicleId}` : '';
+  window.location.href = `/api/analyses/export${params}`;
 }
 
 // ── CSV Export ─────────────────────────────────────────────────────────

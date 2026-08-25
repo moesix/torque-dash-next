@@ -17,6 +17,11 @@ module.exports = (sequelize, DataTypes) => {
             type: DataTypes.STRING,
             unique: true
         },
+        tokenVersion: {
+            type: DataTypes.INTEGER,
+            defaultValue: 0,
+            allowNull: false,
+        },
         forwardUrls: {
             type: DataTypes.ARRAY(DataTypes.STRING)
         }

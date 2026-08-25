@@ -3,9 +3,9 @@ import type { Ref } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
-import { analyzeSession, listAnalyses, getSettings } from '@/lib/api';
+import { analyzeSession, listAnalyses, getAnalysis, getSettings } from '@/lib/api';
 import StreamRenderer from './StreamRenderer';
-import type { Analysis, Settings } from '@/lib/types';
+import type { Analysis, AnalysisPreview, Settings } from '@/lib/types';
 import { stripMarkdown } from '@/lib/utils';
 
 export interface AnalysisPanelHandle {
@@ -23,7 +23,9 @@ export default function AnalysisPanel({ sessionId, ref }: Props) {
     const [stream, setStream] = useState<ReadableStream<Uint8Array> | null>(null);
     const [analyzing, setAnalyzing] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    const [pastAnalyses, setPastAnalyses] = useState<Analysis[]>([]);
+    const [pastAnalyses, setPastAnalyses] = useState<AnalysisPreview[]>([]);
+    const [expandedMap, setExpandedMap] = useState<Map<number, Analysis>>(new Map());
+    const [loadingId, setLoadingId] = useState<number | null>(null);
     const [copiedId, setCopiedId] = useState<number | null>(null);
     const [copiedTextId, setCopiedTextId] = useState<number | null>(null);
     const [copiedStream, setCopiedStream] = useState(false);
@@ -88,6 +90,30 @@ export default function AnalysisPanel({ sessionId, ref }: Props) {
       }
     }
 
+    async function toggleExpand(preview: AnalysisPreview) {
+      if (expandedMap.has(preview.id)) {
+        // Collapse
+        setExpandedMap((prev) => {
+          const next = new Map(prev);
+          next.delete(preview.id);
+          return next;
+        });
+        return;
+      }
+      // Expand — fetch full detail
+      setLoadingId(preview.id);
+      try {
+        const full = await getAnalysis(preview.id);
+        if (full) {
+          setExpandedMap((prev) => new Map(prev).set(preview.id, full));
+        }
+      } catch {
+        // Silently ignore — keep collapsed
+      } finally {
+        setLoadingId(null);
+      }
+    }
+
     if (llmSettings && !llmSettings.hasLlmProvider) {
       return (
         <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-6 shadow-xs">
@@ -136,47 +162,65 @@ export default function AnalysisPanel({ sessionId, ref }: Props) {
           {pastAnalyses.length > 0 && (
             <div className="space-y-2">
               <p className="text-sm leading-relaxed font-medium">Past Analyses</p>
-              {pastAnalyses.map((a) => (
-                <details key={a.id} className="rounded border border-[var(--border-default)] p-3 dark:border-[var(--border-strong)]">
-                  <summary className="cursor-pointer text-sm text-gray-600 dark:text-gray-400">
-                    {a.provider}/{a.model} — {new Date(a.createdAt).toLocaleString()}
-                  </summary>
-                  <div className="flex justify-end mt-1 mb-1">
-                    <button
-                      type="button"
-                      onClick={() => copyToClipboard(a.response, a.id)}
-                      className="text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+              {pastAnalyses.map((a) => {
+                const full = expandedMap.get(a.id);
+                const isLoading = loadingId === a.id;
+                return (
+                  <details
+                    key={a.id}
+                    open={!!full}
+                    className="rounded border border-[var(--border-default)] p-3 dark:border-[var(--border-strong)]"
+                  >
+                    <summary
+                      className="cursor-pointer text-sm text-gray-600 dark:text-gray-400"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        toggleExpand(a);
+                      }}
                     >
-                      {copiedId === a.id ? 'Copied!' : 'Copy'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => copyAsPlainText(a.response, a.id)}
-                      className="text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 ml-2"
-                    >
-                      {copiedTextId === a.id ? 'Copied!' : 'Copy Text'}
-                    </button>
-                  </div>
-                  <div className="prose prose-sm dark:prose-invert max-w-none analysis-prose overflow-hidden">
-                    {a.reasoning && (
-                      <details className="mb-3">
-                        <summary className="cursor-pointer text-xs text-gray-500 dark:text-gray-400">
-                          Reasoning
-                        </summary>
-                        <div className="mt-2 text-xs text-gray-600 dark:text-gray-400 whitespace-pre-wrap border-l-2 border-gray-300 dark:border-gray-600 pl-3">
-                          {a.reasoning}
+                      {isLoading ? 'Loading...' : `${a.provider}/${a.model} — ${new Date(a.createdAt).toLocaleString()}`}
+                    </summary>
+                    {full && (
+                      <>
+                        <div className="flex justify-end mt-1 mb-1">
+                          <button
+                            type="button"
+                            onClick={() => copyToClipboard(full.response, full.id)}
+                            className="text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                          >
+                            {copiedId === full.id ? 'Copied!' : 'Copy'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => copyAsPlainText(full.response, full.id)}
+                            className="text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 ml-2"
+                          >
+                            {copiedTextId === full.id ? 'Copied!' : 'Copy Text'}
+                          </button>
                         </div>
-                      </details>
+                        <div className="prose prose-sm dark:prose-invert max-w-none analysis-prose overflow-hidden">
+                          {full.reasoning && (
+                            <details className="mb-3">
+                              <summary className="cursor-pointer text-xs text-gray-500 dark:text-gray-400">
+                                Reasoning
+                              </summary>
+                              <div className="mt-2 text-xs text-gray-600 dark:text-gray-400 whitespace-pre-wrap border-l-2 border-gray-300 dark:border-gray-600 pl-3">
+                                {full.reasoning}
+                              </div>
+                            </details>
+                          )}
+                          <Markdown
+                            remarkPlugins={[remarkGfm]}
+                            rehypePlugins={[rehypeHighlight]}
+                          >
+                            {full.response}
+                          </Markdown>
+                        </div>
+                      </>
                     )}
-                    <Markdown
-                      remarkPlugins={[remarkGfm]}
-                      rehypePlugins={[rehypeHighlight]}
-                    >
-                      {a.response}
-                    </Markdown>
-                  </div>
-                </details>
-              ))}
+                  </details>
+                );
+              })}
             </div>
           )}
         </div>

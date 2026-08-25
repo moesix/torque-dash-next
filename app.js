@@ -30,7 +30,6 @@ const { sequelize } = require('./models');
 const config = require('./config/config');
 // Note: config.js will throw if DATABASE_URL or SESSION_KEYS are missing.
 // This is intentional — the app must not start with default/placeholder secrets.
-const flash = require('connect-flash');
 const session = require('express-session');
 const PgSession = require('connect-pg-simple')(session);
 const passport = require('passport');
@@ -70,15 +69,8 @@ app.use(session({
         secure: process.env.COOKIE_SECURE === 'true'
     }
 }));
-app.use(flash());
 app.use(passport.initialize());
 app.use(passport.session());
-
-app.use((req, res, next) => {
-    res.locals.success = req.flash('success');
-    res.locals.error = req.flash('error');
-    next();
-});
 
 // Health probe (no auth)
 app.get('/health', (req, res) => res.json({ status: 'ok', ts: Date.now() }));

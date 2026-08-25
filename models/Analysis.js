@@ -45,5 +45,9 @@ module.exports = (sequelize, DataTypes) => {
         updatedAt: false,
     });
 
+    Analysis.associate = function (models) {
+        Analysis.belongsTo(models.Session, { foreignKey: 'sessionId', as: 'Session' });
+    };
+
     return Analysis;
 };

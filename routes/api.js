@@ -69,6 +69,7 @@ const aiLimiter = makeLimiter(rateLimits.ai);
 // Public read of site settings (register/login pages need this to decide whether
 // to show the signup form). Toggling requires an authenticated session.
 router.get('/settings', UserController.getSettings);
+router.get('/settings/full', authenticate, UserController.getSettingsFull);
 // Settings mutation and token generation use writeLimiter only (no global limiter
 // redundancy). Must come before the global limiter below.
 router.put('/settings', writeLimiter, authenticate, UserController.updateSettings);
@@ -130,7 +131,12 @@ router.patch('/vehicles/:vehicleId/default', authenticate, VehicleController.set
 router.post('/settings/test-llm', aiLimiter, authenticate, AnalysisController.testConnection);
 router.post('/sessions/:sessionId/analyze', aiLimiter, authenticate, AnalysisController.analyzeSession);
 router.get('/sessions/:sessionId/analyses', authenticate, AnalysisController.listAnalyses);
+router.get('/sessions/:sessionId/analyses/:analysisId', authenticate, AnalysisController.getAnalysis);
 router.delete('/sessions/:sessionId/analyses/:analysisId', authenticate, AnalysisController.deleteAnalysis);
+
+// ── Cross-vehicle analysis history ────────────────────────────────────
+router.get('/analyses', authenticate, AnalysisController.listAllAnalyses);
+router.get('/analyses/export', authenticate, AnalysisController.exportAnalyses);
 
 
 module.exports = router;

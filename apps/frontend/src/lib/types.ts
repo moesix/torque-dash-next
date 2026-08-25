@@ -151,12 +151,31 @@ export type SeriesSource = PidMeta | ColumnMeta;
 /** A cached analysis result. */
 export interface Analysis {
   id: number;
+  sessionId?: number;
   provider: string;
   model: string;
   response: string;
   reasoning?: string | null;
   tokenUsage: Record<string, unknown> | null;
   createdAt: string;
+}
+
+/** Preview of an analysis (no response body — used in listings). */
+export interface AnalysisPreview {
+  id: number;
+  sessionId?: number;
+  provider: string;
+  model: string;
+  createdAt: string;
+  Session?: {
+    id: number;
+    name: string | null;
+    vehicleId: number | null;
+    Vehicle?: {
+      id: number;
+      name: string;
+    } | null;
+  };
 }
 
 /** Request body for updating LLM settings. */
