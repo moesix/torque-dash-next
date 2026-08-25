@@ -77,12 +77,23 @@ function normalizeRow(row: RawTelemetryRow): TelemetryFrame {
  * auth-gated endpoint afterwards as a cookie sanity check.
  */
 export async function login(email: string, password: string): Promise<boolean> {
-  await fetch('/api/users/login', {
+  const res = await fetch('/api/users/login', {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, password }),
   });
+  if (!res.ok) {
+    let message = 'Login failed';
+    try {
+      const body = await res.json();
+      if (body?.error) message = body.error;
+    } catch {
+      // non-JSON body — keep default message
+    }
+    throw new ApiError(message, res.status);
+  }
+  // Cookie sanity probe (kept from the previous design).
   try {
     await getSessions();
     return true;
@@ -127,17 +138,72 @@ export async function getSession(id: string): Promise<Session | undefined> {
   return request<Session>(`/api/sessions/${id}`);
 }
 
+/** Server clamps the telemetry `limit` to 10000 (TelemetryController.range),
+ *  so each page can carry at most this many frames. */
+const TELEMETRY_PAGE_SIZE = 10000;
+/** Safety valve bounding memory for very long sessions (~tens of MB worst
+ *  case). Raise deliberately — never silently. */
+const TELEMETRY_HARD_CAP = 100000;
+
+/**
+ * Cursor-paging loop shared by timestamp-ordered endpoints. Fetches pages of
+ * {@link TELEMETRY_PAGE_SIZE} rows until a short page arrives (final page), or
+ * {@link hardCap} rows have accumulated (returns `truncated: true`). The next
+ * cursor is derived from the last row's timestamp (+1ms); ties are impossible
+ * per hypertable PK ("sessionId", timestamp).
+ *
+ * Pure with respect to the transport — `pageFetch` is injected, so the loop is
+ * unit-testable without fetch mocks.
+ */
+export async function pageThrough<T extends { timestamp: string }>(
+  pageFetch: (cursor: string) => Promise<T[]>,
+  initialCursor: string,
+  hardCap: number,
+): Promise<{ items: T[]; truncated: boolean }> {
+  const items: T[] = [];
+  let cursor = initialCursor;
+
+  while (true) {
+    const rows = await pageFetch(cursor);
+    if (!rows || rows.length === 0) break;
+
+    items.push(...rows);
+
+    if (rows.length < TELEMETRY_PAGE_SIZE) break; // final page
+    if (items.length >= hardCap) {
+      // safety valve
+      return { items, truncated: true };
+    }
+
+    // Advance past the last timestamp (+1ms). Rows are timestamp ASC.
+    const lastIso = rows[rows.length - 1].timestamp;
+    cursor = new Date(new Date(lastIso).getTime() + 1).toISOString();
+  }
+
+  return { items, truncated: false };
+}
+
+export interface TelemetryPage {
+  frames: TelemetryFrame[];
+  truncated: boolean;
+}
+
 export async function getTelemetry(
   id: string,
   from: string,
   to: string,
-  limit = 10000,
-): Promise<TelemetryFrame[]> {
-  const url = `/api/sessions/${id}/telemetry?from=${encodeURIComponent(
+): Promise<TelemetryPage> {
+  const { items, truncated } = await pageThrough<RawTelemetryRow>(
+    async (cursor) => {
+      const url = `/api/sessions/${id}/telemetry?from=${encodeURIComponent(
+        cursor,
+      )}&to=${encodeURIComponent(to)}&limit=${TELEMETRY_PAGE_SIZE}`;
+      return (await request<RawTelemetryRow[]>(url)) ?? [];
+    },
     from,
-  )}&to=${encodeURIComponent(to)}&limit=${limit}`;
-  const rows = await request<RawTelemetryRow[]>(url);
-  return (rows ?? []).map(normalizeRow);
+    TELEMETRY_HARD_CAP,
+  );
+  return { frames: items.map(normalizeRow), truncated };
 }
 
 export async function getSettings(): Promise<Settings | undefined> {

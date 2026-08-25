@@ -61,7 +61,7 @@ export default function ReplayDashboard() {
   const cursorTime = usePlaybackStore((s) => s.cursorTime);
 
   // ── Data fetching ──────────────────────────────────────────────────
-  const { session, frames, isLoading, error } = useSessionTelemetry(id);
+  const { session, frames, isLoading, error, truncated } = useSessionTelemetry(id);
 
   // ── State ──────────────────────────────────────────────────────────
   const [isExporting, setIsExporting] = useState(false);
@@ -248,6 +248,14 @@ export default function ReplayDashboard() {
                 '↓ CSV'
               )}
             </button>
+            {truncated && (
+              <span
+                className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700 ring-1 ring-amber-600/20 dark:bg-amber-900/30 dark:text-amber-300 dark:ring-amber-500/20"
+                title="Session exceeds the 100k-frame fetch cap; later points are not shown"
+              >
+                Showing first 100k points
+              </span>
+            )}
             <button
               type="button"
               onClick={async () => {

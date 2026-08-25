@@ -40,4 +40,12 @@ describe('playbackStore', () => {
         usePlaybackStore.getState().setSpeed(0.5);
         expect(usePlaybackStore.getState().speed).toBe(0.5);
     });
+
+    it('cursor at end can be reset to start before playing', () => {
+        usePlaybackStore.getState().setCursorTime(999_999);
+        expect(usePlaybackStore.getState().cursorTime).toBe(999_999);
+        usePlaybackStore.getState().setCursorTime(0); // what handlePlayPause does
+        usePlaybackStore.getState().play();
+        expect(usePlaybackStore.getState().isPlaying).toBe(true);
+    });
 });

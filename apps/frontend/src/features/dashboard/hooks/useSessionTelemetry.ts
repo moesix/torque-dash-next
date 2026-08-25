@@ -19,8 +19,9 @@ export function useSessionTelemetry(id: string | undefined) {
 
     return {
         session: sessionQuery.data,
-        frames: telemetryQuery.data ?? [],
+        frames: telemetryQuery.data?.frames ?? [],
         isLoading: sessionQuery.isLoading || telemetryQuery.isLoading,
         error: sessionQuery.error || telemetryQuery.error,
+        truncated: telemetryQuery.data?.truncated ?? false,
     };
 }

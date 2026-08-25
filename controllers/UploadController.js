@@ -8,6 +8,13 @@ const ssrfGuard = require('../lib/ssrfGuard');
 const ingestBuffer = require('../services/ingestBuffer');
 const runtime = require('../config/runtime');
 
+// Dedicated hot-path caches for the per-frame identity lookups. When the
+// loaded userCache module doesn't expose the class (slim test doubles inject
+// a plain get/set/del object), fall back to using that object as the backend.
+const UserCacheClass = userCache.UserCache || null;
+const vehicleCache = UserCacheClass ? new UserCacheClass({ ttl: 300_000, max: 1000 }) : userCache;
+const sessionCache = UserCacheClass ? new UserCacheClass({ ttl: 60_000, max: 5000 }) : userCache;
+
 // Resolve an email to a User, using the positive + negative TTL cache.
 // Returns the user, or null if unknown (unknown emails are cached as negatives).
 async function resolveUser(eml) {
@@ -68,31 +75,52 @@ class UploadController {
 
             // Resolve vehicle from Torque's `v` param (vehicle profile name).
             // Falls back to the user's default vehicle when `v` is missing or
-            // doesn't match any known vehicle name.
+            // doesn't match any known vehicle name. Both lookups are TTL-cached
+            // (5 min) with negative caching — rename/default staleness is
+            // bounded by the TTL and accepted for single-operator scale.
             let vehicle = null;
             if (v) {
-                vehicle = await Vehicle.findOne({
-                    where: { userId: user.id, name: v },
-                });
+                const vKey = `vn:${user.id}:${v}`;
+                vehicle = vehicleCache.get(vKey);
+                if (vehicle === undefined) {
+                    vehicle = await Vehicle.findOne({
+                        where: { userId: user.id, name: v },
+                    });
+                    vehicleCache.set(vKey, vehicle || null); // negative-cache a miss
+                }
             }
             if (!vehicle) {
-                vehicle = await Vehicle.findOne({
-                    where: { userId: user.id, isDefault: true },
-                });
+                const dKey = `vd:${user.id}`;
+                vehicle = vehicleCache.get(dKey);
+                if (vehicle === undefined) {
+                    vehicle = await Vehicle.findOne({
+                        where: { userId: user.id, isDefault: true },
+                    });
+                    vehicleCache.set(dKey, vehicle || null);
+                }
             }
 
             // Resolve session (find-or-create) — caches the resolved numeric FK.
-            let currentSession = await Session.findOrCreate({
-                where: { sessionId: session, userId: user.id },
-                defaults: {
-                    userId: user.id,
-                    vehicleId: vehicle ? vehicle.id : null,
-                }
-            });
-            let sess = currentSession[0];
+            // POSITIVE-ONLY cache (never store "not found": findOrCreate creates
+            // on demand), keyed per user per device string, short TTL.
+            const sKey = `s:${user.id}:${session}`;
+            let sess = sessionCache.get(sKey);
+            let wasCreated = false;
+            if (!sess) {
+                const [createdSession, createdFlag] = await Session.findOrCreate({
+                    where: { sessionId: session, userId: user.id },
+                    defaults: {
+                        userId: user.id,
+                        vehicleId: vehicle ? vehicle.id : null,
+                    }
+                });
+                sess = createdSession;
+                wasCreated = createdFlag;
+                sessionCache.set(sKey, sess);
+            }
 
             // After findOrCreate, if this is a new session, give it a default name
-            if (currentSession[1] && time) {
+            if (wasCreated && time) {
                 // Fetch the user's timezone offset (minutes from UTC, e.g. 480 for UTC+8)
                 const settings = await Settings.getSingleton();
                 const offsetMinutes = settings?.timezoneOffset ?? 0;

@@ -407,7 +407,15 @@ A **GitHub Actions** workflow (`.github/workflows/ci.yml`) runs on every push
 or pull request to the `development` branch:
 
 - **Backend checks:** `npm ci` → `npm test` → `npm run test:coverage` → `npm run lint`.
-- **Frontend checks:** `npm ci` → `npm run lint` (best-effort — `typescript-eslint` TS 7.0 support pending) → `npm test` (vitest) → `npx tsc --noEmit` (typecheck) → `npm run build`.
+- **Frontend checks:** `npm ci` → `npm run lint` (placeholder) → `npm test` (vitest) → `npx tsc --noEmit` (typecheck) → `npm run build`.
+
+The frontend currently has **no lint coverage**: `typescript-eslint` cannot parse
+TypeScript ≥7 (its peer range tops out below 6.1 — tracked at
+[typescript-eslint#10940](https://github.com/typescript-eslint/typescript-eslint/issues/10940)),
+so the stack was removed and `npm run lint` is an explicit placeholder that prints the
+reason and exits 0. When typescript-eslint ships TypeScript ≥7 support, re-enable linting
+by restoring the flat config, reinstalling `typescript-eslint` / `@eslint/js` / `globals`,
+and flipping the script back to `eslint src/`.
 
 The workflow uses `actions/checkout@v7` and `actions/setup-node@v7` with npm
 caching and **Node 22** (`node-version: '22'`, matching the `node:22-bookworm-slim`

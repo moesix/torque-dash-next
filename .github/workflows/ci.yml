@@ -58,9 +58,12 @@ jobs:
         working-directory: apps/frontend
         run: npm ci --legacy-peer-deps
 
+      # Frontend lint is a deliberate placeholder that exits 0: typescript-eslint
+      # does not support TypeScript >=7 yet (typescript-eslint#10940). The script
+      # prints the reason on every run. Re-enable when support ships.
       - name: Lint frontend
         working-directory: apps/frontend
-        run: npm run lint || echo "⚠️ ESLint skipped — typescript-eslint does not support TS 7.0 yet (https://github.com/typescript-eslint/typescript-eslint/issues/10940)"
+        run: npm run lint
 
       - name: Test frontend
         working-directory: apps/frontend

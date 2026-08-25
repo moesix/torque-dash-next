@@ -4,7 +4,7 @@
 process.env.DATABASE_URL = process.env.DATABASE_URL || 'postgres://x:x@localhost/x';
 process.env.SESSION_KEYS = process.env.SESSION_KEYS || 'abc123';
 
-const { test, describe } = require('node:test');
+const { test, describe, beforeEach } = require('node:test');
 const assert = require('node:assert');
 const passport = require('passport');
 
@@ -43,6 +43,11 @@ require.cache[require.resolve('../models')] = {
 // Load passport config (registers serializeUser + deserializeUser)
 require('../config/passport')(passport);
 
+// deserializeUser now consults a module-level TTL cache (config/passport.js).
+// These tests reuse user id 1 with DIFFERENT mocked findByPk results per test,
+// so each case must start from an empty cache to observe its own mock data.
+const { userByIdCache } = require('../config/passport');
+
 // ── Tests ───────────────────────────────────────────────────────────
 
 describe('serializeUser', () => {
@@ -66,6 +71,10 @@ describe('serializeUser', () => {
 });
 
 describe('deserializeUser', () => {
+    beforeEach(() => {
+        userByIdCache.store.clear();
+    });
+
     test('returns user when versions match', (_, done) => {
         mockUserFindByPkResult = {
             id: 1, email: 'test@example.com', tokenVersion: 3,

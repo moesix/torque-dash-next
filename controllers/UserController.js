@@ -5,6 +5,7 @@ const passport = require('passport');
 const { nanoid } = require('nanoid');
 const crypto = require('crypto');
 const runtime = require('../config/runtime');
+const { userByIdCache } = require('../config/passport');
 const Joi = require('joi');
 const { validateLlmThinkingMode, validateLlmMaxTokens, validateRetentionEnabled, validateRetentionDays } = require('../lib/validators');
 
@@ -405,6 +406,10 @@ class UserController {
 
             // Update password (beforeUpdate hook will hash it)
             await user.update({ password: newPassword });
+
+            // Invalidate the deserializeUser cache so the next request re-reads
+            // this user from the DB instead of serving a pre-change snapshot.
+            userByIdCache.del(user.id);
 
             // Regenerate session to invalidate all other sessions for this user
             req.session.regenerate((err) => {

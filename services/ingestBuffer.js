@@ -13,6 +13,8 @@
  */
 const Log = require('../models').Log;
 const Session = require('../models').Session;
+// pidRegistry has no heavy deps and does not require models — no cycle.
+const { invalidatePidKeys } = require('../lib/pidRegistry');
 
 const BATCH_SIZE = 1000;
 const FLUSH_MS = 1000;
@@ -53,6 +55,13 @@ async function flush() {
         for (let i = 0; i < rows.length; i += BATCH_SIZE) {
             const chunk = rows.slice(i, i + BATCH_SIZE);
             await Log.bulkCreate(chunk, { ignoreDuplicates: true, returning: false });
+        }
+        // Discovered PID key-sets are append-mostly: any write may introduce a
+        // new key, so drop each touched session's cached entry unconditionally.
+        // Success path only — a failed flush writes nothing and must keep the
+        // cache valid.
+        for (const sid of new Set(rows.map(r => r.sessionId))) {
+            invalidatePidKeys(sid);
         }
     } catch (err) {
         console.error('[ingestBuffer] flush failed, re-queueing:', err.message);
