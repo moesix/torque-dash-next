@@ -69,7 +69,7 @@ const aiLimiter = makeLimiter(rateLimits.ai);
 // Public read of site settings (register/login pages need this to decide whether
 // to show the signup form). Toggling requires an authenticated session.
 router.get('/settings', UserController.getSettings);
-router.get('/settings/full', authenticate, UserController.getSettingsFull);
+router.get('/settings/full', writeLimiter, authenticate, UserController.getSettingsFull);
 // Settings mutation and token generation use writeLimiter only (no global limiter
 // redundancy). Must come before the global limiter below.
 router.put('/settings', writeLimiter, authenticate, UserController.updateSettings);
