@@ -26,6 +26,26 @@ module.exports = (sequelize, DataTypes) => {
             type: DataTypes.INTEGER,
             allowNull: true,
             defaultValue: null,
+        },
+        firstTimestamp: {
+            type: DataTypes.DATE,
+            allowNull: true,
+            defaultValue: null,
+        },
+        lastTimestamp: {
+            type: DataTypes.DATE,
+            allowNull: true,
+            defaultValue: null,
+        },
+        maxRpm: {
+            type: DataTypes.INTEGER,
+            allowNull: true,
+            defaultValue: null,
+        },
+        maxSpeed: {
+            type: DataTypes.INTEGER,
+            allowNull: true,
+            defaultValue: null,
         }
     }, {});
 

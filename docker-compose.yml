@@ -12,6 +12,9 @@
 # Generate secure values with:
 #   openssl rand -base64 24  # for POSTGRES_PASSWORD
 #   openssl rand -hex 24     # for SESSION_KEYS
+#   openssl rand -hex 24     # for UPLOAD_API_TOKEN (required for production
+#                              uploads; alternatively generate one from the
+#                              Settings page after first login)
 
 services:
   db:

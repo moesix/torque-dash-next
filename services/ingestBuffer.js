@@ -12,6 +12,9 @@
  * loss on a persistently failing DB — acknowledge this in ops runbooks.
  */
 const Log = require('../models').Log;
+const Session = require('../models').Session;
+// pidRegistry has no heavy deps and does not require models — no cycle.
+const { invalidatePidKeys } = require('../lib/pidRegistry');
 
 const BATCH_SIZE = 1000;
 const FLUSH_MS = 1000;
@@ -35,13 +38,33 @@ function toLogRow(item) {
 
 let flushing = false;
 
+// JS-side LEAST/GREATEST equivalents that COALESCE NULLs (either side null
+// yields the other candidate; both non-null yields the min/max).
+function minDate(a, b) { if (a == null) return b; if (b == null) return a; return b < a ? b : a; }
+function maxDate(a, b) { if (a == null) return b; if (b == null) return a; return b > a ? b : a; }
+function maxNum(a, b)  { if (a == null) return b; if (b == null) return a; return b > a ? b : a; }
+
 async function flush() {
     if (flushing || buffer.length === 0) return;
     flushing = true;
     const batch = buffer.splice(0, buffer.length); // synchronous snapshot
+    let writeOk = false; // set true only after every chunk was written below
     try {
         const rows = batch.map(toLogRow);
-        await Log.bulkCreate(rows, { ignoreDuplicates: true });
+        // Flush in chunks of at most BATCH_SIZE to avoid exceeding the
+        // PostgreSQL parameter limit (typically 32767 bind params).
+        for (let i = 0; i < rows.length; i += BATCH_SIZE) {
+            const chunk = rows.slice(i, i + BATCH_SIZE);
+            await Log.bulkCreate(chunk, { ignoreDuplicates: true, returning: false });
+        }
+        writeOk = true; // all chunks written — safe to merge summaries below
+        // Discovered PID key-sets are append-mostly: any write may introduce a
+        // new key, so drop each touched session's cached entry unconditionally.
+        // Success path only — a failed flush writes nothing and must keep the
+        // cache valid.
+        for (const sid of new Set(rows.map(r => r.sessionId))) {
+            invalidatePidKeys(sid);
+        }
     } catch (err) {
         console.error('[ingestBuffer] flush failed, re-queueing:', err.message);
         for (const item of batch) {
@@ -57,6 +80,50 @@ async function flush() {
         }
     } finally {
         flushing = false;
+    }
+
+    // Merge this batch's min/max into the denormalized summary columns so
+    // list views read Sessions instead of scanning Logs. Values are computed
+    // in JS from the batch we already hold and bound as parameters — no SQL
+    // aliases, no literal fragments (a previous version referenced a nonexistent
+    // "sub" alias and silently failed on every flush). Stats are derived from
+    // toLogRow-shaped rows ({ timestamp, engine_rpm, vehicle_speed }) because
+    // the raw buffered items use different key names (time/engineRpm/...).
+    // Gated on writeOk: when the Log write above failed (rows re-queued or
+    // dropped), these Session updates must NOT run — otherwise denormalized
+    // summaries would advance AHEAD of the Logs table they derive from.
+    if (writeOk) {
+        try {
+            const rows = batch.map(toLogRow);
+            const stats = new Map(); // sessionId -> {minTs, maxTs, maxRpm, maxSpeed}
+            for (const r of rows) {
+                let s = stats.get(r.sessionId);
+                if (!s) stats.set(r.sessionId, s = {});
+                if (r.timestamp != null && (s.minTs === undefined || r.timestamp < s.minTs)) s.minTs = r.timestamp;
+                if (r.timestamp != null && (s.maxTs === undefined || r.timestamp > s.maxTs)) s.maxTs = r.timestamp;
+                if (r.engine_rpm != null && (s.maxRpm === undefined || r.engine_rpm > s.maxRpm)) s.maxRpm = r.engine_rpm;
+                if (r.vehicle_speed != null && (s.maxSpeed === undefined || r.vehicle_speed > s.maxSpeed)) s.maxSpeed = r.vehicle_speed;
+            }
+
+            // One update per affected session, merging against current column values.
+            // COALESCE handles the NULL (never-backfilled) case; LEAST/GREATEST run
+            // in JS because both candidates are known here.
+            for (const [sessionId, s] of stats) {
+                const existing = await Session.findByPk(sessionId, {
+                    attributes: ['id', 'firstTimestamp', 'lastTimestamp', 'maxRpm', 'maxSpeed'],
+                });
+                if (!existing) continue;
+                const merged = {
+                    firstTimestamp: minDate(existing.firstTimestamp, s.minTs),
+                    lastTimestamp: maxDate(existing.lastTimestamp, s.maxTs),
+                    maxRpm: maxNum(existing.maxRpm, s.maxRpm ?? null),
+                    maxSpeed: maxNum(existing.maxSpeed, s.maxSpeed ?? null),
+                };
+                await Session.update(merged, { where: { id: sessionId } });
+            }
+        } catch (err) {
+            console.error('[ingestBuffer] summary update failed:', err.message);
+        }
     }
 }
 

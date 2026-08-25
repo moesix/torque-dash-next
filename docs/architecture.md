@@ -11,14 +11,15 @@ containerisation topology.
 
 Two clients talk to the same Express backend:
 
-1. **Torque Pro** (Android) — pushes OBD2 frames to an unauthenticated,
-   *email-gated* ingestion endpoint.
+1. **Torque Pro** (Android) — pushes OBD2 frames to the *email-gated*
+   ingestion endpoint, which additionally checks a Bearer upload token
+   (token configuration is the required production posture).
 2. **Browser SPA** (React/Vite) — reads data over an authenticated, CORS +
     cookie-based session API (express-session + connect-pg-simple store).
 
 ```mermaid
 flowchart LR
-    TP[Torque Pro Android app] -->|GET /api/upload?eml=...| ING[Express: UploadController]
+    TP[Torque Pro Android app] -->|GET /api/upload?eml=...<br/>Authorization: Bearer| ING[Express: UploadController]
     BR[Browser SPA - React/Vite] -->|CORS + express-session /api/*| API[Express: /api router]
 
     ING --> UC[lib/userCache - email->user]
@@ -69,6 +70,15 @@ which enforces ownership (or `?shareId=` for shared sessions) and returns
 ## 2. Backend Internals
 
 ### 2.1 `UploadController` (`controllers/UploadController.js`)
+- **Bearer-token auth (2026 baseline):** once an upload token is configured,
+  requests without a matching `Authorization: Bearer <token>` header are
+  rejected with `401` JSON — email alone is insufficient. The env
+  `UPLOAD_API_TOKEN` always wins over the Settings-UI/DB token and locks the UI
+  (generate/clear return `403` while env-managed); without env, the Settings-UI/
+  DB token applies. Matching-token requests bypass the per-IP upload rate
+  limiter. Token configuration is the required production posture; email-only
+  ingestion occurs only when no token exists anywhere (a discouraged bootstrap
+  mode, insecure for production).
 - **Email-gated:** resolves the `eml` query param to a `User` via
   `lib/userCache` (positive **and** negative TTL cache, 300s). Unknown emails
   get `403` and are **never buffered or forwarded**.
@@ -113,9 +123,12 @@ which enforces ownership (or `?shareId=` for shared sessions) and returns
   (`min(limit||5000, 10000)`), ordered ASC, **limited attributes**
   (`timestamp, lon, lat, values, engine_rpm, vehicle_speed`).
 - Returns JSON frames (unlike the legacy `getOne`/`getAll` which eager-load
-  the full `Log` array). Session list endpoints use `aggregateSummaries()`
-  (one `GROUP BY` per request) instead of including full log associations —
-  eliminating the N+1 query pattern that previously flooded telemetry queries.
+  the full `Log` array). Session list endpoints use **denormalized session
+  summaries** — `aggregateSummaries()` runs a single `GROUP BY` query across
+  all fetched session IDs, computing `min(timestamp)`, `max(timestamp)`,
+  `max(vehicle_speed)`, `max(engine_rpm)` in one pass. The results are merged
+  onto each session via `decorateWithSummaries()`, eliminating the N+1 query
+  pattern that previously loaded full Log associations per session.
 
 ### 2.4 TimescaleDB (`infra/timescale/log_hypertable.sql`)
 - **Hypertable** `Logs` partitioned by `timestamp` (`chunk_time_interval = 1 day`).
@@ -167,6 +180,15 @@ which enforces ownership (or `?shareId=` for shared sessions) and returns
   copy.
 - **Key format** — Torque hex keys **without leading zeros** (e.g. `k5`, `kc`,
   `kd`, `kf`, `kff1007`). No entries use zero-padded variants.
+- **GPS PIDs** — `kff1005` = longitude, `kff1006` = latitude. These are
+  destructured as GPS coordinates in `UploadController.processUpload` and
+  stored as `lon`/`lat` on the `Log` model. Non-GPS uploads are stored with
+  null lat/lon.
+- **⚠️ Label discrepancy** — as of this writing, `pidRegistry.js` and
+  `pidDecode.ts` label `kff1005`/`kff1006` as "Fuel Trim (Long/Short Term)"
+  with `%` units, which conflicts with their actual use as GPS coordinates in
+  the upload path. The labels should be updated to "GPS Longitude" / "GPS
+  Latitude" (unit: `°`) and the frontend FALLBACK_MAP synced accordingly.
 
 ### 2.7 Security Headers (Helmet)
 
@@ -375,12 +397,36 @@ src/
 
 ### 3.2 Data fetching
 - **TanStack Query** drives all reads: `getSessions`, `getSession`,
-  `getTelemetry`, `getVehicles`.
+  `getTelemetry`, `getVehicles`, `getAllAnalyses`.
 - **Mutations** use direct `fetch` via the `request()` wrapper: notes updates,
   vehicle CRUD, session reassignment, and all settings changes.
 - **Auth** is cookie-based: every `fetch` uses `credentials: 'include'`. The
   SPA expects **401 JSON** from protected endpoints and redirects to `/login`
   on 401 (unless already on an auth page).
+
+### 3.2a Extracted Hooks (`features/dashboard/hooks/`)
+
+| Hook | File | Purpose |
+|------|------|---------|
+| `useSessionTelemetry(id)` | `useSessionTelemetry.ts` | Orchestrates the two dependent queries: (1) fetch session metadata, (2) fetch telemetry frames using the session's `startDate`/`endDate` as the time range. Returns `{ session, frames, isLoading, error }`. |
+| `usePidSelection(available, id)` | `usePidSelection.ts` | Manages the selected PID set for the overlay chart. Exposes `selectedPids`, `selectedSources`, and toggle/selectAll/clear/reset handlers. Resets to defaults (`kc`, `vehicleSpeed`, `k5`, `ke`, `kff1214`) when the session ID changes. |
+
+Both hooks are consumed by `ReplayDashboard.tsx`, keeping the dashboard
+component focused on layout and composition rather than data wiring.
+
+### 3.2b Code Splitting & Lazy Loading
+
+`AnalysisPanel` is the only component loaded via `React.lazy`:
+
+```tsx
+const AnalysisPanel = React.lazy(() => import('@/components/ai/AnalysisPanel'));
+```
+
+Route-level imports (`Login`, `Register`, `SessionBrowser`, `ReplayDashboard`,
+`SettingsPage`) are **not** lazy-loaded — they are static imports in
+`app/router.tsx`. The Vite build uses Rolldown `codeSplitting.groups` to
+separate vendor chunks (echarts, zrender, react-markdown, rehype-highlight,
+react/react-dom) into dedicated bundles.
 
 ### 3.3 Synchronized replay — `zustand` `playbackStore`
 - `usePlaybackStore` holds `cursorTime` (epoch-ms), `isPlaying`, `speed`.
@@ -650,7 +696,10 @@ See `docs/deployment.md` for the full deployment guide.
 | `GET /api/sessions/:id/shared/:shareId` | shareId | shared view |
 | `POST /api/sessions/:id/analyze` | cookie + owner | trigger AI analysis for a session (SSE stream) |
 | `GET /api/sessions/:id/analyses` | cookie + owner | list cached analyses for a session |
+| `GET /api/sessions/:id/analyses/:analysisId` | cookie + owner | get a single analysis (full response + reasoning) |
 | `DELETE /api/sessions/:id/analyses/:analysisId` | cookie + owner | delete a cached analysis |
+| `GET /api/analyses` | cookie | cross-vehicle analysis history (paginated: `{ analyses, total, limit, offset }`; optional `vehicleId` filter, optional `limit`/`offset`). Each analysis includes session name and vehicle. |
+| `GET /api/analyses/export` | cookie | export all analyses as a Markdown file download (optional `vehicleId` filter) |
 | `GET /api/settings` | none | public settings (disableRegistration, hasUploadApiToken, hasLlmProvider, llmMaxTokens, retentionEnabled, retentionDays, vehicle fields) |
 | `PUT /api/settings` | cookie | update settings (disableRegistration, uploadApiToken, llmProvider, llmApiKey, llmModel, llmEndpoint, llmThinkingMode, llmReasoningEffort, llmMaxTokens, retentionEnabled, retentionDays, vehicle fields); response includes `retentionPolicyApplied` |
 | `POST /api/settings/upload-token` | cookie | generate a new upload API token (shown once) |
@@ -661,12 +710,14 @@ See `docs/deployment.md` for the full deployment guide.
 | `PUT /api/vehicles/:vehicleId` | cookie | update a vehicle (body: partial fields) |
 | `DELETE /api/vehicles/:vehicleId` | cookie | delete a vehicle (sessions unassigned via SET NULL) |
 | `PATCH /api/vehicles/:vehicleId/default` | cookie | set a vehicle as the user's default (unsets all others) |
-| `POST /api/upload` (`/upload` from Torque) | email-gated + **Bearer token required when `UPLOAD_API_TOKEN` is set** | ingest (401 without token) |
+| `POST /api/upload` (`/upload` from Torque) | email-gated + **Bearer token required** (when a token is configured — the required production posture) | ingest (`401` without matching token) |
 | `GET /health` | none | probe |
 
 > See `routes/api.js` for the authoritative route table. The SPA auth contract
 > is now **resolved** — all endpoints return JSON/401 over `/api`. See
-> `docs/development.md → Known Issues` for history.
+> `docs/development.md → Known Issues` for history. Upload-token configuration
+> is the required production posture as of 2026; email-only ingestion occurs
+> only when no token is configured anywhere (discouraged bootstrap mode).
 
 **Session list pagination and filtering:** `GET /api/sessions` accepts `limit`
 (default 50, max 200) and `offset` query parameters, plus an optional `vehicleId`

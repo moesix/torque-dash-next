@@ -13,10 +13,9 @@
  *   pattern that threw RangeError on large datasets.
  */
 
-import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import React, { useState, useMemo, useCallback, useRef } from 'react';
 import { useParams } from 'react-router';
-import { getSession, getTelemetry, exportSessionCsv, updateSessionNotes, getVehicles, reassignSessionVehicle } from '@/lib/api';
+import { exportSessionCsv, getVehicles, reassignSessionVehicle } from '@/lib/api';
 import type { AnalysisPanelHandle } from '@/components/ai/AnalysisPanel';
 import type { Vehicle } from '@/lib/types';
 import VehicleReassignDialog from '@/components/vehicles/VehicleReassignDialog';
@@ -31,15 +30,12 @@ import DiagnosticPanels from '@/components/charts/DiagnosticPanels';
 import PidTogglePanel from '@/components/telemetry/PidTogglePanel';
 import DecodedMetricsTable from '@/components/telemetry/DecodedMetricsTable';
 import { getAvailableSeries, getSeriesData, coerceScalar } from '@/lib/pidDecode';
-import type { SeriesSource } from '@/lib/types';
+import { useSessionTelemetry } from './hooks/useSessionTelemetry';
+import { usePidSelection } from './hooks/usePidSelection';
+import NotesCard from '@/components/NotesCard';
+import AnalysisConfirmDialog from '@/components/AnalysisConfirmDialog';
 
 const AnalysisPanel = React.lazy(() => import('@/components/ai/AnalysisPanel'));
-
-// ── Constants ────────────────────────────────────────────────────────────
-
-/** Default selected source pids — these are column-based so the chart is
- *  never empty even when frames lack OBD-II PID values. */
-const DEFAULT_PIDS = ['kc', 'vehicleSpeed', 'k5', 'ke', 'kff1214'];
 
 // ── Safe helpers ─────────────────────────────────────────────────────────
 
@@ -65,98 +61,31 @@ export default function ReplayDashboard() {
   const cursorTime = usePlaybackStore((s) => s.cursorTime);
 
   // ── Data fetching ──────────────────────────────────────────────────
-  const sessionQuery = useQuery({
-    queryKey: ['session', id],
-    queryFn: () => getSession(id as string),
-    enabled: !!id,
-  });
-
-  const from = sessionQuery.data?.startDate;
-  const to = sessionQuery.data?.endDate;
-
-  const telemetryQuery = useQuery({
-    queryKey: ['telemetry', id, from, to],
-    queryFn: () => getTelemetry(id as string, from as string, to as string, 10000),
-    enabled: !!id && !!from && !!to,
-  });
-
-  const frames = telemetryQuery.data ?? [];
+  const { session, frames, isLoading, error, truncated } = useSessionTelemetry(id);
 
   // ── State ──────────────────────────────────────────────────────────
-  const [selectedPids, setSelectedPids] = useState<string[]>(DEFAULT_PIDS);
   const [isExporting, setIsExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
   const dialogRef = useRef<HTMLDialogElement | null>(null);
-  const analysisDialogRef = useRef<HTMLDialogElement | null>(null);
   const analysisPanelRef = useRef<AnalysisPanelHandle>(null);
   const [showAnalysisConfirm, setShowAnalysisConfirm] = useState(false);
-  const [notes, setNotes] = useState<string>('');
-  const [notesSaving, setNotesSaving] = useState(false);
   const [showReassign, setShowReassign] = useState(false);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
 
-  // Sync notes state when session data loads
-  useEffect(() => {
-    if (sessionQuery.data) {
-      setNotes(sessionQuery.data.notes ?? '');
-    }
-  }, [sessionQuery.data]);
-
-  // Safari fallback for closedby="any" (light-dismiss)
-  useEffect(() => {
-    const dialog = dialogRef.current;
-    if (!dialog) return;
-
-    if (!('closedBy' in HTMLDialogElement.prototype)) {
-      const handleClick = (e: MouseEvent) => {
-        if (e.target === dialog) {
-          const rect = dialog.getBoundingClientRect();
-          const isInside =
-            rect.top <= e.clientY && e.clientY <= rect.top + rect.height &&
-            rect.left <= e.clientX && e.clientX <= rect.left + rect.width;
-          if (!isInside) dialog.close();
-        }
-      };
-      dialog.addEventListener('click', handleClick);
-      return () => dialog.removeEventListener('click', handleClick);
-    }
-  }, []);
-
-  // Show/close analysis confirmation dialog via showModal() for proper top-layer rendering
-  useEffect(() => {
-    const dialog = analysisDialogRef.current;
-    if (!dialog) return;
-    if (showAnalysisConfirm) {
-      dialog.showModal();
-    } else {
-      dialog.close();
-    }
-  }, [showAnalysisConfirm]);
-
-  const handleExpand = useCallback(() => {
-    dialogRef.current?.showModal();
-  }, []);
-
-  const handleCollapse = useCallback(() => {
-    dialogRef.current?.close();
-  }, []);
-
-  // Reset playback cursor AND selected PIDs when switching sessions.
-  useEffect(() => {
-    setCursorTime(null);
-    setSelectedPids(DEFAULT_PIDS);
-  }, [id, setCursorTime]);
-
   // ── Computed values ────────────────────────────────────────────────
-  const available: SeriesSource[] = useMemo(
+  const available = useMemo(
     () => getAvailableSeries(frames),
     [frames],
   );
 
-  const selectedSources = useMemo(
-    () => available.filter((s) => selectedPids.includes(s.pid)),
-    [available, selectedPids],
-  );
+  const {
+    selectedPids,
+    selectedSources,
+    handleToggle,
+    handleSelectAll,
+    handleClear,
+    handleReset,
+  } = usePidSelection(available, id);
 
   // Build series data for ALL available sources (used by DecodedMetricsTable).
   // Memoized — no re-scan of frames on re-render.
@@ -169,33 +98,28 @@ export default function ReplayDashboard() {
   }, [frames, available]);
 
   // ── Handlers ───────────────────────────────────────────────────────
-  const handleToggle = useCallback((pid: string) => {
-    setSelectedPids((prev) =>
-      prev.includes(pid) ? prev.filter((p) => p !== pid) : [...prev, pid],
-    );
-  }, []);
-
-  const handleSelectAll = useCallback(() => {
-    setSelectedPids(available.map((s) => s.pid));
-  }, [available]);
-
-  const handleClear = useCallback(() => {
-    setSelectedPids([]);
-  }, []);
-
-  const handleReset = useCallback(() => {
-    setSelectedPids(DEFAULT_PIDS);
-  }, []);
-
   const handleCursorMove = useCallback(
     (tsMs: number | null) => setCursorTime(tsMs),
     [setCursorTime],
   );
 
+  const handleExpand = useCallback(() => {
+    dialogRef.current?.showModal();
+  }, []);
+
+  const handleCollapse = useCallback(() => {
+    dialogRef.current?.close();
+  }, []);
+
   function scrollToAnalysis() {
     const el = document.getElementById('ai-analysis-panel');
     el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
+
+  // Reset playback cursor when switching sessions.
+  React.useEffect(() => {
+    setCursorTime(null);
+  }, [id, setCursorTime]);
 
   // ── Safe max for KPI cards (fixes RangeError bug) ─────────────────
   const maxRpm = useMemo(
@@ -212,7 +136,7 @@ export default function ReplayDashboard() {
   );
 
   // ── Loading / error states ─────────────────────────────────────────
-  if (sessionQuery.isLoading) {
+  if (isLoading) {
     return (
       <div className="space-y-4">
         {/* Slim banner skeleton */}
@@ -259,7 +183,7 @@ export default function ReplayDashboard() {
       </div>
     );
   }
-  if (sessionQuery.isError || !sessionQuery.data) {
+  if (error || !session) {
     return (
       <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
         <ErrorAlert message="Session not found." />
@@ -275,18 +199,18 @@ export default function ReplayDashboard() {
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
             <h1 className="text-lg font-semibold text-gray-900 dark:text-white font-display">
-              {sessionQuery.data.name || 'Session Replay'}
-              {sessionQuery.data.vehicleName && (
+              {session.name || 'Session Replay'}
+              {session.vehicleName && (
                 <span className="ml-2 inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 dark:bg-gray-700 dark:text-gray-300">
-                  {sessionQuery.data.vehicleName}
+                  {session.vehicleName}
                 </span>
               )}
             </h1>
             <p className="text-sm text-gray-500 dark:text-[var(--text-secondary)]">
-              {sessionQuery.data.startDate
-                ? new Date(sessionQuery.data.startDate).toLocaleString()
+              {session.startDate
+                ? new Date(session.startDate).toLocaleString()
                 : ''}
-              {sessionQuery.data.duration ? ` · ${sessionQuery.data.duration}` : ''}
+              {session.duration ? ` · ${session.duration}` : ''}
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-2">
@@ -324,6 +248,14 @@ export default function ReplayDashboard() {
                 '↓ CSV'
               )}
             </button>
+            {truncated && (
+              <span
+                className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700 ring-1 ring-amber-600/20 dark:bg-amber-900/30 dark:text-amber-300 dark:ring-amber-500/20"
+                title="Session exceeds the 100k-frame fetch cap; later points are not shown"
+              >
+                Showing first 100k points
+              </span>
+            )}
             <button
               type="button"
               onClick={async () => {
@@ -344,33 +276,7 @@ export default function ReplayDashboard() {
       </div>
 
       {/* Session notes */}
-      <div className="animate-slide-up rounded-lg bg-white px-4 py-3 shadow-xs dark:bg-[var(--bg-card)]">
-        <label htmlFor="session-notes" className="mb-1 block text-sm font-medium text-gray-700 dark:text-[var(--text-secondary)]">
-          Notes
-        </label>
-        <textarea
-          id="session-notes"
-          rows={3}
-          value={notes}
-          onChange={(e) => setNotes(e.target.value)}
-          onBlur={async () => {
-            if (!id) return;
-            setNotesSaving(true);
-            try {
-              await updateSessionNotes(id, notes.trim() || null);
-            } catch {
-              // Silently ignore
-            } finally {
-              setNotesSaving(false);
-            }
-          }}
-          placeholder="Add notes about this session..."
-          className="w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm shadow-xs focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500 dark:border-[var(--border-default)] dark:bg-[var(--bg-surface)] dark:text-[var(--text-primary)] dark:focus:border-teal-400"
-        />
-        {notesSaving && (
-          <span className="text-xs text-gray-400 dark:text-[var(--text-muted)]">Saving...</span>
-        )}
-      </div>
+      {id && <NotesCard sessionId={id} initialNotes={session.notes ?? ''} />}
 
       {/* Playback controls — full width */}
       <div className="animate-slide-up-delay-1">
@@ -460,61 +366,32 @@ export default function ReplayDashboard() {
       <div className="animate-slide-up-delay-4">
         <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
           <h3 className="text-lg font-semibold leading-relaxed">GPS Track</h3>
-          {telemetryQuery.isLoading ? (
-            <Skeleton className="mt-2 h-48 w-full" />
-          ) : (
-            <div className="mt-2">
-              <GpsTrackMap frames={frames} />
-            </div>
-          )}
+          <div className="mt-2">
+            <GpsTrackMap frames={frames} />
+          </div>
         </div>
       </div>
 
       {/* AI Analysis confirmation dialog */}
-      <dialog
-        ref={analysisDialogRef}
+      <AnalysisConfirmDialog
+        open={showAnalysisConfirm}
         onClose={() => setShowAnalysisConfirm(false)}
-        className="fixed inset-0 z-50 m-auto w-full max-w-sm rounded-lg border bg-white p-6 shadow-xl dark:border-[var(--border-strong)] dark:bg-[var(--bg-card)]"
-      >
-        <div className="space-y-4">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Run AI Analysis?</h2>
-          <p className="text-sm text-gray-600 dark:text-[var(--text-secondary)]">
-            This will send session telemetry data to your configured LLM provider
-            and may incur API costs (~$0.01–0.05 per analysis depending on provider
-            and session size).
-          </p>
-          <div className="flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={() => setShowAnalysisConfirm(false)}
-              className="rounded border bg-white px-4 py-2 text-sm font-medium hover:bg-gray-50 dark:border-[var(--border-default)] dark:bg-[var(--bg-card)] dark:text-[var(--text-primary)] dark:hover:bg-[var(--bg-surface)]"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setShowAnalysisConfirm(false);
-                scrollToAnalysis();
-                analysisPanelRef.current?.triggerAnalysis();
-              }}
-              className="rounded bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-600"
-            >
-              Analyze
-            </button>
-          </div>
-        </div>
-      </dialog>
+        onConfirm={() => {
+          setShowAnalysisConfirm(false);
+          scrollToAnalysis();
+          analysisPanelRef.current?.triggerAnalysis();
+        }}
+        busy={false}
+      />
 
-      {/* Vehcile reassign dialog */}
+      {/* Vehicle reassign dialog */}
       {showReassign && (
         <VehicleReassignDialog
           vehicles={vehicles}
-          currentVehicleId={sessionQuery.data.vehicleId}
+          currentVehicleId={session.vehicleId}
           onReassign={async (vehicleId) => {
             if (!id) return;
             await reassignSessionVehicle(id, vehicleId);
-            await sessionQuery.refetch();
             setShowReassign(false);
           }}
           onClose={() => setShowReassign(false)}
