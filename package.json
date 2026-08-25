@@ -6,8 +6,8 @@
   "scripts": {
     "start": "node app.js",
     "lint": "eslint .",
-    "test": "node --test 'test/*.test.js'",
-    "test:coverage": "c8 node --test 'test/*.test.js'",
+    "test": "node --test 'test/*.test.js' && node scripts/checkMirrors.js && node scripts/checkTestIntegrity.js",
+    "test:coverage": "c8 node --test 'test/*.test.js' && node scripts/checkMirrors.js && node scripts/checkTestIntegrity.js",
     "prepare": "husky || true"
   },
   "keywords": [],

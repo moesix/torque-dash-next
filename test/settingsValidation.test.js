@@ -31,6 +31,7 @@ const {
   sanitizeFilename,
   csvEscape,
 } = require('../controllers/SessionController');
+const { settingsView } = require('../controllers/UserController');
 
 // ── LLM thinking mode ──────────────────────────────────────────────
 
@@ -157,26 +158,29 @@ describe('validateRetentionDays', () => {
   });
 });
 
-// ── Settings response shape (buildSettingsResponse mirror) ──────────
+// ── Settings response shape (REAL settingsView from UserController) ─
 
-describe('settings response shape', () => {
-  function buildSettingsResponse(settings) {
-    return {
-      retentionEnabled: settings.retentionEnabled ?? false,
-      retentionDays: settings.retentionDays ?? 365,
-    };
-  }
-
+describe('settings response shape (real settingsView)', () => {
   it('defaults to boolean retentionEnabled and number retentionDays', () => {
-    const res = buildSettingsResponse({});
+    const res = settingsView({});
     assert.strictEqual(typeof res.retentionEnabled, 'boolean');
     assert.strictEqual(typeof res.retentionDays, 'number');
+    assert.strictEqual(res.retentionEnabled, false);
+    assert.strictEqual(res.retentionDays, 365);
   });
 
   it('passes through provided values', () => {
-    const full = buildSettingsResponse({ retentionEnabled: true, retentionDays: 180 });
+    const full = settingsView({ retentionEnabled: true, retentionDays: 180 });
     assert.strictEqual(full.retentionEnabled, true);
     assert.strictEqual(full.retentionDays, 180);
+  });
+
+  it('does not include retentionPolicyApplied (updateSettings-only extra)', () => {
+    const res = settingsView({});
+    assert.strictEqual(
+      Object.prototype.hasOwnProperty.call(res, 'retentionPolicyApplied'),
+      false
+    );
   });
 });
 

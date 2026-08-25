@@ -280,7 +280,7 @@ describe('ingestBuffer — has LEAST/GREATEST summary merge', () => {
 
 describe('flush — real-path summary merge through ingestBuffer', () => {
   // Drives the ACTUAL flush() with mocked models capturing arguments.
-  function makeFlushMocks({ findByPkResult }) {
+  function makeFlushMocks({ findByPkResult, bulkCreateError } = {}) {
     const updateCalls = [];
     const findByPkCalls = [];
     let bulkCreateCalls = 0;
@@ -296,7 +296,11 @@ describe('flush — real-path summary merge through ingestBuffer', () => {
           update: async (vals, opts) => { updateCalls.push({ vals, opts }); return [1]; },
         },
         Log: {
-          bulkCreate: async (rows) => { bulkCreateCalls += rows.length; return rows; },
+          bulkCreate: async (rows) => {
+            if (bulkCreateError) throw bulkCreateError;
+            bulkCreateCalls += rows.length;
+            return rows;
+          },
         },
       },
       getBulkCreateCalls: () => bulkCreateCalls,
@@ -390,6 +394,32 @@ describe('flush — real-path summary merge through ingestBuffer', () => {
 
       assert.strictEqual(updateCalls.length, 0,
         'Session.update must NOT be called when the session is missing');
+    } finally {
+      restore();
+    }
+  });
+
+  test('failed bulkCreate — NO Session.update (summaries never run ahead of Logs)', async () => {
+    const { mockModels, updateCalls, findByPkCalls } = makeFlushMocks({
+      findByPkResult: { id: 12, firstTimestamp: null, lastTimestamp: null, maxRpm: null, maxSpeed: null },
+      bulkCreateError: new Error('db down'),
+    });
+
+    const { restore } = loadWithMocks(mockModels);
+    try {
+      const { ingest, flush } = require('../services/ingestBuffer');
+
+      ingest({ userId: 1, sessionId: 12, time: new Date('2026-09-01T00:00:00Z'), lon: 0, lat: 0, values: {}, engineRpm: 1000, vehicleSpeed: 30 });
+      ingest({ userId: 1, sessionId: 12, time: new Date('2026-09-01T00:10:00Z'), lon: 0, lat: 0, values: {}, engineRpm: 1100, vehicleSpeed: 35 });
+
+      // Must resolve without throwing despite the write failure (errors are
+      // caught and logged; rows are re-queued/dropped by the retry policy).
+      await flush();
+
+      assert.strictEqual(findByPkCalls.length, 0,
+        'summary merge must not even start when the Log write failed');
+      assert.strictEqual(updateCalls.length, 0,
+        'Session.update must NOT happen when bulkCreate threw');
     } finally {
       restore();
     }

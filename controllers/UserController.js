@@ -22,10 +22,20 @@ class UserController {
             });
         })(req, res, next);
     }
-    static logout(req, res) {
+    // Logout must ALSO destroy the express-session record so the
+    // connect-pg-simple store row dies NOW, not at TTL (plan 054 intent).
+    // Response contract stays { ok: true } — the SPA logout flow depends on
+    // it; both failure modes (passport logout error, store destroy error)
+    // are log-only.
+    static async logout(req, res) {
         req.logout((err) => {
-            if (err) return res.status(500).json({ error: 'Logout failed' });
-            return res.json({ ok: true });
+            if (err) console.error('[UserController] logout:', err.message);
+            req.session.destroy((destroyErr) => {
+                if (destroyErr) {
+                    console.error('[UserController] session.destroy failed:', destroyErr.message);
+                }
+                return res.json({ ok: true });
+            });
         });
     }
     static async register(req, res) {
@@ -461,3 +471,7 @@ function settingsView(settings, extras = {}) {
 }
 
 module.exports = UserController;
+
+// Expose the settings projection helper so tests assert against the real
+// response shape (single source of truth) instead of local re-implementations.
+module.exports.settingsView = settingsView;

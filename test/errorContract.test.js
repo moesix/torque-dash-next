@@ -44,6 +44,8 @@ require.cache[modelsPath] = {
 };
 
 const SessionController = require('../controllers/SessionController');
+const UploadController = require('../controllers/UploadController');
+const runtime = require('../config/runtime');
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
@@ -190,31 +192,37 @@ describe('Error contract — backend response shapes', () => {
     assert.strictEqual(typeof calls.body.error, 'string', 'body.error should be a string');
   });
 
-  // ── UploadController text response → JSON ──────────────────────
-  // We replicate the guard logic from UploadController since mocking
-  // the full upload pipeline is heavy.
+  // ── UploadController unknown-user gate ─────────────────────────
+  // Exercises the REAL exported resolveUser and the REAL processUpload
+  // guard through the ../models require-cache stub above
+  // (User.findOne → null). No test-local reimplementation of the guard.
 
-  describe('UploadController — unknown user returns 403 JSON', () => {
-    // Replicate the resolveUser + 403 guard from UploadController.processUpload
-    function uploadGuard(userExists) {
-      if (!userExists) {
-        return { status: 403, body: { error: 'Invalid user account.' } };
-      }
-      return { status: 'ok' };
+  describe('UploadController — unknown user is rejected with 403', () => {
+    // Local harness: tracks just what the upload gate needs (status code +
+    // response body) so the JSON error contract can be asserted directly.
+    function makeUploadHarness() {
+      const calls = { statusCode: null, body: null };
+      const res = {
+        status(code) { calls.statusCode = code; return res; },
+        json(obj) { calls.body = obj; return res; },
+        send(data) { calls.body = data; return res; },
+      };
+      return { res, calls };
     }
 
-    test('returns 403 JSON with error field when user not found', () => {
-      const result = uploadGuard(false);
-      assert.strictEqual(result.status, 403);
-      assert.ok(typeof result.body === 'object');
-      assert.strictEqual(result.body.error, 'Invalid user account.');
+    test('real resolveUser returns null for missing or unknown email', async () => {
+      assert.strictEqual(await UploadController.resolveUser(undefined), null);
+      assert.strictEqual(await UploadController.resolveUser(''), null);
+      assert.strictEqual(await UploadController.resolveUser('ghost@example.com'), null);
     });
 
-    test('response is valid JSON shape', () => {
-      const result = uploadGuard(false);
-      const json = JSON.stringify(result.body);
-      const parsed = JSON.parse(json);
-      assert.strictEqual(parsed.error, 'Invalid user account.');
+    test('processUpload answers 403 JSON { error } "Invalid user account." when user unknown', async () => {
+      runtime.setUploadApiToken(null); // ensure bearer-token auth gate is off
+      const req = makeStubReq({ params: {}, query: { session: 's1', eml: 'ghost@example.com' } });
+      const { res, calls } = makeUploadHarness();
+      await UploadController.processUpload(req, res);
+      assert.strictEqual(calls.statusCode, 403);
+      assert.deepStrictEqual(calls.body, { error: 'Invalid user account.' });
     });
   });
 

@@ -30,10 +30,15 @@ export default function Login() {
     e.preventDefault();
     setBusy(true);
     setError(null);
-    const ok = await login(email, password);
+    const ok = await login(email, password).catch((err: unknown) => {
+      // login() throws ApiError(message, status) on failed logins (bad
+      // credentials, rate limit); surface the server's message.
+      setError(err instanceof Error ? err.message : 'Invalid email or password.');
+      return false;
+    });
     setBusy(false);
     if (ok) navigate('/');
-    else setError('Invalid email or password.');
+    else setError((prev) => prev || 'Invalid email or password.');
   }
 
   return (

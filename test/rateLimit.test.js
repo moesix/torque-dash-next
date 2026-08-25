@@ -4,9 +4,9 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 const express = require('express');
 
-// Import the REAL makeLimiter from routes/api.js instead of a local copy.
-// This requires the config module to load, which needs DATABASE_URL and
-// SESSION_KEYS.  Step 6 ensures CI always provides these env vars.
+// Import the REAL makeLimiter from routes/api.js as the single source of
+// truth. This requires the config module to load, which needs DATABASE_URL
+// and SESSION_KEYS.  Step 6 ensures CI always provides these env vars.
 let makeLimiter;
 let canLoadReal;
 try {

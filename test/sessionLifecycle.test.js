@@ -48,6 +48,10 @@ require('../config/passport')(passport);
 // so each case must start from an empty cache to observe its own mock data.
 const { userByIdCache } = require('../config/passport');
 
+// Required AFTER the ../models stub above so UserController binds to the
+// mock models instead of the real database-backed module.
+const UserController = require('../controllers/UserController');
+
 // ── Tests ───────────────────────────────────────────────────────────
 
 describe('serializeUser', () => {
@@ -137,5 +141,46 @@ describe('deserializeUser', () => {
             assert.strictEqual(user, false, 'should reject pre-migration session after password change');
             done();
         });
+    });
+});
+
+describe('logout', () => {
+    // Behavioral harness for UserController.logout: stubs req.logout and
+    // req.session.destroy so we can observe the destroy call + response.
+    function makeLogoutHarness({ logoutErr = null, destroyErr = null } = {}) {
+        let destroyCalled = false;
+        const req = {
+            logout: (cb) => cb(logoutErr),
+            session: {
+                destroy: (cb2) => { destroyCalled = true; cb2(destroyErr); },
+            },
+        };
+        const calls = { body: null, statusCode: null };
+        const res = {
+            status(code) { calls.statusCode = code; return res; },
+            json(obj) { calls.body = obj; return res; },
+        };
+        return { req, res, calls, wasDestroyCalled: () => destroyCalled };
+    }
+
+    test('destroys the session store record and responds {ok:true}', () => {
+        const h = makeLogoutHarness();
+        UserController.logout(h.req, h.res);
+        assert.strictEqual(h.wasDestroyCalled(), true, 'req.session.destroy must be called');
+        assert.deepStrictEqual(h.calls.body, { ok: true });
+    });
+
+    test('still responds {ok:true} when session.destroy errors (log-only)', () => {
+        const h = makeLogoutHarness({ destroyErr: new Error('store unavailable') });
+        UserController.logout(h.req, h.res);
+        assert.strictEqual(h.wasDestroyCalled(), true, 'destroy must still be attempted');
+        assert.deepStrictEqual(h.calls.body, { ok: true }, 'response contract must hold even on destroy error');
+    });
+
+    test('proceeds to session.destroy even when req.logout errors (log-only)', () => {
+        const h = makeLogoutHarness({ logoutErr: new Error('passport logout failed') });
+        UserController.logout(h.req, h.res);
+        assert.strictEqual(h.wasDestroyCalled(), true, 'destroy must run despite logout error');
+        assert.deepStrictEqual(h.calls.body, { ok: true }, 'response contract must hold even on logout error');
     });
 });

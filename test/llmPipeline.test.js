@@ -108,8 +108,8 @@ describe('endpoint hijack prevention', () => {
 });
 
 // ── Deterministic even sampling (implementation-backed structural checks) ──
-// The old suite tested a local copy of the selection math; these asserts pin
-// the real AnalysisController implementation instead (single source of truth).
+// These asserts pin the real AnalysisController implementation directly
+// (single source of truth) rather than any suite-side reimplementation.
 
 describe('deterministic even sampling (implementation)', () => {
   const controllerSrc = fs.readFileSync(

@@ -71,7 +71,7 @@ class UploadController {
             // Resolve user (positive + negative cache). Keep the 403 gate:
             // unknown emails are NEVER buffered or forwarded.
             let user = await resolveUser(eml);
-            if (!user) return res.status(403).send('Invalid user account.');
+            if (!user) return res.status(403).json({ error: 'Invalid user account.' });
 
             // Resolve vehicle from Torque's `v` param (vehicle profile name).
             // Falls back to the user's default vehicle when `v` is missing or

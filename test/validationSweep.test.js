@@ -211,9 +211,9 @@ describe('copySchema', () => {
   });
 
   it('accepts valid name', () => {
-    const { error, value } = copySchema.validate({ name: 'Copy of Session' });
+    const { error, value } = copySchema.validate({ name: 'Duplicated Session' });
     assert.ifError(error);
-    assert.strictEqual(value.name, 'Copy of Session');
+    assert.strictEqual(value.name, 'Duplicated Session');
   });
 });
 
@@ -599,3 +599,4 @@ describe('SessionController updateNotes validation', () => {
     mockModels.Session.findOne = async () => null;
   });
 });
+
