@@ -10,8 +10,10 @@ ALTER TABLE "Logs" SET (timescaledb.compress = false);
 ALTER TABLE "Logs" DROP CONSTRAINT IF EXISTS "Logs_pkey";
 ALTER TABLE "Logs" ADD PRIMARY KEY ("sessionId", timestamp);
 
--- 2. Explicit dedupe constraint (helps bulkCreate ON CONFLICT + clarity)
-ALTER TABLE "Logs" ADD CONSTRAINT IF NOT EXISTS logs_session_timestamp_uniq UNIQUE ("sessionId", timestamp);
+-- 2. Explicit dedupe constraint (helps bulkCreate ON CONFLICT + clarity).
+--    NOTE: PostgreSQL does NOT support ADD CONSTRAINT IF NOT EXISTS, so we use
+--    a unique index (functionally identical for dedupe) which IS idempotent.
+CREATE UNIQUE INDEX IF NOT EXISTS logs_session_timestamp_uniq ON "Logs"("sessionId", timestamp);
 
 -- 3. Promoted hot columns (populated at ingest + backfilled)
 ALTER TABLE "Logs" ADD COLUMN IF NOT EXISTS "engine_rpm" double precision;
