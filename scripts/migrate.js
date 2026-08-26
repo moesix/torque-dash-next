@@ -81,13 +81,19 @@ async function run() {
 
     // Group statements by their source file, preserving lexicographic order so
     // that a file is only marked applied once ALL of its statements succeed.
+    // Seed from the FULL file list first: comment-only files (zero statements
+    // after comment stripping, e.g. 012_upload_token.sql) must still appear in
+    // filesInOrder so they get recorded in the tracker instead of silently
+    // vanishing from bookkeeping.
     const filesInOrder = [];
     const byFile = new Map();
-    for (const st of statements) {
-        if (!byFile.has(st.file)) {
-            byFile.set(st.file, []);
-            filesInOrder.push(st.file);
+    for (const file of listMigrationFiles()) {
+        if (!byFile.has(file)) {
+            byFile.set(file, []);
+            filesInOrder.push(file);
         }
+    }
+    for (const st of statements) {
         byFile.get(st.file).push(st);
     }
 
