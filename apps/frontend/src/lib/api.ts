@@ -210,6 +210,14 @@ export async function getSettings(): Promise<Settings | undefined> {
   return request<Settings>('/api/settings');
 }
 
+/** Authenticated full settings (LLM provider, API-key-presence flag, vehicle,
+ *  retention, timezone, etc.). The public /api/settings endpoint intentionally
+ *  only returns { disableRegistration, tokenFromEnv } — any caller that needs
+ *  hasLlmProvider / llmProvider / hasLlmApiKey MUST use this one. */
+export async function getFullSettings(): Promise<Settings | undefined> {
+  return request<Settings>('/api/settings/full');
+}
+
 export async function updateSettings(
   body: {
     disableRegistration?: boolean;
