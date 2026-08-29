@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { getSettings, updateSettings, generateUploadToken, getVersion } from '@/lib/api';
+import { getSettings, getFullSettings, updateSettings, generateUploadToken, getVersion } from '@/lib/api';
 import type { Settings } from '@/lib/types';
 import Toggle from '@/components/ui/Toggle';
 import AiProviderCard from './AiProviderCard';
@@ -50,7 +50,7 @@ export default function SettingsPage() {
   }, []);
 
   useEffect(() => {
-    getSettings()
+    getFullSettings()
       .then((s) => {
         if (!s) return;
         setDisableRegistration(s.disableRegistration);
@@ -306,7 +306,7 @@ export default function SettingsPage() {
                 setRetentionError(null);
                 updateSettings({ retentionEnabled: checked }).catch(() => {
                   setRetentionError('Failed to save retention setting.');
-                  getSettings().then((s) => {
+                  getFullSettings().then((s) => {
                     if (s) setLlmSettings(s);
                   });
                 });
@@ -334,7 +334,7 @@ export default function SettingsPage() {
                   setRetentionError(null);
                   updateSettings({ retentionDays: days }).catch(() => {
                     setRetentionError('Failed to save retention days.');
-                    getSettings().then((s) => {
+                    getFullSettings().then((s) => {
                       if (s) setLlmSettings(s);
                     });
                   });

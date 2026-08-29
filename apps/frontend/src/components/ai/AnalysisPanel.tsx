@@ -3,7 +3,7 @@ import type { Ref } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
-import { analyzeSession, listAnalyses, getAnalysis, getSettings } from '@/lib/api';
+import { analyzeSession, listAnalyses, getAnalysis, getFullSettings } from '@/lib/api';
 import StreamRenderer from './StreamRenderer';
 import type { Analysis, AnalysisPreview, Settings } from '@/lib/types';
 import { stripMarkdown } from '@/lib/utils';
@@ -48,7 +48,7 @@ export default function AnalysisPanel({ sessionId, ref }: Props) {
     useImperativeHandle(ref, () => ({ triggerAnalysis: doAnalyze }), [doAnalyze]);
 
     useEffect(() => {
-      getSettings()
+      getFullSettings()
         .then((s) => setLlmSettings(s ?? null))
         .catch(() => {});
     }, []);
