@@ -159,8 +159,8 @@ describe('timeout lifecycle (body-phase)', () => {
     return { llmProvider: 'anthropic', llmApiKeyEnc: prepareApiKey('sk-test') };
   }
 
-  // Replace setTimeout/clearTimeout with recording stubs so no real 120s
-  // timer is ever armed and we can observe exactly when handles are cleared.
+  // Replace setTimeout/clearTimeout with recording stubs so no real
+  // timer is ever armed and we can observe exactly when handles are managed.
   function stubTimers(t) {
     const armed = [];
     const cleared = [];
@@ -175,47 +175,46 @@ describe('timeout lifecycle (body-phase)', () => {
     return { armed, cleared };
   }
 
-  test('structural: exactly two clearTimeout calls, both inside !res.ok branches', () => {
-    const matches = providersSrc.match(/clearTimeout\(timeout\)/g) || [];
-    assert.strictEqual(matches.length, 2);
+  test('structural: source uses timeoutGuard.clear() instead of clearTimeout(timeout)', () => {
+    // The old code had clearTimeout(timeout) in both !res.ok branches.
+    // The new code uses timeoutGuard.clear() — no raw clearTimeout(timeout) in providers.
+    const rawClears = providersSrc.match(/clearTimeout\(timeout\)/g) || [];
+    assert.strictEqual(rawClears.length, 0, 'no raw clearTimeout(timeout) should remain in llmProviders.js');
 
-    const lines = providersSrc.split('\n');
-    let guarded = 0;
-    lines.forEach((line, i) => {
-      if (line.includes('clearTimeout(timeout)')) {
-        const window = lines.slice(Math.max(0, i - 4), i).join('\n');
-        if (window.includes('if (!res.ok)')) guarded++;
-      }
-    });
-    assert.strictEqual(guarded, 2);
+    const guardClears = providersSrc.match(/timeoutGuard\.clear\(\)/g) || [];
+    assert.strictEqual(guardClears.length, 2, 'exactly two timeoutGuard.clear() calls');
   });
 
-  test('structural: both analyze functions return the timeout handle', () => {
-    const returns = providersSrc.match(/return \{ response: res, abortController: ac, timeout \}/g) || [];
+  test('structural: both analyze functions return timeoutGuard (not raw timeout handle)', () => {
+    const returns = providersSrc.match(/return \{ response: res, abortController: ac, timeoutGuard \}/g) || [];
     assert.strictEqual(returns.length, 2);
   });
 
-  test('ok response keeps the timeout armed — consumer clears it after the body read', async (t) => {
+  test('ok response: bump() transitions from connect ceiling to inactivity window', async (t) => {
     const { armed, cleared } = stubTimers(t);
     fakeResponse = { ok: true };
 
     const result = await analyze('hi', openAISettings());
 
-    // Armed once for the full 120s and handed back to the caller…
-    assert.strictEqual(armed.length, 1);
-    assert.strictEqual(armed[0].ms, 120_000);
-    assert.strictEqual(result.timeout, armed[0].handle);
-    // …and NOT cleared when response headers arrive (the old bug).
-    assert.strictEqual(cleared.length, 0);
+    // Constructor arms the connect ceiling (first setTimeout), and bump()
+    // clears it and re-arms the inactivity window — so 2 armed total.
+    assert.strictEqual(armed.length, 2);
+    assert.strictEqual(armed[0].ms, 300_000);
+    assert.strictEqual(armed[1].ms, 90_000);
+
+    // ok response calls bump() — clears connect, arms inactivity
+    assert.strictEqual(cleared.length, 1);
+    assert.strictEqual(cleared[0], armed[0].handle);
+
+    // The guard is returned, not the raw handle
+    assert.ok(result.timeoutGuard);
+    assert.strictEqual(typeof result.timeoutGuard.bump, 'function');
+    assert.strictEqual(typeof result.timeoutGuard.clear, 'function');
     assert.strictEqual(result.response, fakeResponse);
     assert.strictEqual(typeof result.abortController.abort, 'function');
-
-    // Consumer-side cleanup (controller's finally block):
-    clearTimeout(result.timeout);
-    assert.deepStrictEqual(cleared, [result.timeout]);
   });
 
-  test('!res.ok clears the timeout before throwing (no body to wait for)', async (t) => {
+  test('!res.ok clears the guard before throwing', async (t) => {
     const { armed, cleared } = stubTimers(t);
     fakeResponse = { ok: false, status: 500, text: async () => 'boom' };
 
@@ -224,22 +223,23 @@ describe('timeout lifecycle (body-phase)', () => {
       /LLM API error 500: boom/
     );
 
+    // clear() was called (one clearTimeout)
     assert.strictEqual(cleared.length, 1);
     assert.strictEqual(cleared[0], armed[0].handle);
   });
 
-  test('anthropic: ok response returns the timeout handle uncleared', async (t) => {
+  test('anthropic: ok response bumps to inactivity window', async (t) => {
     const { armed, cleared } = stubTimers(t);
     fakeResponse = { ok: true };
 
     const result = await analyze('hi', anthropicSettings());
 
-    assert.strictEqual(armed.length, 1);
-    assert.strictEqual(result.timeout, armed[0].handle);
-    assert.strictEqual(cleared.length, 0);
+    assert.strictEqual(armed.length, 2); // connect + bump
+    assert.strictEqual(cleared.length, 1); // bump clears connect
+    assert.ok(result.timeoutGuard);
   });
 
-  test('anthropic: !res.ok clears the timeout before throwing', async (t) => {
+  test('anthropic: !res.ok clears before throwing', async (t) => {
     const { armed, cleared } = stubTimers(t);
     fakeResponse = { ok: false, status: 401, text: async () => 'bad key' };
 
@@ -250,6 +250,27 @@ describe('timeout lifecycle (body-phase)', () => {
 
     assert.strictEqual(cleared.length, 1);
     assert.strictEqual(cleared[0], armed[0].handle);
+  });
+
+  test('bump() resets the inactivity window', async (t) => {
+    const { armed, cleared } = stubTimers(t);
+    fakeResponse = { ok: true };
+
+    const result = await analyze('hi', openAISettings());
+    // After analyze: armed[0]=connect (cleared by bump), armed[1]=inactivity
+
+    // Simulate consumer calling bump() on each streamed event
+    result.timeoutGuard.bump();
+    result.timeoutGuard.bump();
+    result.timeoutGuard.bump();
+
+    // Each bump: 1 clearTimeout + 1 setTimeout
+    assert.strictEqual(cleared.length, 4); // 1 from analyze + 3 from bumps
+    assert.strictEqual(armed.length, 5);   // 1 connect + 1 bump-in-analyze + 3 bumps
+
+    // clear() disarms permanently
+    result.timeoutGuard.clear();
+    assert.strictEqual(cleared.length, 5);
   });
 });
 

@@ -8,6 +8,7 @@ const sequelize = require('../models').sequelize;
 const { analyze, streamEvents } = require('../lib/llmProviders');
 const { buildAnalysisPrompt } = require('../lib/llmPrompt');
 const { discoverPidKeys } = require('../lib/pidRegistry');
+const { classifyAnalysisError } = require('../lib/analysisErrors');
 
 class AnalysisController {
   static async analyzeSession(req, res) {
@@ -112,25 +113,28 @@ class AnalysisController {
       // 7. Abort as soon as the client goes away — covers prompt build +
       // provider connect, not just the mid-stream phase.
       const clientGone = new AbortController();
-      req.on('close', () => clientGone.abort());
+      let clientDisconnected = false;
+      req.on('close', () => { clientDisconnected = true; clientGone.abort(); });
 
-      const { response: llmRes, abortController: llmAbort, timeout } =
+      const { response: llmRes, abortController: llmAbort, timeoutGuard } =
         await analyze(prompt, settings);
       clientGone.signal.addEventListener('abort', () => llmAbort.abort(), { once: true });
 
       let fullResponse = '';
       let fullReasoning = '';
 
-      // The 120s provider timeout stays armed through the whole body read;
-      // always disarm it when streaming finishes or throws.
+      // Body-phase timeout is inactivity-based: every streamed event
+      // (reasoning included) re-arms it; always disarm when the stream
+      // finishes or throws.
       try {
         for await (const evt of streamEvents(llmRes)) {
           if (evt.type === 'content') fullResponse += evt.text;
           else if (evt.type === 'reasoning') fullReasoning += evt.text;
+          timeoutGuard.bump();
           res.write(`data: ${JSON.stringify(evt)}\n\n`);
         }
       } finally {
-        clearTimeout(timeout);
+        timeoutGuard.clear();
       }
 
       // 8. Cache the analysis (BEFORE signaling done so listAnalyses finds it)
@@ -152,11 +156,16 @@ class AnalysisController {
       res.write('data: [DONE]\n\n');
       res.end();
     } catch (err) {
+      if (clientDisconnected) {
+        console.log('[AnalysisController] analyzeSession aborted: client disconnected');
+        return;
+      }
+      const message = classifyAnalysisError(err);
       console.error('[AnalysisController] analyzeSession error:', err);
       if (!res.headersSent) {
-        res.status(500).json({ error: 'Analysis failed' });
+        res.status(502).json({ error: message });
       } else {
-        res.write(`data: ${JSON.stringify({ error: 'Analysis failed' })}\n\n`);
+        res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
         res.end();
       }
     }
@@ -302,25 +311,27 @@ class AnalysisController {
       req.on('close', () => clientGone.abort());
 
       const testPrompt = 'Say "Connection successful" and nothing else.';
-      const { response: llmRes, abortController: llmAbort, timeout } =
+      const { response: llmRes, abortController: llmAbort, timeoutGuard } =
         await analyze(testPrompt, settings, { maxTokens: 20 });
       clientGone.signal.addEventListener('abort', () => llmAbort.abort(), { once: true });
 
       let text = '';
-      // The 120s provider timeout stays armed through the whole body read;
-      // always disarm it when streaming finishes or throws.
+      // Body-phase timeout is inactivity-based: every streamed event
+      // (reasoning included) re-arms it; always disarm when the stream
+      // finishes or throws.
       try {
         for await (const evt of streamEvents(llmRes)) {
           text += evt.text;
+          timeoutGuard.bump();
         }
       } finally {
-        clearTimeout(timeout);
+        timeoutGuard.clear();
       }
 
       res.json({ ok: true, response: text.trim(), provider: settings.llmProvider });
     } catch (err) {
       console.error('[AnalysisController] testConnection error:', err);
-      res.status(500).json({ ok: false, error: 'LLM connection test failed' });
+      res.status(502).json({ ok: false, error: classifyAnalysisError(err) });
     }
   }
 }
