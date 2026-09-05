@@ -79,7 +79,7 @@ const FEATURES: BrandFeature[] = [
 
 export default function AuthBranding() {
   return (
-    <div className="hidden w-1/2 items-center justify-center bg-gradient-to-br from-teal-600 to-teal-800 p-12 lg:flex">
+    <div className="hidden w-1/2 items-center justify-center bg-gradient-to-br from-teal-700 to-teal-900 p-12 lg:flex">
       <div className="max-w-md">
         <div className="text-center">
           <img
@@ -94,7 +94,7 @@ export default function AuthBranding() {
           >
             TorqueDash-Next
           </h1>
-          <p className="mt-3 text-lg text-teal-100">
+          <p className="mt-3 text-lg text-teal-50">
             Real-time vehicle telemetry replay and analysis.
           </p>
         </div>
@@ -117,7 +117,7 @@ export default function AuthBranding() {
               </svg>
               <div>
                 <div className="text-sm font-semibold text-white">{f.title}</div>
-                <p className="mt-0.5 text-sm leading-relaxed text-teal-100/90">
+                <p className="mt-0.5 text-sm leading-relaxed text-teal-50">
                   {f.description}
                 </p>
               </div>

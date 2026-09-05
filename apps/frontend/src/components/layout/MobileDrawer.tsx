@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router';
-import { getVersion } from '@/lib/api';
+import { useVersion } from '@/lib/useVersion';
 
 /** GitHub octocat mark — standard filled path (Simple Icons convention). */
 const GITHUB_PATH =
@@ -21,11 +21,7 @@ export default function MobileDrawer({ open, onClose }: Props) {
   const navigate = useNavigate();
   const location = useLocation();
   const drawerRef = useRef<HTMLDivElement | null>(null);
-  const [version, setVersion] = useState<string>('');
-
-  useEffect(() => {
-    getVersion().then((v) => setVersion(v.version)).catch(() => {});
-  }, []);
+  const { version } = useVersion();
 
   // ── Close on Escape key ──────────────────────────────────────────────
   useEffect(() => {
@@ -115,6 +111,7 @@ export default function MobileDrawer({ open, onClose }: Props) {
             href="https://github.com/moesix/torque-dash-next/"
             target="_blank"
             rel="noopener noreferrer"
+            aria-label="GitHub repository (opens in a new tab)"
             onClick={onClose}
             className="flex items-center gap-2 rounded-md px-3 py-2 text-left font-medium text-gray-600 hover:bg-gray-100 dark:text-[var(--text-secondary)] dark:hover:bg-[var(--bg-surface)]"
           >

@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router';
-import { logout, getVersion } from '@/lib/api';
+import { logout } from '@/lib/api';
 import MobileDrawer from '@/components/layout/MobileDrawer';
 import { toggleTheme, getTheme } from '@/lib/theme';
+import { useVersion } from '@/lib/useVersion';
 
 /** GitHub octocat mark — standard filled path (Simple Icons convention). */
 const GITHUB_PATH =
@@ -17,10 +18,7 @@ export default function AppShell() {
   const location = useLocation();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [theme, setTheme] = useState(getTheme());
-  const [version, setVersion] = useState<string>('');
-  useEffect(() => {
-    getVersion().then((v) => setVersion(v.version)).catch(() => {});
-  }, []);
+  const { version } = useVersion();
 
   async function onLogout() {
     try {
@@ -68,6 +66,7 @@ export default function AppShell() {
             href="https://github.com/moesix/torque-dash-next/"
             target="_blank"
             rel="noopener noreferrer"
+            aria-label="GitHub repository (opens in a new tab)"
             className="flex items-center gap-2 rounded-md px-3 py-2 font-medium text-gray-600 hover:bg-gray-100 dark:text-[var(--text-secondary)] dark:hover:bg-[var(--bg-surface)]"
           >
             <svg viewBox="0 0 24 24" className="h-4 w-4" fill="currentColor" aria-hidden="true">
