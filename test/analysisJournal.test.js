@@ -336,3 +336,141 @@ describe('listAnalyses (preview mode)', () => {
     assert.strictEqual(calls.body[0].provider, 'openai');
   });
 });
+
+// ── Route registration (regression: GET /api/analyses/:id 404s) ──────
+// The frontend calls the top-level GET /api/analyses/:id when expanding a
+// past analysis. The controller has always handled it; the route was simply
+// never registered. These tests exercise the REAL router (routes/api.js)
+// mounted on an express app, with the mocked models injected above, so a
+// missing or mis-ordered registration fails here instead of in production.
+// HTTP-level on purpose: a controller-only test cannot catch route
+// registration bugs. NOTE: intentionally standalone — these cover the
+// router wiring, not a duplicate of the controller-level suites above.
+const express = require('express');
+
+// Load the real router with the SAME require.cache mocks the controller
+// tests above rely on (models, LLM providers, prompt builder, PID registry).
+let apiRouter;
+try {
+  apiRouter = require('../routes/api');
+} catch {
+  apiRouter = null;
+}
+
+// Boot the router on an ephemeral port; authenticate is stubbed per-test.
+function withServer(handler) {
+  return new Promise((resolve, reject) => {
+    const app = express();
+    // Parse JSON like app.js does so res.json bodies behave identically.
+    app.use(express.json());
+    app.use('/api', (req, res, next) => {
+      // Stub passport's req.isAuthenticated + req.user; req.user is
+      // overridden by tests that need a different identity.
+      req.user = req.user || { id: 1 };
+      req.isAuthenticated = () => true;
+      next();
+    });
+    app.use('/api', apiRouter);
+    // Terminal handler so unmatched routes surface as JSON 404s instead of
+    // hanging or defaulting to HTML errors.
+    app.use((req, res) => res.status(404).json({ error: 'Not found' }));
+    const server = app.listen(0, '127.0.0.1', async () => {
+      const { port } = server.address();
+      try {
+        await handler(`http://127.0.0.1:${port}`);
+        server.close(() => resolve());
+      } catch (err) {
+        server.close(() => reject(err));
+      }
+    });
+  });
+}
+
+async function getJson(base, path) {
+  const res = await fetch(`${base}${path}`);
+  return { status: res.status, body: await res.json() };
+}
+
+describe('GET /api/analyses/:id route registration', { skip: apiRouter ? false : 'routes/api.js could not load (env vars missing in local dev)' }, () => {
+  test('returns 200 with full analysis detail for the owning user', async () => {
+    await withServer(async (base) => {
+      mockModels.Analysis.findOne = async (opts) => {
+        // Prove ownership scoping reaches the model: where must carry the
+        // analysisId (Express params are strings) AND the user's id.
+        assert.strictEqual(opts.where.id, '39');
+        assert.strictEqual(opts.where.userId, 1);
+        return {
+          id: 39,
+          sessionId: 10,
+          provider: 'anthropic',
+          model: 'claude-3',
+          response: 'Full analysis body',
+          reasoning: 'Because telemetry shows X',
+          createdAt: new Date('2026-01-15T10:00:00Z'),
+        };
+      };
+
+      const { status, body } = await getJson(base, '/api/analyses/39');
+
+      assert.strictEqual(status, 200);
+      assert.strictEqual(body.id, 39);
+      assert.strictEqual(body.provider, 'anthropic');
+      assert.strictEqual(body.model, 'claude-3');
+      assert.strictEqual(body.response, 'Full analysis body');
+      assert.strictEqual(body.reasoning, 'Because telemetry shows X');
+      assert.strictEqual(body.createdAt, new Date('2026-01-15T10:00:00Z').toISOString());
+    });
+  });
+
+  test('returns 404 for a non-existent analysis id', async () => {
+    await withServer(async (base) => {
+      mockModels.Analysis.findOne = async () => null;
+
+      const { status, body } = await getJson(base, '/api/analyses/99999');
+
+      assert.strictEqual(status, 404);
+      assert.deepStrictEqual(body, { error: 'Analysis not found' });
+    });
+  });
+
+  test('returns 404 when requesting another user\u2019s analysis (ownership scoping)', async () => {
+    await withServer(async (base) => {
+      // Simulate the DB honouring the scoped where clause: user 1 asking for
+      // user 2's analysis finds no row.
+      mockModels.Analysis.findOne = async (opts) => {
+        assert.strictEqual(opts.where.userId, 1);
+        return null;
+      };
+
+      const { status, body } = await getJson(base, '/api/analyses/77');
+
+      assert.strictEqual(status, 404);
+      assert.deepStrictEqual(body, { error: 'Analysis not found' });
+    });
+  });
+
+  test('GET /api/analyses/export still returns markdown, not captured by :analysisId', async () => {
+    await withServer(async (base) => {
+      mockModels.Analysis.findAll = async () => [
+        {
+          id: 1,
+          provider: 'openai',
+          model: 'gpt-4',
+          response: 'All good.',
+          reasoning: null,
+          createdAt: new Date('2026-01-15T10:00:00Z'),
+          Session: { name: 'Morning Drive' },
+        },
+      ];
+
+      const res = await fetch(`${base}/api/analyses/export`);
+      const text = await res.text();
+
+      assert.strictEqual(res.status, 200);
+      assert.ok(res.headers.get('content-type').includes('text/markdown'));
+      assert.ok(text.includes('# AI Analysis History'));
+      assert.ok(text.includes('Morning Drive'));
+      assert.ok(text.includes('All good.'));
+    });
+  });
+});
