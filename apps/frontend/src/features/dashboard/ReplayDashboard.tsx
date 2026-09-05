@@ -74,6 +74,10 @@ export default function ReplayDashboard() {
   // View mode: 'dash' is the default landing view; 'map' shows the
   // GPS track near-fullscreen with the playback transport beneath it.
   const [viewMode, setViewMode] = useState<'dash' | 'map'>('dash');
+  // Print mode: force-expands diagnostic panels so charts initialize before
+  // window.print(); cleared again after the print dialog closes.
+  const [printMode, setPrintMode] = useState(false);
+  const [isPrinting, setIsPrinting] = useState(false);
 
   // ── Computed values ────────────────────────────────────────────────
   const available = useMemo(
@@ -117,6 +121,27 @@ export default function ReplayDashboard() {
   function scrollToAnalysis() {
     const el = document.getElementById('ai-analysis-panel');
     el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  /**
+   * Print the session report / save as PDF.
+   *
+   * Sets printMode so the diagnostic panels force-expand (charts lazy-init),
+   * then waits one frame for React to commit the expanded panels before
+   * opening the print dialog. Note: the latest AI analysis body is fetched
+   * asynchronously on printMode — if it was never expanded before, the first
+   * print may omit its body (one-print latency); the analysis is usually
+   * already expanded when the owner prints after reading.
+   */
+  function handlePrint() {
+    setIsPrinting(true);
+    setPrintMode(true);
+    // next frame so React commits the expanded panels before print
+    requestAnimationFrame(() => {
+      window.print();
+      setPrintMode(false);
+      setIsPrinting(false);
+    });
   }
 
   // Reset playback cursor when switching sessions.
@@ -216,7 +241,7 @@ export default function ReplayDashboard() {
               {session.duration ? ` · ${session.duration}` : ''}
             </p>
           </div>
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex shrink-0 items-center gap-2 whitespace-nowrap">
             <div
               role="group"
               aria-label="Session view mode"
@@ -244,9 +269,9 @@ export default function ReplayDashboard() {
               onClick={() => setShowAnalysisConfirm(true)}
               className="rounded p-2.5 min-w-[44px] min-h-[44px] text-xs font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
               title="AI-powered session analysis"
-              aria-label="AI Analysis"
+              aria-label="Run AI Analysis"
             >
-              🤖 AI
+              🤖 Run AI Analysis
             </button>
             <button
               type="button"
@@ -271,6 +296,20 @@ export default function ReplayDashboard() {
                 <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-gray-400 border-t-transparent" />
               ) : (
                 '↓ CSV'
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={handlePrint}
+              disabled={isPrinting}
+              className="rounded p-2.5 min-w-[44px] min-h-[44px] text-xs font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200 disabled:opacity-50"
+              title="Print session report or save as PDF"
+              aria-label="Print session report"
+            >
+              {isPrinting ? (
+                <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-gray-400 border-t-transparent" />
+              ) : (
+                '🖨️ Print / PDF'
               )}
             </button>
             {truncated && (
@@ -387,7 +426,11 @@ export default function ReplayDashboard() {
 
       {/* ── Pre-configured diagnostic panels ────────────── */}
       <div className="animate-slide-up-delay-3">
-        <DiagnosticPanels frames={frames} available={available} />
+        <DiagnosticPanels
+          frames={frames}
+          available={available}
+          forceExpanded={printMode}
+        />
       </div>
 
       {/* GPS Track — full width */}
@@ -429,7 +472,11 @@ export default function ReplayDashboard() {
       {/* AI Analysis panel — at the bottom */}
       <div id="ai-analysis-panel" className="animate-slide-up-delay-5">
         <React.Suspense fallback={<div className="text-sm text-gray-400 p-4">Loading analysis panel...</div>}>
-          <AnalysisPanel ref={analysisPanelRef} sessionId={id as string} />
+          <AnalysisPanel
+            ref={analysisPanelRef}
+            sessionId={id as string}
+            printMode={printMode}
+          />
         </React.Suspense>
       </div>
         </>

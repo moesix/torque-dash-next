@@ -10,6 +10,28 @@ interface Props {
   maxCoolant: number | null;
 }
 
+// ── Stats helper ────────────────────────────────────────────────────────────
+
+/**
+ * Compute min / max / median over the non-null values of a series.
+ * Returns null when there is no usable data (empty or null-only input).
+ * The input is sorted internally, so callers may pass unsorted series.
+ */
+export function stats(
+  values: (number | null)[],
+): { min: number; max: number; median: number } | null {
+  const v = values.filter((x): x is number => x != null).sort((a, b) => a - b);
+  if (v.length === 0) return null;
+  const mid = v.length >> 1;
+  const median = v.length % 2 ? v[mid] : (v[mid - 1] + v[mid]) / 2;
+  return { min: v[0], max: v[v.length - 1], median };
+}
+
+/** Extract a number-only array of series values ([timestamp, value][]) → value[]. */
+function seriesValues(data: [number, number | null][]): (number | null)[] {
+  return data.map((d) => d[1]);
+}
+
 // ── SVG Ring Gauge ──────────────────────────────────────────────────────────
 
 interface GaugeProps {
@@ -167,6 +189,11 @@ export default function SessionSummaryCard({
     [frames],
   );
 
+  // Compute per-metric stats from the SAME series the gauges use
+  const rpmStats = useMemo(() => stats(seriesValues(rpmData)), [rpmData]);
+  const coolantStats = useMemo(() => stats(seriesValues(coolantData)), [coolantData]);
+  const speedStats = useMemo(() => stats(seriesValues(speedData)), [speedData]);
+
   // Find current values at cursor position
   const currentValues = useMemo(() => {
     if (cursorTime == null || frames.length === 0) {
@@ -212,21 +239,42 @@ export default function SessionSummaryCard({
         />
       </div>
 
-      {/* Bottom: Max values row */}
-      <div className="border-t pt-2 pb-1 flex items-center justify-center gap-4 text-xs text-gray-500 flex-wrap">
-        <span>
-          Max RPM: <strong>{maxRpm != null ? Math.round(maxRpm) : '—'}</strong>
-        </span>
-        <span className="text-gray-300">·</span>
-        <span>
-          Max Speed:{' '}
-          <strong>{maxSpeed != null ? `${Math.round(maxSpeed)} km/h` : '—'}</strong>
-        </span>
-        <span className="text-gray-300">·</span>
-        <span>
-          Max Coolant:{' '}
-          <strong>{maxCoolant != null ? `${Math.round(maxCoolant)}°C` : '—'}</strong>
-        </span>
+      {/* Bottom: Min / Max / Median table (doubles as the print
+          "Summarised Session Info" block) */}
+      <div className="border-t pt-2 pb-1 overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="text-left text-gray-500 dark:text-[var(--text-muted)]">
+              <th className="py-1 pr-2 font-medium">Metric</th>
+              <th className="py-1 pr-2 text-right font-medium">Min</th>
+              <th className="py-1 pr-2 text-right font-medium">Max</th>
+              <th className="py-1 text-right font-medium">Median</th>
+            </tr>
+          </thead>
+          <tbody className="text-gray-700 dark:text-[var(--text-secondary)]">
+            {[
+              { label: 'Engine RPM', unit: 'rpm', s: rpmStats },
+              { label: 'Coolant', unit: '°C', s: coolantStats },
+              { label: 'Speed', unit: 'km/h', s: speedStats },
+            ].map((row) => (
+              <tr key={row.label} className="border-t border-gray-100 dark:border-[var(--border-default)]">
+                <td className="py-1 pr-2 font-medium">
+                  {row.label}
+                  <span className="ml-1 text-gray-400 dark:text-[var(--text-muted)]">{row.unit}</span>
+                </td>
+                <td className="py-1 pr-2 text-right tabular-nums">
+                  {row.s != null ? Math.round(row.s.min) : '—'}
+                </td>
+                <td className="py-1 pr-2 text-right tabular-nums">
+                  {row.s != null ? Math.round(row.s.max) : '—'}
+                </td>
+                <td className="py-1 text-right tabular-nums">
+                  {row.s != null ? Math.round(row.s.median) : '—'}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   );

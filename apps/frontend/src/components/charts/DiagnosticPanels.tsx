@@ -17,6 +17,8 @@ import { computeTotalTrim } from '@/lib/pidDecode';
 interface Props {
   frames: TelemetryFrame[];
   available: SeriesSource[];
+  /** When true every panel renders expanded — print mode. */
+  forceExpanded?: boolean;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────
@@ -29,7 +31,7 @@ function hasPids(required: string[], available: SeriesSource[]): boolean {
 
 // ── Component ────────────────────────────────────────────────────────────
 
-export default function DiagnosticPanels({ frames, available }: Props) {
+export default function DiagnosticPanels({ frames, available, forceExpanded = false }: Props) {
   // Pre-compute Total Trim series (memoized — only recomputes when frames change)
   const totalTrimData = useMemo(() => computeTotalTrim(frames), [frames]);
 
@@ -63,6 +65,7 @@ export default function DiagnosticPanels({ frames, available }: Props) {
           0: {}, // RPM left
           1: {}, // Speed right
         }}
+        forceExpanded={forceExpanded}
       />
 
       {/* Panel 2: Fuel Trims */}
@@ -73,6 +76,7 @@ export default function DiagnosticPanels({ frames, available }: Props) {
         computedSeries={[totalTrimSeries]}
         markLines={fuelTrimMarkLines}
         markAreas={fuelTrimMarkAreas}
+        forceExpanded={forceExpanded}
       />
 
       {/* Panel 3: O2 Sensor & AFR */}
@@ -84,6 +88,7 @@ export default function DiagnosticPanels({ frames, available }: Props) {
           0: {}, // O2 Voltage left
           1: {}, // AFR right
         }}
+        forceExpanded={forceExpanded}
       />
 
       {/* Panel 4: Engine Coolant Temp */}
@@ -94,6 +99,7 @@ export default function DiagnosticPanels({ frames, available }: Props) {
         yAxisOverrides={{
           0: { min: 60, max: 95 },
         }}
+        forceExpanded={forceExpanded}
       />
 
       {/* Panel 5: Boost & MAF (conditional — only if PIDs exist) */}
@@ -106,6 +112,7 @@ export default function DiagnosticPanels({ frames, available }: Props) {
             0: {}, // Boost left
             1: {}, // MAF right
           }}
+          forceExpanded={forceExpanded}
         />
       )}
 
@@ -116,6 +123,7 @@ export default function DiagnosticPanels({ frames, available }: Props) {
           frames={frames}
           pids={['k11', 'k49']}
           // Both are %, single Y-axis — no overrides needed
+          forceExpanded={forceExpanded}
         />
       )}
     </div>

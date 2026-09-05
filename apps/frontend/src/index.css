@@ -242,3 +242,38 @@ h1, h2, h3, h4 {
 .analysis-prose pre code {
   @apply bg-transparent p-0;
 }
+
+/* ── Print: session report ── */
+@media print {
+  /* Force light tokens regardless of theme */
+  :root { color-scheme: light; }
+  html.dark { --bg-base: #f9fafb; --bg-card: #ffffff; --bg-elevated: #ffffff;
+    --bg-surface: #f3f4f6; --text-primary: #111827; --text-secondary: #4b5563;
+    --text-muted: #9ca3af; --border-default: #e5e7eb; --border-strong: #d1d5db;
+    --accent: #009999; }
+
+  /* Hide chrome + non-report UI */
+  aside, header[role="banner"], .skeleton,
+  #ai-analysis-panel button,
+  .print\:hidden { display: none !important; }
+
+  /* Kill page-level scrolling/height constraints */
+  html, body, #root, .scrollable-area { height: auto !important; overflow: visible !important; }
+  main#main-content { overflow: visible !important; padding: 0 !important; }
+
+  /* Expand every collapsed disclosure */
+  details { display: block !important; }
+  details > summary { list-style: none; }
+  details:not([open]) > *:not(summary) { display: block !important; }
+  details:not([open]) { display: block !important; }
+
+  /* Tables: no horizontal scroll in print */
+  .analysis-prose table { display: table !important; overflow-x: visible !important; }
+
+  /* Charts: keep canvas size, avoid page-break inside panels */
+  .echarts-for-react, canvas { max-width: 100% !important; break-inside: avoid; }
+  .rounded-xl { break-inside: avoid; }
+
+  /* Reports are black-on-white */
+  body { background: #fff !important; color: #111827 !important; }
+}
