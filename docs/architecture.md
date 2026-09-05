@@ -276,12 +276,14 @@ from session telemetry:
   Markdown tables, saving ~30% on LLM tokens. Strips lat/lon columns and
   extracts `HH:mm:ss` from timestamps via regex. Uses `resampleTelemetry()`
   internally.
-- **`buildAnalysisPrompt(session, settings, telemetrySample, pidKeys)`** —
+- **`buildAnalysisPrompt(session, settings, telemetrySample, pidKeys, dataQuality)`** —
   Assembles the full analysis prompt by composing all of the above. Includes
   pre-calculated statistical aggregates with units, four diagnostic guardrails
   (fuel trim physics, A/C idle behaviour, ECU torque management, deceleration
-  fuel cut-off), dynamic engine size injection, and five specific analysis
-  categories.
+  fuel cut-off), dynamic engine size injection, five specific analysis
+  categories, and — when a `dataQuality` note is present — a fifth "Data
+  Quality" guardrail (Plan 089). Gap-free sessions produce byte-identical
+  prompts.
 
 **Key architectural decisions:**
 
@@ -296,6 +298,18 @@ from session telemetry:
   rather than just the start and end.
 - **CSV over Markdown.** CSV is more token-efficient than Markdown tables for
   the same telemetry data, reducing per-analysis cost.
+- **Connectivity-gap forensics (Plan 089).** `detectBackfillGaps()` scans the
+  full-resolution log timeline for >5 s silences (connectivity gaps) and
+  >90-row-per-minute backfill bursts; `buildDataQualityNote()` turns any hits
+  into the conditional "Data Quality" guardrail, so the model treats the
+  discontinuity as missing (buffered/backfilled) data rather than speculating
+  about an engine stall or sensor dropout. Sessions without gaps keep
+  byte-identical prompts.
+- **Duration from log bounds, never `createdAt` (Plan 087).**
+  `formatSessionDuration()` computes `HH:MM:SS` from log MIN/MAX timestamps
+  (falling back to `Sessions.firstTimestamp`/`lastTimestamp`) and returns
+  `unknown` for negative or missing spans — backfilled sessions (logs uploaded
+  after the trip ended) used to show bogus durations like `-1:-1:-24`.
 
 ### 2.11 `lib/llmProviders.js` — LLM Provider Routing & Token Budget
 
@@ -319,6 +333,15 @@ from session telemetry:
   use the configured budget. This replaces the previous hardcoded 8192 that
   starved DeepSeek thinking-mode responses (reasoning + content share one
   budget).
+- **Budget exhaustion surfaced as a finish event (Plan 088)** — the stream
+  parser captures `finish_reason` (OpenAI-compatible) / `stop_reason`
+  (Anthropic) and yields a single `{ type: 'finish', reason }` event per stream
+  (never duplicated across chunks). On `length`/`max_tokens` — a thinking-mode
+  model spent its whole budget on reasoning and produced no answer, or a
+  partial one — the controller streams an SSE warning to the client (amber
+  banner in the frontend), persists `{ finishReason, reasoningChars,
+  responseChars }` to the `Analyses.tokenUsage` JSONB column (no migration),
+  and logs. Previously this failed silently with no error anywhere.
 - **API keys** — stored encrypted at rest (`llmApiKeyEnc`, AES-256-GCM via
   `lib/encryption.js`); `getApiKey()` decrypts on demand, `prepareApiKey()`
   encrypts on save.

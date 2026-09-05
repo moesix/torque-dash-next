@@ -307,7 +307,7 @@ POST /api/sessions/:id/analyze
 | `resampleTelemetry(telemetrySample, maxRows = 80)` | Uniform resampling across the full timeline (replaces the older head/tail slicing approach). Ensures the LLM sees data from start, middle, and end of every drive. |
 | `buildTelemetryCsv(telemetrySample, pidKeys)` | Outputs raw CSV instead of Markdown tables (~30% token savings). Removes lat/lon columns. Extracts `HH:mm:ss` via regex. Calls `resampleTelemetry()` internally. |
 | `buildContext(session, settings, telemetrySample, pidKeys)` | Builds the vehicle/session context block with cleaner formatting and a "Data points in sample" label. |
-| `buildAnalysisPrompt(session, settings, telemetrySample, pidKeys)` | Assembles the complete prompt from all of the above. Includes pre-calculated stats, four diagnostic guardrails, dynamic engine size, and five analysis categories. |
+| `buildAnalysisPrompt(session, settings, telemetrySample, pidKeys, dataQuality)` | Assembles the complete prompt from all of the above. Includes pre-calculated stats, four diagnostic guardrails, dynamic engine size, and five analysis categories. When a `dataQuality` note is passed (connectivity gaps / backfill bursts detected, Plan 089), a fifth "Data Quality" guardrail is appended; clean sessions get byte-identical prompts. |
 
 ### 8.3 Design Notes
 
@@ -322,7 +322,10 @@ POST /api/sessions/:id/analyze
 - **Diagnostic guardrails** — four domain-specific rules encoded in the prompt
   prevent the LLM from flagging normal OBD-II behaviour (negative fuel trims
   within ±10%, A/C idle load, ECU torque management timing, deceleration fuel
-  cut-off) as mechanical faults.
+  cut-off) as mechanical faults. A fifth, conditional **"Data Quality"**
+  guardrail is appended only when connectivity gaps or upload backfill bursts
+  are detected (see §8.5); clean sessions keep the byte-identical four-guardrail
+  prompt.
 - **`lib/pidRegistry.js`** is imported to resolve PID short keys to human-readable
   names and units in both CSV column headers and the stats display.
 
@@ -344,6 +347,37 @@ POST /api/sessions/:id/analyze
   input (min 2048, max 32768, step 1024) with a cost warning, and the provider
   status badge now shows the human-readable provider name plus chips for Model,
   DeepSeek Thinking / Effort, and Max tokens.
+
+### 8.5 AI Analysis Reliability (Plans 087–089)
+
+Reliability hardening for AI analysis on long or backfilled sessions:
+
+- **Token-budget exhaustion is surfaced, not silent** — when a thinking-mode
+  model ends the stream with `finish_reason` `length`/`max_tokens` (it spent
+  its whole token budget on reasoning and produced no answer, or only a partial
+  one), `lib/llmProviders.js` now yields a single `{ type: 'finish', reason }`
+  event. The controller streams an SSE `{ type: 'finish', warning }` event that
+  the frontend renders as an amber warning banner (`AnalysisPanel.tsx`),
+  persists `{ finishReason, reasoningChars, responseChars }` to the
+  `Analyses.tokenUsage` JSONB column (no migration), and logs a `console.warn`
+  line. Previously the stream simply ended with no answer and no error
+  anywhere.
+- **Session duration never comes from `createdAt`** — the prompt duration is
+  computed from log MIN/MAX timestamps via `formatSessionDuration()`, falling
+  back to `Sessions.firstTimestamp`/`lastTimestamp` when logs are missing.
+  Backfilled sessions (logs uploaded after the trip ended, e.g. a tablet that
+  reconnected at trip end) used to show negative spans like `-1:-1:-24`;
+  negative or missing bounds now render as `unknown`.
+- **Connectivity gaps are labelled as missing data** — the controller feeds
+  `detectBackfillGaps()` the full-resolution log timeline. When it finds a
+  connectivity gap (>5 s silence between logs) or a backfill burst (>90 rows in
+  one minute), `buildDataQualityNote()` produces the "Data Quality" guardrail
+  telling the model the discontinuity is missing (buffered/backfilled) data —
+  NOT an engine stall or sensor dropout. Gap-free sessions get byte-identical
+  prompts.
+- **Remediation** — raise "Max tokens" in Settings (validated 2048–32768) to
+  give thinking-mode models more headroom; the earlier mitigation applied on
+  the production DB set `llmMaxTokens` to 32768.
 
 ---
 
