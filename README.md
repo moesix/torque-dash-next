@@ -68,16 +68,25 @@ After creating all user accounts, disable public registration via the Settings U
 ## Screenshots
 
 <details>
-<summary><strong>Session replay with overlay chart & GPS track</strong></summary>
+<summary><strong>Login</strong></summary>
 
 <p align="center">
-  <img src="./imgs/TDN-session.png" width="100%" alt="Session replay view with overlay chart showing multi-series PID data and a Leaflet GPS map with color-coded speed trace">
+  <img src="./imgs/tdn-login.png" width="100%" alt="Mobile login screen">
 </p>
 
 </details>
 
 <details>
-<summary><strong>Session list & dashboard overview</strong></summary>
+<summary><strong>Session dash with overlay charts</strong></summary>
+
+<p align="center">
+  <img src="./imgs/tdn-dash-session.png" width="100%" alt="Session replay view with overlay chart showing multi-series PID data and a Leaflet GPS map with color-coded speed trace">
+</p>
+
+</details>
+
+<details>
+<summary><strong>Session list</strong></summary>
 
 <p align="center">
   <img src="./imgs/tdn-session-list.png" width="100%" alt="Session list with summary cards showing trip duration, distance, and max speed">
@@ -86,46 +95,59 @@ After creating all user accounts, disable public registration via the Settings U
 </details>
 
 <details>
-<summary><strong>AI-powered session analysis</strong></summary>
+<summary><strong>AI-powered session reasoning & analysis</strong></summary>
 
 <p align="center">
-  <img src="./imgs/tdn-ai-analysis.png" width="100%" alt="AI analysis panel showing a diagnostic summary generated from session telemetry data">
+  <img src="./imgs/tdn-ai-analysis-content.png" width="100%" alt="AI analysis panel showing a diagnostic summary generated from session telemetry data">
+</p>
+
+<p align="center">
+  <img src="./imgs/tdn-ai-analysis-reasoning.png" width="100%" alt="AI analysis panel showing a reasoning, if enabled, generated from session telemetry data">
 </p>
 
 </details>
 
 <details>
-<summary><strong>Time-series map view</strong></summary>
+<summary><strong>Primary & Dedicated Time Series Graph</strong></summary>
 
 <p align="center">
-  <img src="./imgs/tdn-timeseries-map.png" width="100%" alt="Combined time-series chart and GPS map view for a telemetry session">
+  <img src="./imgs/tdn-graphs.png" width="100%" alt="Combined time-series charts for a telemetry session">
 </p>
 
 </details>
 
 <details>
-<summary><strong>GPS map view</strong></summary>
+<summary><strong>Map Mode</strong></summary>
 
 <p align="center">
-  <img src="./imgs/mapview.png" width="100%" alt="Leaflet GPS map with color-coded speed track">
+  <img src="./imgs/tdn-mapviewmode.png" width="100%" alt="Leaflet GPS map with color-coded speed track">
 </p>
 
 </details>
 
 <details>
-<summary><strong>Mobile — login</strong></summary>
+<summary><strong>Settings: User Registration, Bearer Token, AI Provider</strong></summary>
 
 <p align="center">
-  <img src="./imgs/tdn-mobile-login.jpg" width="100%" alt="Mobile login screen">
+  <img src="./imgs/tdn-settings01.png" width="100%" alt="Mobile AI provider settings panel with DeepSeek selected">
 </p>
 
 </details>
 
 <details>
-<summary><strong>Mobile — AI provider settings</strong></summary>
+<summary><strong>Settings: User Registration, Bearer Token, AI Provider</strong></summary>
 
 <p align="center">
-  <img src="./imgs/tdn-mobile-settings-ai-provider.jpg" width="100%" alt="Mobile AI provider settings panel with DeepSeek selected">
+  <img src="./imgs/tdn-settings02.png" width="100%" alt="Mobile AI provider settings panel with DeepSeek selected">
+</p>
+
+</details>
+
+<details>
+<summary><strong>Settings: Vehicles, Timezone, Data Retention</strong></summary>
+
+<p align="center">
+  <img src="./imgs/tdn-settings03.png" width="100%" alt="Mobile AI provider settings panel with DeepSeek selected">
 </p>
 
 </details>
