@@ -52,8 +52,25 @@ function findNearestFrame(
   return f;
 }
 
+/**
+ * Resolve the frame the marker should pin to when the map mounts with an
+ * already-set playback cursor. The imperative subscription below only fires
+ * on cursor CHANGES, so an entry position must be derived from the store's
+ * CURRENT cursorTime explicitly. A null cursor (never scrubbed) yields null —
+ * the map then keeps its default `position={center}` (= first frame).
+ */
+export function resolveFrameAtCursor(
+  frames: TelemetryFrame[],
+  cursorTime: number | null,
+): TelemetryFrame | null {
+  if (cursorTime == null) return null;
+  return findNearestFrame(frames, cursorTime);
+}
+
 interface Props {
   frames: TelemetryFrame[];
+  /** Tailwind height classes for the MapContainer. */
+  className?: string;
 }
 
 /**
@@ -62,8 +79,9 @@ interface Props {
  * map). Instead we subscribe to the playback store OUTSIDE React render and
  * imperatively call `marker.setLatLng(...)` on the nearest frame.
  */
-export default function GpsTrackMap({ frames }: Props) {
+export default function GpsTrackMap({ frames, className }: Props) {
   const markerRef = useRef<L.Marker | null>(null);
+  const heightClass = className ?? 'h-64 md:h-[360px]';
 
   const positions = useMemo<[number, number][]>(
     () =>
@@ -84,6 +102,18 @@ export default function GpsTrackMap({ frames }: Props) {
       if (!f || !markerRef.current) return;
       markerRef.current.setLatLng([f.lat as number, f.lon as number]);
     });
+
+    // Synchronous first run: if a cursor is already set (e.g. the user
+    // scrubbed in Dash mode before toggling to Map), pin the marker to the
+    // matching frame immediately. Runs on every mount and frames change.
+    const t0 = usePlaybackStore.getState().cursorTime;
+    if (t0 != null) {
+      const f0 = resolveFrameAtCursor(frames, t0);
+      if (f0 && markerRef.current) {
+        markerRef.current.setLatLng([f0.lat as number, f0.lon as number]);
+      }
+    }
+
     return unsubscribe;
   }, [frames]);
 
@@ -93,7 +123,7 @@ export default function GpsTrackMap({ frames }: Props) {
       zoom={13}
       scrollWheelZoom
       style={{ width: '100%' }}
-      className="h-64 md:h-[360px]"
+      className={heightClass}
     >
       <TileLayer
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"

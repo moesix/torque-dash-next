@@ -71,6 +71,9 @@ export default function ReplayDashboard() {
   const [showAnalysisConfirm, setShowAnalysisConfirm] = useState(false);
   const [showReassign, setShowReassign] = useState(false);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  // View mode: 'dash' is the default landing view; 'map' shows the
+  // GPS track near-fullscreen with the playback transport beneath it.
+  const [viewMode, setViewMode] = useState<'dash' | 'map'>('dash');
 
   // ── Computed values ────────────────────────────────────────────────
   const available = useMemo(
@@ -214,6 +217,28 @@ export default function ReplayDashboard() {
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-2">
+            <div
+              role="group"
+              aria-label="Session view mode"
+              className="flex items-center rounded-lg border border-gray-200 p-0.5 dark:border-[var(--border-strong)]"
+            >
+              <span className="mr-1 text-xs text-gray-400">View:</span>
+              {(['dash', 'map'] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => setViewMode(mode)}
+                  aria-pressed={viewMode === mode}
+                  className={`rounded-md px-3 py-1.5 text-xs font-medium capitalize min-h-[36px] ${
+                    viewMode === mode
+                      ? 'bg-gray-900 text-white dark:bg-[var(--bg-elevated)] dark:text-white'
+                      : 'text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700'
+                  }`}
+                >
+                  {mode}
+                </button>
+              ))}
+            </div>
             <button
               type="button"
               onClick={() => setShowAnalysisConfirm(true)}
@@ -275,6 +300,9 @@ export default function ReplayDashboard() {
         </div>
       </div>
 
+      {/* ── Dash (default) vs Map view body ───────────────────────── */}
+      {viewMode === 'dash' ? (
+        <>
       {/* Session notes */}
       {id && <NotesCard sessionId={id} initialNotes={session.notes ?? ''} />}
 
@@ -404,6 +432,17 @@ export default function ReplayDashboard() {
           <AnalysisPanel ref={analysisPanelRef} sessionId={id as string} />
         </React.Suspense>
       </div>
+        </>
+      ) : (
+        <div className="space-y-4">
+          <div className="animate-slide-up rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-2 shadow-xs">
+            <GpsTrackMap frames={frames} className="h-[calc(100vh-16rem)] min-h-[420px]" />
+            <div className="px-2 pb-2">
+              <PlaybackControls frames={frames} />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
