@@ -1,6 +1,6 @@
-# torqueDASH-Next — Development & Contributing
+# TorqueDash-Next — Development & Contributing
 
-Guidance for contributors working on the torqueDASH-Next backend (repo root) and
+Guidance for contributors working on the TorqueDash-Next backend (repo root) and
 the React/Vite frontend (`apps/frontend/`).
 
 > **Known issues and follow-up items are documented below.** See the
@@ -469,10 +469,17 @@ push to `master`. It:
    tag.
 4. Pushes the commit and tag back to `master`.
 
-> **Chaining to Docker builds:** pushes made with the default `GITHUB_TOKEN` do
-> **not** trigger downstream workflows (like `docker-publish.yml`). To enable
-> the chain, configure a PAT with `contents:write` as `secrets.GH_PAT` and
-> replace the token reference in the `git push` step.
+The workflow guards against self-triggering: it skips when the triggering
+commit message starts with `chore: release`.
+
+> **Chaining to Docker builds:** `docker-publish.yml` does **not** rely on the
+> `GITHUB_TOKEN` push trigger (pushes made with the default token do not fire
+> downstream workflows). Instead it listens for a `workflow_run` event on the
+> **Version Bump** workflow completing with `conclusion == 'success'`, and also
+> triggers on `v*` tag pushes and manual dispatch. On the `workflow_run` path it
+> explicitly checks out `master`, which by then already contains the bumped
+> commit — so `/api/version` (which reads the root `package.json` at request
+> time in `routes/api.js`) always matches the built image.
 
 Docker images built by `docker-publish.yml` now include **semver tags** in
 addition to the SHA and `latest` tags — `v<version>` and `<major>.<minor>` for
@@ -655,6 +662,8 @@ blockers are resolved and re-reviewed as PASS:
 - **Cross-vehicle analysis history** — `GET /api/analyses` lists all analyses across sessions (paginated, optional vehicle filter); `GET /api/analyses/export` streams all analyses as a Markdown file; `GET /api/sessions/:sessionId/analyses/:analysisId` returns a single analysis with full response/reasoning.
 - **Extracted controller helpers** — `SessionController` now uses `loadOwnedSession()`, `decorateWithSummaries()`, and `aggregateSummaries()` to eliminate duplicate code and the N+1 query pattern.
 - **Joi validation schemas** — `lib/validators.js` centralises input validation with Joi schemas for session operations (rename, notes, cut, filter, copy, join, addLocation) and vehicle CRUD (create/update), plus pure validation helpers for LLM settings.
+- **v2.0.0 branding & PWA** — product name normalized to **TorqueDash-Next** across `index.html`, Login/Register headings, and the AppShell topbar. `apps/frontend/public/` ships `brand/logo.svg` (interim mark; final owner-supplied SVG is a file-replacement swap), `favicon.svg`, PWA icons (`icon-192.png`, `icon-512.png`, `maskable-512.png`), and `manifest.webmanifest` (name TorqueDash-Next, theme `#009999`). `index.html` links favicon + manifest + theme-color, making the SPA installable to the Android home screen **without a service worker**. Login/Register share one `AuthBranding.tsx` left panel (mark, tagline, 5 USP rows) replacing three duplicated inline panels. AppShell + MobileDrawer render a `v{version}` badge (shared `lib/useVersion.ts`, module-level memoized `/api/version` fetch) and a GitHub link (new tab). See `docs/architecture.md` §3.12.
+- **Session Map view + print-to-PDF report (v2.0.0)** — the ReplayDashboard banner gains a `View: Dash | Map` segmented control; Map mode renders a near-fullscreen `GpsTrackMap` (new `className` height prop) with `PlaybackControls`, reusing the zustand playback store and persisting the cursor across toggles (`resolveFrameAtCursor` export; covered by `mapView.test.ts`). The AI button is now "🤖 Run AI Analysis". A new "🖨️ Print / PDF" button produces a print-ready session report: `@media print` CSS forces a light theme incl. dark-utility neutralizers for dark-mode users; `DiagnosticPanels`/`DiagnosticPanel` gain `forceExpanded`; `SessionSummaryCard` shows a Metric\|Min\|Max\|Median table (exported `stats()` helper, covered by `stats.test.ts`); `AnalysisPanel` accepts `printMode` (latest analysis fetched + expanded); printing is disabled in Map view and `printMode` resets via `afterprint` (Safari-safe fallback). See `docs/architecture.md` §3.13.
 
 ---
 

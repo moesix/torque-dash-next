@@ -1,4 +1,4 @@
-# torqueDASH-Next — System Architecture
+# TorqueDash-Next — System Architecture
 
 This document describes the architecture of the Tier-2 modernization of
 `torque-dash`. It covers the high-level topology, backend internals, frontend
@@ -407,7 +407,7 @@ src/
     ui/      Skeleton.tsx, ErrorAlert.tsx
     vehicles/ VehicleReassignDialog.tsx
   features/
-    auth/    Login.tsx, Register.tsx, useAuth.ts
+    auth/    Login.tsx, Register.tsx, AuthBranding.tsx, useAuth.ts
     dashboard/ ReplayDashboard.tsx, PlaybackControls.tsx
     sessions/  SessionBrowser.tsx
     settings/  SettingsPage.tsx, AiProviderCard.tsx, VehicleManager.tsx
@@ -416,6 +416,7 @@ src/
     types.ts
     pidDecode.ts   # PID auto-decode engine (pdDecode.ts)
     theme.ts   # dark/light mode detection, applyTheme, toggleTheme
+    useVersion.ts  # shared /api/version fetch for the nav version badge
 ```
 
 ### 3.2 Data fetching
@@ -485,6 +486,13 @@ extracts `[timestamp_ms, value]` pairs via the safe `coerceScalar()` helper.
 - Renders 3 live SVG ring gauges (RPM, Coolant, Speed) that update reactively as the playback cursor moves.
 - Subscribes to `playbackStore.cursorTime` via imperative zustand subscription, matching the same pattern used by `GpsTrackMap` and `OverlayChart` markLine updates.
 - Each gauge interpolates the nearest value from the session's telemetry frames based on the current cursor time.
+- **Min/Max/Median stats table** — the bottom "max values" row is now a
+  `Metric | Min | Max | Median` table for Engine RPM, Coolant, and Speed,
+  computed from the same series the gauges use via the exported `stats()`
+  helper (min/max/median over non-null values; returns `null` for empty or
+  null-only input). Covered by `components/charts/__tests__/stats.test.ts`.
+  The table also doubles as the "Summarised Session Info" block in the
+  print-to-PDF report (§3.13).
 > **Fix:** Hardcoded SVG stroke and fill colours were replaced with Tailwind
 > `dark:` class variants (`dark:stroke-gray-700`, `dark:fill-gray-100`,
 > `dark:fill-gray-400`) so gauge text, unit labels, and track rings remain
@@ -535,6 +543,16 @@ extracts `[timestamp_ms, value]` pairs via the safe `coerceScalar()` helper.
   (`findNearestFrame`) over timestamps, then calls
   `marker.setLatLng([lat, lon])` **imperatively** — no React state, no map
   recreation.
+- The component now accepts a `className` prop to set the map's height
+  (default `h-64 md:h-[360px]`). Map view mode in `ReplayDashboard` passes a
+  near-fullscreen `h-[calc(100vh-16rem)] min-h-[420px]` (§3.13).
+- **Entry-cursor resolution** — `resolveFrameAtCursor(frames, cursorTime)` is
+  exported from the module: the imperative subscription only fires on cursor
+  *changes*, so when the map mounts with a cursor already set (the user
+  scrubbed in Dash view, then toggled to Map), a synchronous first run pins the
+  marker to the matching frame. A `null` cursor (never scrubbed) yields `null`,
+  keeping the map's default first-frame centre. Covered by
+  `features/dashboard/__tests__/mapView.test.ts`.
 
 ### 3.8 Design System and Theme
 
@@ -636,6 +654,76 @@ manages the LLM connection and exposes the configurable token budget:
 - **Provider-specific fields** — DeepSeek shows Thinking Mode + Reasoning
   Effort (High / Max); Ollama/Custom show a free-text model name and endpoint
   URL (SSRF-checked server-side).
+
+### 3.12 Branding, PWA & App Chrome (v2.0.0)
+
+The canonical product name is **TorqueDash-Next**, normalized across the
+`index.html` `<title>`, Login/Register headings, and AppShell topbar.
+
+**Brand assets (`apps/frontend/public/`):**
+- `brand/logo.svg` — the **interim** app mark (dark tile, teal gauge arc,
+  needle). The final owner-supplied SVG is expected; swapping it is a
+  file-replacement only — no code references change.
+- `favicon.svg` — browser tab icon (same mark), linked from `index.html`.
+- `icons/icon-192.png`, `icons/icon-512.png`, `maskable-512.png` — PWA install
+  icons, including a `maskable` 512 variant with safe-zone padding.
+- `manifest.webmanifest` — name **TorqueDash-Next**, `theme_color` `#009999`,
+  `background_color` `#0f1117`, `display: standalone`.
+
+`index.html` links the favicon and manifest and sets
+`<meta name="theme-color" content="#009999">`. Together with the icons this
+makes the SPA **installable to the Android home screen (PWA)** without a
+service worker — installability comes from the manifest + icons + HTTPS, and
+the app has no offline/`fetch`-handler requirements yet.
+
+**Navigation chrome (AppShell sidebar + MobileDrawer):**
+- The flat teal logo box was replaced with `/brand/logo.svg`.
+- A `v{version}` badge is rendered below the nav links (hidden when the version
+  can't be fetched), and a GitHub octocat link to
+  <https://github.com/moesix/torque-dash-next/> opens in a new tab
+  (`rel="noopener noreferrer"`).
+- Version is supplied by the shared `lib/useVersion.ts` hook, which dedupes the
+  `/api/version` request with a **module-level memoized promise** — AppShell and
+  MobileDrawer mount together and previously issued two requests per authed
+  load; now the first subscriber triggers the fetch and later subscribers reuse
+  it. Failures are silent (resolves to `''`), matching the old
+  `.catch(() => {})` behaviour — the badge simply does not render.
+
+### 3.13 ReplayDashboard View Modes & Print-to-PDF Report (v2.0.0)
+
+The session replay page now supports two view modes plus a print-to-PDF
+session report:
+
+- **`View: Dash | Map` segmented control** — a two-segment toggle in the banner
+  row's action cluster (the whole cluster is `print:hidden` and wraps onto its
+  own line at narrow viewports).
+  - **Dash** (default) — the existing dashboard layout.
+  - **Map** — a near-fullscreen `GpsTrackMap` (passing the `className` height
+    prop from §3.7) with `PlaybackControls` beneath it, reusing the same zustand
+    `playbackStore`. The cursor position persists across mode toggles via the
+    exported `resolveFrameAtCursor` helper, so scrubbing in Dash view then
+    switching to Map leaves the marker on the matching frame.
+- **AI button** — the banner AI action is now labelled "🤖 Run AI Analysis"
+  (previously just "🤖 AI"); aria-label updated to match.
+- **"🖨️ Print / PDF" button** — produces a print-to-PDF session report:
+  1. Sets `printMode`, which **force-expands** the collapsible diagnostic
+     panels (`DiagnosticPanels`/`DiagnosticPanel` gained a `forceExpanded`
+     prop) so their lazily-initialised ECharts render before the dialog opens;
+     `SessionSummaryCard`'s min/max/median table (§3.5) serves as the printed
+     summary block; `AnalysisPanel` accepts a `printMode` prop that fetches and
+     expands the latest past analysis so the report carries its markdown.
+  2. Waits two animation frames (React commit + ECharts lazy init), then calls
+     `window.print()`. The button is disabled while printing and in Map view
+     (the map has no printable report; its title hints to switch back).
+  3. `printMode` resets via the `afterprint` event with a ~500 ms timeout
+     fallback for engines that never fire it (older Safari).
+- **`@media print` CSS (`index.css`)** — forces light tokens regardless of
+  theme (`color-scheme: light`, `.dark` variable overrides), hides the app
+  chrome (`aside`, topbar), neutralises Tailwind `dark:` utilities for
+  dark-mode users (text/fill/background + `dark:prose-invert` token resets so
+  the `.analysis-prose` AI markdown prints black-on-white), un-clips
+  `.analysis-prose` tables (`overflow: visible`), and wraps long `<pre>` blocks
+  instead of overflowing the page margin.
 
 ---
 

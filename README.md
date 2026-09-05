@@ -1,14 +1,14 @@
-# torqueDASH-Next
+# TorqueDash-Next
 
 <p align="center">
-  <img src="./imgs/hero.svg" width="100%" alt="torqueDASH-Next — Self-hosted OBD-II vehicle telemetry dashboard with live PID data">
+  <img src="./imgs/hero.svg" width="100%" alt="TorqueDash-Next — Self-hosted OBD-II vehicle telemetry dashboard with live PID data">
 </p>
 
 <p align="center">
-  <img src="./imgs/TDN-session.png" width="100%" alt="torqueDASH-Next dashboard showing GPS route map with color-coded speed and a multi-series telemetry chart">
+  <img src="./imgs/TDN-session.png" width="100%" alt="TorqueDash-Next dashboard showing GPS route map with color-coded speed and a multi-series telemetry chart">
 </p>
 
-A self-hosted dashboard for [Torque Pro](https://torque-bhp.com/) vehicle telemetry. Torque Pro streams live OBD-II data from your car over HTTPS; torqueDASH-Next stores it in a time-series database and renders it in a React dashboard — live gauges, a route map, session replays, and per-session summaries. All data stays on your own server.
+A self-hosted dashboard for [Torque Pro](https://torque-bhp.com/) vehicle telemetry. Torque Pro streams live OBD-II data from your car over HTTPS; TorqueDash-Next stores it in a time-series database and renders it in a React dashboard — live gauges, a route map, session replays, and per-session summaries. All data stays on your own server.
 
 ## Features
 
@@ -16,8 +16,10 @@ A self-hosted dashboard for [Torque Pro](https://torque-bhp.com/) vehicle teleme
 |---|---|
 | **Real-time telemetry playback** | Watch your drive unfold — gauges, chart, and map all move in sync with a single playback cursor. |
 | **GPS route map** | Leaflet map with color-coded speed traces and an animated position marker that follows the playback head. |
+| **Dash ↔ Map session views** | Toggle the replay page between the dashboard layout and a near-fullscreen GPS map driven by the same playback transport — the scrub cursor carries across modes. |
 | **Multi-series overlay chart** | Toggle any combination of PIDs on a shared time axis with per-unit-group y-axes (ECharts + LTTB sampling for large datasets). |
 | **CSV export** | Download any session with auto-discovered PID columns — ready for Excel, Google Sheets, or Python notebooks. |
+| **Print-to-PDF session report** | A "🖨️ Print / PDF" button renders the session as a clean print-ready report — expanded diagnostic charts, a min/max/median stats table, and the AI analysis — for saving as PDF. |
 | **BYOK AI analysis** | Connect your own LLM (OpenAI, Anthropic, DeepSeek, Ollama, or any OpenAI-compatible endpoint) for per-session diagnostic insights. |
 | **DeepSeek first-class** | `deepseek-v4-flash` / `deepseek-v4-pro` with chain-of-thought Thinking Mode and configurable reasoning effort (High / Max). |
 | **PID decode engine** | Auto-discovers every OBD-II parameter from Torque's `values` JSONB — no schema changes when you add new PIDs. |
