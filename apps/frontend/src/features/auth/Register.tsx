@@ -46,7 +46,7 @@ export default function Register() {
               className="text-3xl font-bold text-white"
               style={{ fontFamily: 'var(--font-mono)' }}
             >
-              TorqueDash
+              TorqueDash-Next
             </h1>
             <p className="mt-3 text-lg text-teal-100">
               Real-time vehicle telemetry replay and analysis.
@@ -64,7 +64,7 @@ export default function Register() {
                 className="text-2xl font-bold text-gray-900 dark:text-white"
                 style={{ fontFamily: 'var(--font-mono)' }}
               >
-                TorqueDash
+                TorqueDash-Next
               </h1>
             </div>
 
@@ -99,7 +99,7 @@ export default function Register() {
             className="text-3xl font-bold text-white"
             style={{ fontFamily: 'var(--font-mono)' }}
           >
-            TorqueDash
+            TorqueDash-Next
           </h1>
           <p className="mt-3 text-lg text-teal-100">
             Real-time vehicle telemetry replay and analysis.
@@ -117,7 +117,7 @@ export default function Register() {
               className="text-2xl font-bold text-gray-900 dark:text-white"
               style={{ fontFamily: 'var(--font-mono)' }}
             >
-              TorqueDash
+              TorqueDash-Next
             </h1>
           </div>
 

@@ -81,7 +81,7 @@ export default function AppShell() {
               </svg>
             </button>
             <span className="text-sm font-medium text-gray-500 dark:text-[var(--text-secondary)]">
-              TorqueDash Next
+              TorqueDash-Next
             </span>
           </div>
           <div className="flex items-center gap-2">

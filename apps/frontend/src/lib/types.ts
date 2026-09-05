@@ -1,5 +1,5 @@
 /**
- * Domain types for the TorqueDash frontend.
+ * Domain types for the TorqueDash-Next frontend.
  *
  * NOTE on casing: the Express/Sequelize backend returns telemetry rows with
  * snake_case DB columns `engine_rpm` / `vehicle_speed` (no `underscored:true`,

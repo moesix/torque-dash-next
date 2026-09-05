@@ -51,7 +51,7 @@ export default function Login() {
             className="text-3xl font-bold text-white"
             style={{ fontFamily: 'var(--font-mono)' }}
           >
-            TorqueDash
+            TorqueDash-Next
           </h1>
           <p className="mt-3 text-lg text-teal-100">
             Real-time vehicle telemetry replay and analysis.
@@ -69,7 +69,7 @@ export default function Login() {
               className="text-2xl font-bold text-gray-900 dark:text-white"
               style={{ fontFamily: 'var(--font-mono)' }}
             >
-              TorqueDash
+              TorqueDash-Next
             </h1>
           </div>
 
@@ -77,7 +77,7 @@ export default function Login() {
             Sign in
           </h2>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            Access your TorqueDash sessions.
+            Access your TorqueDash-Next sessions.
           </p>
 
           <form onSubmit={onSubmit} className="mt-6 space-y-4">
@@ -150,7 +150,7 @@ export default function Login() {
           </p>
           {version && (
             <p className="mt-4 text-center text-sm text-gray-500 dark:text-gray-400">
-              torqueDASH-Next v{version}
+              TorqueDash-Next v{version}
             </p>
           )}
         </div>
