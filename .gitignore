@@ -8,3 +8,6 @@ CLAUDE.md
 plans/
 .env
 coverage/
+
+# Local tooling
+.commandcode/

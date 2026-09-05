@@ -71,6 +71,13 @@ export default function ReplayDashboard() {
   const [showAnalysisConfirm, setShowAnalysisConfirm] = useState(false);
   const [showReassign, setShowReassign] = useState(false);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  // View mode: 'dash' is the default landing view; 'map' shows the
+  // GPS track near-fullscreen with the playback transport beneath it.
+  const [viewMode, setViewMode] = useState<'dash' | 'map'>('dash');
+  // Print mode: force-expands diagnostic panels so charts initialize before
+  // window.print(); cleared again after the print dialog closes.
+  const [printMode, setPrintMode] = useState(false);
+  const [isPrinting, setIsPrinting] = useState(false);
 
   // ── Computed values ────────────────────────────────────────────────
   const available = useMemo(
@@ -115,6 +122,49 @@ export default function ReplayDashboard() {
     const el = document.getElementById('ai-analysis-panel');
     el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
+
+  /**
+   * Print the session report / save as PDF.
+   *
+   * Sets printMode so the diagnostic panels force-expand (charts lazy-init),
+   * then waits two frames for React to commit the expanded panels and for
+   * ECharts' lazy init to render before opening the print dialog (a single
+   * rAF raced the charts on some engines — notably Safari). printMode is kept
+   * on until the dialog closes: the reset happens via the `afterprint` event
+   * (see the effect below), with a timeout fallback for engines that never
+   * fire it. Note: the latest AI analysis body is fetched asynchronously on
+   * printMode — if it was never expanded before, the first print may omit its
+   * body (one-print latency); the analysis is usually already expanded when
+   * the owner prints after reading.
+   */
+  function handlePrint() {
+    setIsPrinting(true);
+    setPrintMode(true);
+    // Double rAF so React commits the expanded panels AND ECharts' lazy init
+    // gets a frame to render before the print dialog opens.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        window.print();
+      });
+    });
+  }
+
+  // Reset print mode AFTER printing completes. `afterprint` is not fired by
+  // every engine (older Safari), so fall back to a ~500ms timeout. Keeps
+  // isPrinting true (spinner visible) until the dialog actually closes.
+  React.useEffect(() => {
+    if (!isPrinting) return;
+    const finishPrint = () => {
+      setPrintMode(false);
+      setIsPrinting(false);
+    };
+    window.addEventListener('afterprint', finishPrint);
+    const fallback = window.setTimeout(finishPrint, 500);
+    return () => {
+      window.removeEventListener('afterprint', finishPrint);
+      window.clearTimeout(fallback);
+    };
+  }, [isPrinting]);
 
   // Reset playback cursor when switching sessions.
   React.useEffect(() => {
@@ -196,8 +246,8 @@ export default function ReplayDashboard() {
     <div className="space-y-4">
       {/* Slim session banner — not a full Card */}
       <div className="animate-slide-up rounded-lg bg-white px-4 py-3 shadow-xs dark:bg-[var(--bg-card)]">
-        <div className="flex items-start justify-between gap-4">
-          <div className="min-w-0">
+        <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+          <div className="min-w-0 flex-1">
             <h1 className="text-lg font-semibold text-gray-900 dark:text-white font-display">
               {session.name || 'Session Replay'}
               {session.vehicleName && (
@@ -213,15 +263,40 @@ export default function ReplayDashboard() {
               {session.duration ? ` · ${session.duration}` : ''}
             </p>
           </div>
-          <div className="flex shrink-0 items-center gap-2">
+          {/* Right action cluster — allow wrapping onto its own line(s) at
+              narrow viewports; hidden entirely when printing the report. */}
+          <div className="flex flex-wrap items-center gap-2 print:hidden">
+            <div
+              role="group"
+              aria-label="Session view mode"
+              className="flex items-center whitespace-nowrap rounded-lg border border-gray-200 p-0.5 dark:border-[var(--border-strong)] print:hidden"
+            >
+              <span className="mr-1 text-xs text-gray-400">View:</span>
+              {(['dash', 'map'] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => setViewMode(mode)}
+                  aria-pressed={viewMode === mode}
+                  aria-label={mode === 'dash' ? 'Dashboard view' : 'Map view'}
+                  className={`whitespace-nowrap rounded-md px-3 py-1.5 text-xs font-medium capitalize min-h-[40px] ${
+                    viewMode === mode
+                      ? 'bg-gray-900 text-white dark:bg-[var(--bg-elevated)] dark:text-white'
+                      : 'text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700'
+                  }`}
+                >
+                  {mode}
+                </button>
+              ))}
+            </div>
             <button
               type="button"
               onClick={() => setShowAnalysisConfirm(true)}
-              className="rounded p-2.5 min-w-[44px] min-h-[44px] text-xs font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+              className="whitespace-nowrap rounded p-2.5 min-w-[44px] min-h-[44px] text-xs font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
               title="AI-powered session analysis"
-              aria-label="AI Analysis"
+              aria-label="Run AI Analysis"
             >
-              🤖 AI
+              🤖 Run AI Analysis
             </button>
             <button
               type="button"
@@ -238,7 +313,7 @@ export default function ReplayDashboard() {
                 }
               }}
               disabled={isExporting}
-              className="rounded p-2.5 min-w-[44px] min-h-[44px] text-xs font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200 disabled:opacity-50"
+              className="whitespace-nowrap rounded p-2.5 min-w-[44px] min-h-[44px] text-xs font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200 disabled:opacity-50"
               title="Download session data as CSV"
               aria-label="Download CSV"
             >
@@ -246,6 +321,24 @@ export default function ReplayDashboard() {
                 <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-gray-400 border-t-transparent" />
               ) : (
                 '↓ CSV'
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={handlePrint}
+              disabled={isPrinting || viewMode === 'map'}
+              className="whitespace-nowrap rounded p-2.5 min-w-[44px] min-h-[44px] text-xs font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200 disabled:opacity-50"
+              title={
+                viewMode === 'map'
+                  ? 'Switch to Dash view to print the report'
+                  : 'Print session report or save as PDF'
+              }
+              aria-label="Print session report"
+            >
+              {isPrinting ? (
+                <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-gray-400 border-t-transparent" />
+              ) : (
+                '🖨️ Print / PDF'
               )}
             </button>
             {truncated && (
@@ -263,7 +356,7 @@ export default function ReplayDashboard() {
                 setVehicles(v ?? []);
                 setShowReassign(true);
               }}
-              className="rounded p-2.5 min-w-[44px] min-h-[44px] text-xs font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+              className="whitespace-nowrap rounded p-2.5 min-w-[44px] min-h-[44px] text-xs font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
               title="Reassign to a different vehicle"
             >
               🚗
@@ -275,6 +368,9 @@ export default function ReplayDashboard() {
         </div>
       </div>
 
+      {/* ── Dash (default) vs Map view body ───────────────────────── */}
+      {viewMode === 'dash' ? (
+        <>
       {/* Session notes */}
       {id && <NotesCard sessionId={id} initialNotes={session.notes ?? ''} />}
 
@@ -359,7 +455,11 @@ export default function ReplayDashboard() {
 
       {/* ── Pre-configured diagnostic panels ────────────── */}
       <div className="animate-slide-up-delay-3">
-        <DiagnosticPanels frames={frames} available={available} />
+        <DiagnosticPanels
+          frames={frames}
+          available={available}
+          forceExpanded={printMode}
+        />
       </div>
 
       {/* GPS Track — full width */}
@@ -401,9 +501,24 @@ export default function ReplayDashboard() {
       {/* AI Analysis panel — at the bottom */}
       <div id="ai-analysis-panel" className="animate-slide-up-delay-5">
         <React.Suspense fallback={<div className="text-sm text-gray-400 p-4">Loading analysis panel...</div>}>
-          <AnalysisPanel ref={analysisPanelRef} sessionId={id as string} />
+          <AnalysisPanel
+            ref={analysisPanelRef}
+            sessionId={id as string}
+            printMode={printMode}
+          />
         </React.Suspense>
       </div>
+        </>
+      ) : (
+        <div className="space-y-4">
+          <div className="animate-slide-up rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-2 shadow-xs">
+            <GpsTrackMap frames={frames} className="h-[calc(100vh-16rem)] min-h-[420px]" />
+            <div className="px-2 pb-2">
+              <PlaybackControls frames={frames} />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

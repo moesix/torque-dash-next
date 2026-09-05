@@ -1,6 +1,6 @@
-# torqueDASH-Next — Development & Contributing
+# TorqueDash-Next — Development & Contributing
 
-Guidance for contributors working on the torqueDASH-Next backend (repo root) and
+Guidance for contributors working on the TorqueDash-Next backend (repo root) and
 the React/Vite frontend (`apps/frontend/`).
 
 > **Known issues and follow-up items are documented below.** See the
@@ -307,7 +307,7 @@ POST /api/sessions/:id/analyze
 | `resampleTelemetry(telemetrySample, maxRows = 80)` | Uniform resampling across the full timeline (replaces the older head/tail slicing approach). Ensures the LLM sees data from start, middle, and end of every drive. |
 | `buildTelemetryCsv(telemetrySample, pidKeys)` | Outputs raw CSV instead of Markdown tables (~30% token savings). Removes lat/lon columns. Extracts `HH:mm:ss` via regex. Calls `resampleTelemetry()` internally. |
 | `buildContext(session, settings, telemetrySample, pidKeys)` | Builds the vehicle/session context block with cleaner formatting and a "Data points in sample" label. |
-| `buildAnalysisPrompt(session, settings, telemetrySample, pidKeys)` | Assembles the complete prompt from all of the above. Includes pre-calculated stats, four diagnostic guardrails, dynamic engine size, and five analysis categories. |
+| `buildAnalysisPrompt(session, settings, telemetrySample, pidKeys, dataQuality)` | Assembles the complete prompt from all of the above. Includes pre-calculated stats, four diagnostic guardrails, dynamic engine size, and five analysis categories. When a `dataQuality` note is passed (connectivity gaps / backfill bursts detected, Plan 089), a fifth "Data Quality" guardrail is appended; clean sessions get byte-identical prompts. |
 
 ### 8.3 Design Notes
 
@@ -322,7 +322,10 @@ POST /api/sessions/:id/analyze
 - **Diagnostic guardrails** — four domain-specific rules encoded in the prompt
   prevent the LLM from flagging normal OBD-II behaviour (negative fuel trims
   within ±10%, A/C idle load, ECU torque management timing, deceleration fuel
-  cut-off) as mechanical faults.
+  cut-off) as mechanical faults. A fifth, conditional **"Data Quality"**
+  guardrail is appended only when connectivity gaps or upload backfill bursts
+  are detected (see §8.5); clean sessions keep the byte-identical four-guardrail
+  prompt.
 - **`lib/pidRegistry.js`** is imported to resolve PID short keys to human-readable
   names and units in both CSV column headers and the stats display.
 
@@ -344,6 +347,37 @@ POST /api/sessions/:id/analyze
   input (min 2048, max 32768, step 1024) with a cost warning, and the provider
   status badge now shows the human-readable provider name plus chips for Model,
   DeepSeek Thinking / Effort, and Max tokens.
+
+### 8.5 AI Analysis Reliability (Plans 087–089)
+
+Reliability hardening for AI analysis on long or backfilled sessions:
+
+- **Token-budget exhaustion is surfaced, not silent** — when a thinking-mode
+  model ends the stream with `finish_reason` `length`/`max_tokens` (it spent
+  its whole token budget on reasoning and produced no answer, or only a partial
+  one), `lib/llmProviders.js` now yields a single `{ type: 'finish', reason }`
+  event. The controller streams an SSE `{ type: 'finish', warning }` event that
+  the frontend renders as an amber warning banner (`AnalysisPanel.tsx`),
+  persists `{ finishReason, reasoningChars, responseChars }` to the
+  `Analyses.tokenUsage` JSONB column (no migration), and logs a `console.warn`
+  line. Previously the stream simply ended with no answer and no error
+  anywhere.
+- **Session duration never comes from `createdAt`** — the prompt duration is
+  computed from log MIN/MAX timestamps via `formatSessionDuration()`, falling
+  back to `Sessions.firstTimestamp`/`lastTimestamp` when logs are missing.
+  Backfilled sessions (logs uploaded after the trip ended, e.g. a tablet that
+  reconnected at trip end) used to show negative spans like `-1:-1:-24`;
+  negative or missing bounds now render as `unknown`.
+- **Connectivity gaps are labelled as missing data** — the controller feeds
+  `detectBackfillGaps()` the full-resolution log timeline. When it finds a
+  connectivity gap (>5 s silence between logs) or a backfill burst (>90 rows in
+  one minute), `buildDataQualityNote()` produces the "Data Quality" guardrail
+  telling the model the discontinuity is missing (buffered/backfilled) data —
+  NOT an engine stall or sensor dropout. Gap-free sessions get byte-identical
+  prompts.
+- **Remediation** — raise "Max tokens" in Settings (validated 2048–32768) to
+  give thinking-mode models more headroom; the earlier mitigation applied on
+  the production DB set `llmMaxTokens` to 32768.
 
 ---
 
@@ -435,10 +469,17 @@ push to `master`. It:
    tag.
 4. Pushes the commit and tag back to `master`.
 
-> **Chaining to Docker builds:** pushes made with the default `GITHUB_TOKEN` do
-> **not** trigger downstream workflows (like `docker-publish.yml`). To enable
-> the chain, configure a PAT with `contents:write` as `secrets.GH_PAT` and
-> replace the token reference in the `git push` step.
+The workflow guards against self-triggering: it skips when the triggering
+commit message starts with `chore: release`.
+
+> **Chaining to Docker builds:** `docker-publish.yml` does **not** rely on the
+> `GITHUB_TOKEN` push trigger (pushes made with the default token do not fire
+> downstream workflows). Instead it listens for a `workflow_run` event on the
+> **Version Bump** workflow completing with `conclusion == 'success'`, and also
+> triggers on `v*` tag pushes and manual dispatch. On the `workflow_run` path it
+> explicitly checks out `master`, which by then already contains the bumped
+> commit — so `/api/version` (which reads the root `package.json` at request
+> time in `routes/api.js`) always matches the built image.
 
 Docker images built by `docker-publish.yml` now include **semver tags** in
 addition to the SHA and `latest` tags — `v<version>` and `<major>.<minor>` for
@@ -621,6 +662,8 @@ blockers are resolved and re-reviewed as PASS:
 - **Cross-vehicle analysis history** — `GET /api/analyses` lists all analyses across sessions (paginated, optional vehicle filter); `GET /api/analyses/export` streams all analyses as a Markdown file; `GET /api/sessions/:sessionId/analyses/:analysisId` returns a single analysis with full response/reasoning.
 - **Extracted controller helpers** — `SessionController` now uses `loadOwnedSession()`, `decorateWithSummaries()`, and `aggregateSummaries()` to eliminate duplicate code and the N+1 query pattern.
 - **Joi validation schemas** — `lib/validators.js` centralises input validation with Joi schemas for session operations (rename, notes, cut, filter, copy, join, addLocation) and vehicle CRUD (create/update), plus pure validation helpers for LLM settings.
+- **v2.0.0 branding & PWA** — product name normalized to **TorqueDash-Next** across `index.html`, Login/Register headings, and the AppShell topbar. `apps/frontend/public/` ships `brand/logo.svg` (interim mark; final owner-supplied SVG is a file-replacement swap), `favicon.svg`, PWA icons (`icon-192.png`, `icon-512.png`, `maskable-512.png`), and `manifest.webmanifest` (name TorqueDash-Next, theme `#009999`). `index.html` links favicon + manifest + theme-color, making the SPA installable to the Android home screen **without a service worker**. Login/Register share one `AuthBranding.tsx` left panel (mark, tagline, 5 USP rows) replacing three duplicated inline panels. AppShell + MobileDrawer render a `v{version}` badge (shared `lib/useVersion.ts`, module-level memoized `/api/version` fetch) and a GitHub link (new tab). See `docs/architecture.md` §3.12.
+- **Session Map view + print-to-PDF report (v2.0.0)** — the ReplayDashboard banner gains a `View: Dash | Map` segmented control; Map mode renders a near-fullscreen `GpsTrackMap` (new `className` height prop) with `PlaybackControls`, reusing the zustand playback store and persisting the cursor across toggles (`resolveFrameAtCursor` export; covered by `mapView.test.ts`). The AI button is now "🤖 Run AI Analysis". A new "🖨️ Print / PDF" button produces a print-ready session report: `@media print` CSS forces a light theme incl. dark-utility neutralizers for dark-mode users; `DiagnosticPanels`/`DiagnosticPanel` gain `forceExpanded`; `SessionSummaryCard` shows a Metric\|Min\|Max\|Median table (exported `stats()` helper, covered by `stats.test.ts`); `AnalysisPanel` accepts `printMode` (latest analysis fetched + expanded); printing is disabled in Map view and `printMode` resets via `afterprint` (Safari-safe fallback). See `docs/architecture.md` §3.13.
 
 ---
 

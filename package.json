@@ -1,6 +1,6 @@
 {
   "name": "torque-dash-next",
-  "version": "1.9.4",
+  "version": "1.9.8",
   "description": "Modernization of torque-dash: Express/Sequelize/Postgres + TimescaleDB + React SPA",
   "main": "app.js",
   "scripts": {
@@ -46,6 +46,7 @@
   "overrides": {
     "sequelize": {
       "uuid": "^11.1.1"
-    }
+    },
+    "qs": "^6.16.0"
   }
 }

@@ -242,3 +242,103 @@ h1, h2, h3, h4 {
 .analysis-prose pre code {
   @apply bg-transparent p-0;
 }
+
+/* ── Print: session report ── */
+@media print {
+  /* Force light tokens regardless of theme */
+  :root { color-scheme: light; }
+  html.dark { --bg-base: #f9fafb; --bg-card: #ffffff; --bg-elevated: #ffffff;
+    --bg-surface: #f3f4f6; --text-primary: #111827; --text-secondary: #4b5563;
+    --text-muted: #9ca3af; --border-default: #e5e7eb; --border-strong: #d1d5db;
+    --accent: #009999; }
+
+  /* Hide chrome + non-report UI */
+  aside, header[role="banner"], .skeleton,
+  #ai-analysis-panel button { display: none !important; }
+
+  /* Kill page-level scrolling/height constraints */
+  html, body, #root, .scrollable-area { height: auto !important; overflow: visible !important; }
+  main#main-content { overflow: visible !important; padding: 0 !important; }
+
+  /* Expand every collapsed disclosure */
+  details { display: block !important; }
+  details > summary { list-style: none; }
+  details:not([open]) > *:not(summary) { display: block !important; }
+  details:not([open]) { display: block !important; }
+
+  /* Tables: no horizontal scroll in print */
+  .analysis-prose table { display: table !important; overflow-x: visible !important; }
+
+  /* Charts: keep canvas size, avoid page-break inside panels */
+  .echarts-for-react, canvas { max-width: 100% !important; break-inside: avoid; }
+  .rounded-xl { break-inside: avoid; }
+
+  /* Reports are black-on-white */
+  body { background: #fff !important; color: #111827 !important; }
+
+  /* ── Dark-theme print neutralizers ──
+     The token overrides above re-point the CSS-variable utilities, but
+     Tailwind's literal `dark:` classes stay active while printing (class-based
+     variant). Neutralize the white-on-white failures so dark-mode users get a
+     readable black-on-white printout. Scoped under html.dark so light-theme
+     printing is untouched. */
+  html.dark .dark\:text-white,
+  html.dark .dark\:text-gray-100,
+  html.dark .dark\:text-gray-200,
+  html.dark .dark\:text-gray-300 { color: #111827 !important; }
+  /* Mid-gray print text: dark enough to read on paper (matches light-theme
+     secondary), still distinguishable from pure body text. */
+  html.dark .dark\:text-gray-400 { color: #4b5563 !important; }
+
+  /* Pills/buttons whose dark:bg would print as dark blocks with light text —
+     make them light-gray with the dark text forced above. */
+  html.dark .dark\:bg-gray-700,
+  html.dark .dark\:bg-\[var\(--bg-elevated\)\] { background-color: #e5e7eb !important; }
+
+  /* SVG gauge text/fills (SessionSummaryCard ring gauges) */
+  html.dark .dark\:fill-gray-100,
+  html.dark .dark\:fill-gray-200 { fill: #111827 !important; }
+  html.dark .dark\:fill-gray-400 { fill: #6b7280 !important; }
+  html.dark .dark\:stroke-gray-700 { stroke: #e5e7eb !important; }
+
+  /* Tailwind Typography `dark:prose-invert` flips every prose color token to
+     a light value — reset them to dark-on-light for the printed analysis body
+     (the vars cascade to h1-h4/p/a/code/pre/table children of .analysis-prose). */
+  html.dark .dark\:prose-invert {
+    --tw-prose-body: #111827;
+    --tw-prose-headings: #111827;
+    --tw-prose-lead: #4b5563;
+    --tw-prose-links: #009999;
+    --tw-prose-bold: #111827;
+    --tw-prose-counters: #4b5563;
+    --tw-prose-bullets: #d1d5db;
+    --tw-prose-hr: #e5e7eb;
+    --tw-prose-quotes: #111827;
+    --tw-prose-quote-borders: #d1d5db;
+    --tw-prose-captions: #6b7280;
+    --tw-prose-kbd: #111827;
+    --tw-prose-kbd-shadows: transparent;
+    --tw-prose-code: #111827;
+    --tw-prose-pre-code: #111827;
+    --tw-prose-pre-bg: #f3f4f6;
+    --tw-prose-th-borders: #d1d5db;
+    --tw-prose-td-borders: #e5e7eb;
+  }
+
+  /* `.analysis-prose` also applies literal dark: colors directly to elements
+     (see the @apply rules above) — flip those back to the light-theme print
+     equivalents. */
+  html.dark .analysis-prose h2,
+  html.dark .analysis-prose h3 { color: #111827 !important; }
+  html.dark .analysis-prose th,
+  html.dark .analysis-prose code:not(pre code) { background-color: #f3f4f6 !important; }
+  html.dark .analysis-prose td,
+  html.dark .analysis-prose h2 { border-color: #e5e7eb !important; }
+  html.dark .analysis-prose blockquote { background-color: #fffbeb !important; }
+
+  /* `.analysis-prose` carries overflow-hidden (for horizontal scroll on
+     screen), which would clip a multi-page table in print; long <pre> blocks
+     must wrap instead of overflowing the page margin. */
+  .analysis-prose { overflow: visible !important; }
+  pre { white-space: pre-wrap !important; }
+}
