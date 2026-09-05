@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useImperativeHandle, useCallback } from 'react';
+import { useState, useEffect, useRef, useMemo, useImperativeHandle, useCallback } from 'react';
 import type { Ref } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -16,9 +16,12 @@ interface Props {
   sessionId: string;
   /** React 19: ref is a regular prop — no forwardRef wrapper needed. */
   ref?: Ref<AnalysisPanelHandle>;
+  /** Print mode: the latest past analysis is force-expanded (body fetched)
+   *  so the printed report includes the full AI analysis markdown. */
+  printMode?: boolean;
 }
 
-export default function AnalysisPanel({ sessionId, ref }: Props) {
+export default function AnalysisPanel({ sessionId, ref, printMode = false }: Props) {
     const [llmSettings, setLlmSettings] = useState<Settings | null>(null);
     const [stream, setStream] = useState<ReadableStream<Uint8Array> | null>(null);
     const [analyzing, setAnalyzing] = useState(false);
@@ -60,6 +63,26 @@ export default function AnalysisPanel({ sessionId, ref }: Props) {
         .then((rows) => setPastAnalyses(rows ?? []))
         .catch(() => {});
     }, [sessionId]);
+
+    // Latest analysis id (max id — newest row regardless of list order)
+    const latestId = useMemo(() => {
+      if (pastAnalyses.length === 0) return null;
+      return pastAnalyses.reduce((max, a) => (a.id > max.id ? a : max)).id;
+    }, [pastAnalyses]);
+
+    // Print mode: ensure the latest analysis is fetched + expanded so the
+    // printed report carries the full markdown. Fetch is async — if it was
+    // never expanded before, the first print may omit the body (one-print
+    // latency); the analysis is usually already expanded when the owner
+    // prints after reading.
+    useEffect(() => {
+      if (!printMode) return;
+      if (latestId == null) return;
+      if (expandedMap.has(latestId)) return;
+      const latest = pastAnalyses.find((a) => a.id === latestId);
+      if (latest) toggleExpand(latest);
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [printMode, latestId]);
 
     function handleDone(fullText: string) {
       setAnalyzing(false);
@@ -175,7 +198,7 @@ export default function AnalysisPanel({ sessionId, ref }: Props) {
                 return (
                   <details
                     key={a.id}
-                    open={!!full}
+                    open={!!full || (printMode && a.id === latestId)}
                     className="rounded border border-[var(--border-default)] p-3 dark:border-[var(--border-strong)]"
                   >
                     <summary

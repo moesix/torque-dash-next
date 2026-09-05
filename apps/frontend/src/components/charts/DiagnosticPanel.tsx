@@ -73,6 +73,9 @@ export interface DiagnosticPanelProps {
   /** Override Y-axis config per series index. */
   yAxisOverrides?: Record<number, { min?: number; max?: number }>;
   defaultCollapsed?: boolean;
+  /** When true the panel renders expanded regardless of local toggle state
+   *  (used by print mode so charts initialize before window.print()). */
+  forceExpanded?: boolean;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────
@@ -96,8 +99,10 @@ export default function DiagnosticPanel({
   markAreas,
   yAxisOverrides,
   defaultCollapsed = true,
+  forceExpanded = false,
 }: DiagnosticPanelProps) {
   const [expanded, setExpanded] = useState(!defaultCollapsed);
+  const isExpanded = forceExpanded || expanded;
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<ReturnType<typeof echarts.init> | null>(null);
   const hasInitRef = useRef(false);
@@ -111,7 +116,7 @@ export default function DiagnosticPanel({
 
   // ── Lazy init: only create chart when first expanded ──────────────────
   useEffect(() => {
-    if (!expanded || hasInitRef.current) return;
+    if (!isExpanded || hasInitRef.current) return;
 
     const el = containerRef.current;
     if (!el) return;
@@ -129,12 +134,12 @@ export default function DiagnosticPanel({
       chartRef.current = null;
       hasInitRef.current = false;
     };
-  }, [expanded]);
+  }, [isExpanded]);
 
   // ── Data rebuild effect ──────────────────────────────────────────────
   useEffect(() => {
     const chart = chartRef.current;
-    if (!chart || !expanded) return;
+    if (!chart || !isExpanded) return;
 
     const containerWidth = containerRef.current?.clientWidth ?? 640;
     const isMobile = containerWidth < 640;
@@ -275,7 +280,7 @@ export default function DiagnosticPanel({
       { notMerge: true },
     );
   }, [
-    expanded,
+    isExpanded,
     frames,
     resolvedSources,
     computedSeries,
@@ -292,7 +297,7 @@ export default function DiagnosticPanel({
         type="button"
         onClick={() => setExpanded(!expanded)}
         className="flex w-full items-center justify-between px-4 py-3 text-left hover:bg-gray-50 dark:hover:bg-[var(--bg-surface)]"
-        aria-expanded={expanded}
+        aria-expanded={isExpanded}
       >
         <div className="flex items-center gap-3">
           <span className="text-sm font-medium text-gray-900 dark:text-white">
@@ -303,12 +308,12 @@ export default function DiagnosticPanel({
           </span>
         </div>
         <span className="text-gray-400 transition-transform duration-200 dark:text-gray-500">
-          {expanded ? '▾' : '▸'}
+          {isExpanded ? '▾' : '▸'}
         </span>
       </button>
 
       {/* Chart body */}
-      {expanded && (
+      {isExpanded && (
         <div className="border-t border-[var(--border-default)] px-1 pb-2">
           {resolvedSources.length === 0 && !computedSeries?.length ? (
             <div className="flex h-48 items-center justify-center text-sm text-gray-400">

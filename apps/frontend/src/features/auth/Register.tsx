@@ -3,6 +3,7 @@ import type { FormEvent } from 'react';
 import { useNavigate, Navigate } from 'react-router';
 import { register, getSettings } from '@/lib/api';
 import { useAuth } from './useAuth';
+import AuthBranding from './AuthBranding';
 
 export default function Register() {
   const [email, setEmail] = useState('');
@@ -39,32 +40,19 @@ export default function Register() {
     return (
       <div className="flex min-h-full">
         {/* Left branding panel — hidden on mobile */}
-        <div className="hidden w-1/2 items-center justify-center bg-gradient-to-br from-teal-600 to-teal-800 p-12 lg:flex">
-          <div className="max-w-md text-center">
-            <div className="mx-auto mb-6 h-16 w-16 rounded-2xl bg-white/20 backdrop-blur" />
-            <h1
-              className="text-3xl font-bold text-white"
-              style={{ fontFamily: 'var(--font-mono)' }}
-            >
-              TorqueDash
-            </h1>
-            <p className="mt-3 text-lg text-teal-100">
-              Real-time vehicle telemetry replay and analysis.
-            </p>
-          </div>
-        </div>
+        <AuthBranding />
 
         {/* Right panel — closed notice */}
         <div className="flex flex-1 items-center justify-center p-4 md:p-6">
           <div className="w-full max-w-sm">
             {/* Mobile-only logo */}
             <div className="mb-8 text-center lg:hidden">
-              <div className="mx-auto mb-4 h-12 w-12 rounded-xl bg-teal-600" />
+              <img src="/brand/logo.svg" alt="" loading="eager" className="mx-auto mb-4 h-12 w-12 rounded-xl" />
               <h1
                 className="text-2xl font-bold text-gray-900 dark:text-white"
                 style={{ fontFamily: 'var(--font-mono)' }}
               >
-                TorqueDash
+                TorqueDash-Next
               </h1>
             </div>
 
@@ -92,32 +80,19 @@ export default function Register() {
   return (
     <div className="flex min-h-full">
       {/* Left branding panel — hidden on mobile */}
-      <div className="hidden w-1/2 items-center justify-center bg-gradient-to-br from-teal-600 to-teal-800 p-12 lg:flex">
-        <div className="max-w-md text-center">
-          <div className="mx-auto mb-6 h-16 w-16 rounded-2xl bg-white/20 backdrop-blur" />
-          <h1
-            className="text-3xl font-bold text-white"
-            style={{ fontFamily: 'var(--font-mono)' }}
-          >
-            TorqueDash
-          </h1>
-          <p className="mt-3 text-lg text-teal-100">
-            Real-time vehicle telemetry replay and analysis.
-          </p>
-        </div>
-      </div>
+      <AuthBranding />
 
       {/* Right panel — form */}
       <div className="flex flex-1 items-center justify-center p-4 md:p-6">
         <div className="w-full max-w-sm">
           {/* Mobile-only logo */}
           <div className="mb-8 text-center lg:hidden">
-            <div className="mx-auto mb-4 h-12 w-12 rounded-xl bg-teal-600" />
+            <img src="/brand/logo.svg" alt="" loading="eager" className="mx-auto mb-4 h-12 w-12 rounded-xl" />
             <h1
               className="text-2xl font-bold text-gray-900 dark:text-white"
               style={{ fontFamily: 'var(--font-mono)' }}
             >
-              TorqueDash
+              TorqueDash-Next
             </h1>
           </div>
 
