@@ -33,7 +33,7 @@ export default function AppShell() {
       </a>
       <aside aria-label="Main navigation" className="hidden w-60 shrink-0 flex-col bg-white p-4 shadow-[1px_0_0_0_var(--border-default),4px_0_8px_-2px_rgba(0,0,0,0.05)] dark:bg-[var(--bg-card)] md:flex">
         <div className="mb-6 flex items-center gap-2">
-          <div className="h-8 w-8 rounded-lg bg-teal-600" />
+          <img src="/brand/logo.svg" alt="" className="h-8 w-8 rounded-lg" />
           <span className="text-lg font-bold tracking-tight text-gray-900 dark:text-[var(--text-primary)]">
             TorqueDash-Next
           </span>

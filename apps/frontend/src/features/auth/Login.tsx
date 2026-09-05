@@ -46,7 +46,7 @@ export default function Login() {
       {/* Left branding panel — hidden on mobile */}
       <div className="hidden w-1/2 items-center justify-center bg-gradient-to-br from-teal-600 to-teal-800 p-12 lg:flex">
         <div className="max-w-md text-center">
-          <div className="mx-auto mb-6 h-16 w-16 rounded-2xl bg-white/20 backdrop-blur" />
+          <img src="/brand/logo.svg" alt="" loading="eager" className="mx-auto mb-6 h-16 w-16 rounded-2xl" />
           <h1
             className="text-3xl font-bold text-white"
             style={{ fontFamily: 'var(--font-mono)' }}
@@ -64,7 +64,7 @@ export default function Login() {
         <div className="animate-slide-up w-full max-w-sm">
           {/* Mobile-only logo */}
           <div className="mb-8 text-center lg:hidden">
-            <div className="mx-auto mb-4 h-12 w-12 rounded-xl bg-teal-600" />
+            <img src="/brand/logo.svg" alt="" loading="eager" className="mx-auto mb-4 h-12 w-12 rounded-xl" />
             <h1
               className="text-2xl font-bold text-gray-900 dark:text-white"
               style={{ fontFamily: 'var(--font-mono)' }}
