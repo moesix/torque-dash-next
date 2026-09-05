@@ -6,12 +6,16 @@ const Vehicle = require('../models').Vehicle;
 const Settings = require('../models').Settings;
 const sequelize = require('../models').sequelize;
 const { analyze, streamEvents } = require('../lib/llmProviders');
-const { buildAnalysisPrompt } = require('../lib/llmPrompt');
+const { buildAnalysisPrompt, formatSessionDuration, detectBackfillGaps, buildDataQualityNote } = require('../lib/llmPrompt');
 const { discoverPidKeys } = require('../lib/pidRegistry');
 const { classifyAnalysisError } = require('../lib/analysisErrors');
 
 class AnalysisController {
   static async analyzeSession(req, res) {
+    // Hoisted to function scope (NOT the try block): the catch below reads it,
+    // and a block-scoped declaration inside try would be lexically invisible
+    // there — every error reaching the catch would throw ReferenceError.
+    let clientDisconnected = false;
     try {
       // 1. Ownership check
       const session = await Session.findOne({
@@ -28,23 +32,32 @@ class AnalysisController {
       // 3. Discover PID keys
       const pidKeys = await discoverPidKeys(session.id, sequelize);
 
-      // 3b. Compute session duration from createdAt to last log timestamp
-      const [lastLog] = await sequelize.query(`
-        SELECT MAX("timestamp") AS "endTs" FROM "Logs" WHERE "sessionId" = :sessionId
+      // 3b. Compute session duration from LOG bounds (never createdAt —
+      // backfilled uploads create the row after the trip ends, which made
+      // the AI prompt show negative durations; plans/087).
+      const [logBounds] = await sequelize.query(`
+        SELECT MIN("timestamp") AS "startTs", MAX("timestamp") AS "endTs"
+        FROM "Logs" WHERE "sessionId" = :sessionId
       `, { replacements: { sessionId: session.id } });
-      const endTs = lastLog[0]?.endTs || session.updatedAt;
-      const durationMs = new Date(endTs) - new Date(session.createdAt);
-      const durationSec = Math.floor(durationMs / 1000);
-      const hours = Math.floor(durationSec / 3600);
-      const minutes = Math.floor((durationSec % 3600) / 60);
-      const seconds = durationSec % 60;
-      const durationStr = [hours, minutes, seconds].map(n => String(n).padStart(2, '0')).join(':');
+      const startTs = logBounds[0]?.startTs || session.firstTimestamp;
+      const endTs = logBounds[0]?.endTs || session.lastTimestamp;
+      const durationStr = formatSessionDuration(startTs, endTs);
 
-      // 4. Fetch telemetry sample (first 50 + last 50 + evenly-spaced 100 for large sessions)
-      const [countResult] = await sequelize.query(
-        `SELECT COUNT(*) AS cnt FROM "Logs" WHERE "sessionId" = :sessionId`,
-        { replacements: { sessionId: session.id } }
-      );
+      // 4. Fetch telemetry sample (first 50 + last 50 + evenly-spaced 100 for large sessions).
+      //    The 4b timestamp scan is kicked off in the SAME Promise.all: it does not
+      //    depend on the sample, and running it alongside the count keeps the
+      //    full-session timestamp transfer off the serial critical path.
+      const [countResult, tsRows] = await Promise.all([
+        sequelize.query(
+          `SELECT COUNT(*) AS cnt FROM "Logs" WHERE "sessionId" = :sessionId`,
+          { replacements: { sessionId: session.id } }
+        ),
+        // detectBackfillGaps() sorts internally — no ORDER BY needed here.
+        sequelize.query(
+          `SELECT timestamp FROM "Logs" WHERE "sessionId" = :sessionId`,
+          { replacements: { sessionId: session.id }, type: sequelize.QueryTypes.SELECT }
+        ),
+      ]);
       const totalCount = parseInt(countResult[0]?.cnt || '0', 10);
 
       let sample;
@@ -98,10 +111,15 @@ class AnalysisController {
         sample = [...firstBatch, ...randomBatch, ...lastBatch];
       }
 
+      // 4b. Connectivity-gap detection from the full-resolution timestamps fetched
+      // in parallel with the count above (detectBackfillGaps sorts internally).
+      const gapResult = detectBackfillGaps(tsRows.map(r => r.timestamp));
+      const dataQualityNote = buildDataQualityNote(gapResult);
+
       // 5. Build prompt with computed duration
       const prompt = buildAnalysisPrompt(
         { ...session.toJSON(), duration: durationStr },
-        settings, sample, pidKeys
+        settings, sample, pidKeys, dataQualityNote
       );
 
       // 6. Set up SSE headers
@@ -113,7 +131,6 @@ class AnalysisController {
       // 7. Abort as soon as the client goes away — covers prompt build +
       // provider connect, not just the mid-stream phase.
       const clientGone = new AbortController();
-      let clientDisconnected = false;
       req.on('close', () => { clientDisconnected = true; clientGone.abort(); });
 
       const { response: llmRes, abortController: llmAbort, timeoutGuard } =
@@ -122,12 +139,14 @@ class AnalysisController {
 
       let fullResponse = '';
       let fullReasoning = '';
+      let finishReason = null;
 
       // Body-phase timeout is inactivity-based: every streamed event
       // (reasoning included) re-arms it; always disarm when the stream
       // finishes or throws.
       try {
         for await (const evt of streamEvents(llmRes)) {
+          if (evt.type === 'finish') { finishReason = evt.reason; continue; }
           if (evt.type === 'content') fullResponse += evt.text;
           else if (evt.type === 'reasoning') fullReasoning += evt.text;
           timeoutGuard.bump();
@@ -135,6 +154,18 @@ class AnalysisController {
         }
       } finally {
         timeoutGuard.clear();
+      }
+
+      // Budget exhaustion is silent failure by design gap (plans/088): a
+      // thinking-mode model can spend its whole max_tokens budget on
+      // reasoning and end the stream cleanly with no answer. Warn the client
+      // when the terminal reason says the stream was cut short.
+      const budgetExhausted = finishReason === 'length' || finishReason === 'max_tokens';
+      if (budgetExhausted) {
+        const warning = !fullResponse
+          ? '⚠️ The model used its entire token budget on reasoning and produced no answer. Raise \u201cMax tokens\u201d or lower \u201cReasoning effort\u201d in Settings, then retry.'
+          : '⚠️ The answer was truncated \u2014 the token budget ran out mid-response. Raise \u201cMax tokens\u201d in Settings for the full analysis.';
+        res.write(`data: ${JSON.stringify({ type: 'finish', reason: finishReason, warning })}\n\n`);
       }
 
       // 8. Cache the analysis (BEFORE signaling done so listAnalyses finds it)
@@ -147,10 +178,14 @@ class AnalysisController {
           prompt,
           response: fullResponse || fullReasoning,
           reasoning: fullReasoning || null,
-          tokenUsage: null,
+          tokenUsage: budgetExhausted ? { finishReason, reasoningChars: fullReasoning.length, responseChars: fullResponse.length } : null,
         });
       } catch (cacheErr) {
         console.error('[AnalysisController] Failed to cache analysis:', cacheErr.message);
+      }
+
+      if (budgetExhausted) {
+        console.warn(`[AnalysisController] analyzeSession: token budget exhausted (finish=${finishReason}, reasoning=${fullReasoning.length} chars, response=${fullResponse.length} chars)`);
       }
 
       res.write('data: [DONE]\n\n');
@@ -321,7 +356,9 @@ class AnalysisController {
       // finishes or throws.
       try {
         for await (const evt of streamEvents(llmRes)) {
-          text += evt.text;
+          // plans/088: streamEvents now yields terminal {type:'finish'}
+          // events (no text) — only append when a text chunk arrived.
+          if (evt.text) text += evt.text;
           timeoutGuard.bump();
         }
       } finally {
