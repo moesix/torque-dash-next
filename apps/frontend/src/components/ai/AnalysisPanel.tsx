@@ -23,6 +23,7 @@ export default function AnalysisPanel({ sessionId, ref }: Props) {
     const [stream, setStream] = useState<ReadableStream<Uint8Array> | null>(null);
     const [analyzing, setAnalyzing] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [budgetWarning, setBudgetWarning] = useState<string | null>(null);
     const [pastAnalyses, setPastAnalyses] = useState<AnalysisPreview[]>([]);
     const [expandedMap, setExpandedMap] = useState<Map<number, Analysis>>(new Map());
     const [loadingId, setLoadingId] = useState<number | null>(null);
@@ -35,6 +36,7 @@ export default function AnalysisPanel({ sessionId, ref }: Props) {
     const doAnalyze = useCallback(async () => {
       setAnalyzing(true);
       setError(null);
+      setBudgetWarning(null);
       latestResponseRef.current = '';
       try {
         const body = await analyzeSession(sessionId);
@@ -140,6 +142,10 @@ export default function AnalysisPanel({ sessionId, ref }: Props) {
             <p className="text-sm leading-relaxed text-rose-600 dark:text-rose-400">{error}</p>
           )}
 
+          {budgetWarning && (
+            <p className="text-sm leading-relaxed text-amber-600 dark:text-amber-400" role="alert">{budgetWarning}</p>
+          )}
+
           {stream && (
             <div className="rounded border border-[var(--border-default)] p-4 dark:border-[var(--border-strong)]">
               <div className="flex justify-end mb-2">
@@ -155,6 +161,7 @@ export default function AnalysisPanel({ sessionId, ref }: Props) {
                 stream={stream}
                 onDone={handleDone}
                 onError={(e) => { setError(e); setAnalyzing(false); }}
+                onWarning={(w) => setBudgetWarning(w || null)}
               />
             </div>
           )}

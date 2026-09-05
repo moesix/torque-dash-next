@@ -4,17 +4,19 @@ import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 
 interface StreamEvent {
-  type?: 'content' | 'reasoning';
-  text: string;
+  type?: 'content' | 'reasoning' | 'finish';
+  text?: string;
+  warning?: string;
 }
 
 interface Props {
   stream: ReadableStream<Uint8Array>;
   onDone?: (fullText: string) => void;
   onError?: (error: string) => void;
+  onWarning?: (warning: string) => void;
 }
 
-export default function StreamRenderer({ stream, onDone, onError }: Props) {
+export default function StreamRenderer({ stream, onDone, onError, onWarning }: Props) {
   const [contentText, setContentText] = useState('');
   const [reasoningText, setReasoningText] = useState('');
   const [done, setDone] = useState(false);
@@ -24,8 +26,10 @@ export default function StreamRenderer({ stream, onDone, onError }: Props) {
   const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onDoneRef = useRef(onDone);
   const onErrorRef = useRef(onError);
+  const onWarningRef = useRef(onWarning);
   onDoneRef.current = onDone;
   onErrorRef.current = onError;
+  onWarningRef.current = onWarning;
 
   const appendContent = useCallback((chunk: string) => {
     contentRef.current += chunk;
@@ -95,6 +99,10 @@ export default function StreamRenderer({ stream, onDone, onError }: Props) {
                 return;
               }
               const event = parsed as unknown as StreamEvent;
+              if (event.type === 'finish') {
+                onWarningRef.current?.(event.warning ?? '');
+                continue; // don't render finish events as content; keep consuming so [DONE] finalizes
+              }
               if (event.text) {
                 if (event.type === 'reasoning') {
                   appendReasoning(event.text);
