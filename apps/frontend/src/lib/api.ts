@@ -311,6 +311,13 @@ export async function listAnalyses(sessionId: string): Promise<AnalysisPreview[]
   return request<AnalysisPreview[]>(`/api/sessions/${sessionId}/analyses`);
 }
 
+/** Delete a cached analysis (ownership-checked server-side via the session). */
+export async function deleteAnalysis(sessionId: string, analysisId: number): Promise<void> {
+  await request(`/api/sessions/${sessionId}/analyses/${analysisId}`, {
+    method: 'DELETE',
+  });
+}
+
 // ── Cross-vehicle analysis history ──────────────────────────────────
 
 export interface PaginatedAnalyses {
