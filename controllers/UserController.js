@@ -6,7 +6,6 @@ const { nanoid } = require('nanoid');
 const crypto = require('crypto');
 const runtime = require('../config/runtime');
 const { userByIdCache } = require('../config/passport');
-const Joi = require('joi');
 const { validateLlmThinkingMode, validateLlmMaxTokens, validateRetentionEnabled, validateRetentionDays, validateProvider } = require('../lib/validators');
 
 // Admin = first registered user (bootstrap at register time, plan 099). Any
@@ -93,54 +92,6 @@ class UserController {
 
         } catch (err) {
             console.error('Error:', err.message);
-            res.status(500).json({ error: 'Internal server error' });
-        }
-    }
-    static async getForwardUrls(req, res) {
-        try{
-            let user = await User.findOne({
-                where: { id: req.user.id }
-            });
-            let forwardUrls = user.forwardUrls;
-            if(!forwardUrls) return res.send([]);
-            res.send(forwardUrls);
-        }
-        catch(err) {
-            console.error(err.message || err);
-            res.status(500).json({ error: 'Internal server error' });
-        }
-    }
-    static async updateForwardUrls(req, res) {
-        try{
-            let urls = req.body.urls;
-            let user = await User.findOne({
-                where: { id: req.user.id }
-            });
-            if(!user) return res.status(404).json({ error: 'User not found' });
-            if(!urls) {
-                await user.update({
-                    forwardUrls: null
-                });
-                return res.sendStatus(200);
-            }
-            if(!Array.isArray(urls)) {
-                return res.status(400).json({ error: 'URLs must be an array.' });
-            }
-            if(urls.length > 10) {
-                return res.status(400).json({ error: 'Too many URLs. Maximum is 10.' });
-            }
-            const schema = Joi.array().items(Joi.string().uri());
-            const { error } = schema.validate(urls);
-            if(error) {
-                return res.status(400).json({ error: 'Invalid URL: ' + error.details[0].message });
-            }
-            await user.update({
-                forwardUrls: urls
-            });
-            res.sendStatus(200);
-        }
-        catch(err) {
-            console.error(err.message || err);
             res.status(500).json({ error: 'Internal server error' });
         }
     }

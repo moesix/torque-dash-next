@@ -30,9 +30,6 @@ module.exports = (sequelize, DataTypes) => {
             allowNull: false,
             defaultValue: false,
         },
-        forwardUrls: {
-            type: DataTypes.ARRAY(DataTypes.STRING)
-        }
     }, {
         hooks: {
             beforeCreate: [hashPassword, normalizeEmail],

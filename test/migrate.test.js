@@ -4,7 +4,7 @@ const path = require('path');
 const { listMigrationFiles, isBenignError } = require('../scripts/migrate');
 
 describe('migration loader', () => {
-    it('returns files in strict lexicographic path order 001–017 then migrations/', () => {
+    it('returns files in strict lexicographic path order 001–018 then migrations/', () => {
         const files = listMigrationFiles();
         const expected = [
             '001_log_hypertable.sql',
@@ -24,6 +24,7 @@ describe('migration loader', () => {
             '015_normalize_emails.sql',
             '016_denormalize_summaries.sql',
             '017_user_admin.sql',
+            '018_drop_forward_urls.sql',
             'migrations/001_add_upload_token.sql',
             'migrations/002_backfill_pid_columns.sql',
         ];

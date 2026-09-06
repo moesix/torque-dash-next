@@ -4,7 +4,7 @@
 //   - config/passport.js deserializeUser (user-by-id cache)
 //   - controllers/UserController.changePassword (cache invalidation wiring)
 //   - controllers/UploadController.processUpload (vehicle + torque-session caches)
-// Models/ssrfGuard/ingestBuffer/runtime are replaced via require.cache BEFORE
+// Models/ingestBuffer/runtime are replaced via require.cache BEFORE
 // the production modules load; lib/userCache stays REAL so the caches under
 // test are the actual UserCache instances production constructs.
 
@@ -35,9 +35,6 @@ const mockModels = {
     Settings: { getSingleton: async () => ({ timezoneOffset: 0 }) },
 };
 inject(require.resolve('../models'), mockModels);
-
-const mockSsrfGuard = { safeFetch: async () => ({}) };
-inject(require.resolve('../lib/ssrfGuard'), mockSsrfGuard);
 
 const ingestRows = [];
 const mockIngestBuffer = { ingest(row) { ingestRows.push(row); } };
@@ -105,7 +102,7 @@ beforeEach(() => {
     // Upload tests address users as owner<id>@test.io — resolve them by email.
     mockModels.User.findOne = async (args) => {
         const m = /owner(\d+)@test\.io/.exec(args.where.email);
-        return m ? { id: Number(m[1]), forwardUrls: [] } : null;
+        return m ? { id: Number(m[1]) } : null;
     };
     mockModels.Vehicle.findOne = async (args) => { vehicleFindOneCalls.push(args); return vehicleFindOneImpl(args); };
     mockModels.Session.findOrCreate = async (args) => {

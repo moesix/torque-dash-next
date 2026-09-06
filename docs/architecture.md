@@ -43,10 +43,10 @@ flowchart LR
    (email-gated +        │   │    ├─ lib/userCache (positive+neg)     │
     Bearer token req'd)  │   │    ├─ services/ingestBuffer           │──▶  PostgreSQL
                           │   │    │     └─ Log.bulkCreate (batched)  │      + TimescaleDB
-   Browser SPA  ──/api──▶ │   │    └─ lib/ssrfGuard (forwardUrls)     │      hypertable Logs
+   Browser SPA  ──/api──▶ │   │                              │      hypertable Logs
     CORS + express-session  │   ├─ SessionController (list/metadata)    │
                           │   ├─ TelemetryController.range (paged)    │
-                          │   └─ UserController (auth/forwardUrls)    │
+                          │   └─ UserController (auth)                │
                           └─────────────────────────────────────────┘
 ```
 
@@ -54,9 +54,6 @@ flowchart LR
 `Torque Pro` → `GET /api/upload` → `UploadController.processUpload` →
 resolve user (cached) → `findOrCreate` session (resolved numeric FK) →
 `ingestBuffer.ingest()` → buffered `Log.bulkCreate` → `200 OK`.
-
-`forwardUrls` fan-out is fire-and-forget (`setImmediate`), SSRF-guarded, native
-`fetch` with a 3s `AbortController` timeout.
 
 ### Read path
 `Browser SPA` → `CORS` + `express-session` → `/api/*` → `authenticate`
@@ -97,8 +94,6 @@ which enforces ownership (or `?shareId=` for shared sessions) and returns
   When `v` is absent or no match is found, the controller falls back to the
   user's default vehicle (`isDefault: true`). The resolved `vehicleId` is stored
   on the `Session` and returned in session metadata.
-- **SSRF-guarded `forwardUrls`:** each URL is checked with `lib/ssrfGuard.isSafeUrl`
-  before a fire-and-forget `fetch`.
 - Responds `200 OK` immediately; the DB flush is asynchronous.
 
 ### 2.2 `ingestBuffer` (`services/ingestBuffer.js`)
@@ -797,8 +792,6 @@ See `docs/deployment.md` for the full deployment guide.
 | `POST /api/users/logout` | cookie | logout |
 | `GET /api/users/shareid` | cookie | get the user's shareId (empty until sharing is enabled) |
 | `PATCH /api/users/shareid` | cookie | toggle sharing on/off — enable generates a shareId, disable clears it |
-| `GET /api/users/forwardurls` | cookie | get webhook forward URLs that receive a copy of each upload (`string[]`; empty when none) |
-| `PUT /api/users/forwardurls` | cookie | set webhook forward URLs (body: `{ urls: string[] }`; max 10, URI-validated; empty/missing clears) |
 | `GET /api/version` | none | returns `{ version: string }` from package.json |
 | `GET /api/sessions?limit&offset` | cookie | list sessions (paginated: `{ sessions, total, limit, offset }`) |
 | `GET /api/sessions/:id` | cookie + owner | session metadata (no full logs) |

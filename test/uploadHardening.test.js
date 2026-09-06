@@ -17,9 +17,9 @@ const realUserCache = require('../lib/userCache');
 
 // ── Pre-populate require.cache for everything UploadController pulls in ──
 // UploadController requires ../models (which builds a real Sequelize instance),
-// ../lib/userCache, ../lib/ssrfGuard, ../services/ingestBuffer and
-// ../config/runtime at load time. We inject stub containers for all five so
-// the tests below run against PRODUCTION controller code with no DB.
+// ../lib/userCache, ../services/ingestBuffer and ../config/runtime at load
+// time. We inject stub containers for those so the tests below run against
+// PRODUCTION controller code with no DB.
 
 const mockModels = {
     User: { findOne: async () => null },
@@ -34,8 +34,6 @@ const mockUserCache = {
     set(key, value) { mockUserCache.store.set(key, value); },
     del(key) { mockUserCache.store.delete(key); },
 };
-
-const mockSsrfGuard = { safeFetch: async () => ({}) };
 
 const ingestCalls = [];
 const mockIngestBuffer = {
@@ -60,7 +58,6 @@ function inject(resolvedPath, exportsObj) {
 
 inject(require.resolve('../models'), mockModels);
 inject(require.resolve('../lib/userCache'), mockUserCache);
-inject(require.resolve('../lib/ssrfGuard'), mockSsrfGuard);
 inject(require.resolve('../services/ingestBuffer'), mockIngestBuffer);
 inject(require.resolve('../config/runtime'), mockRuntime);
 
@@ -89,7 +86,7 @@ let findOrCreateArgs;
 let sessionUpdateCalls;
 
 // Wire default per-test behavior: auth disabled, known user, existing session.
-function stubHappyPath({ user = { id: 1, forwardUrls: [] }, createsSession = false, timezoneOffset = 0 } = {}) {
+function stubHappyPath({ user = { id: 1 }, createsSession = false, timezoneOffset = 0 } = {}) {
     findOneCalls = [];
     findOrCreateArgs = null;
     sessionUpdateCalls = [];

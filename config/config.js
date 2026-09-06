@@ -59,7 +59,7 @@ let config = {
             windowMs: Number(process.env.UPLOAD_RATE_LIMIT_WINDOW_MS) || 60000,
             max: Number(process.env.UPLOAD_RATE_LIMIT_MAX) || 600
         },
-        // Authenticated mutations (PUT settings/forwardurls): bound write churn.
+        // Authenticated mutations (PUT settings/change-password): bound write churn.
         write: {
             windowMs: Number(process.env.WRITE_RATE_LIMIT_WINDOW_MS) || 60000,
             max: Number(process.env.WRITE_RATE_LIMIT_MAX) || 30

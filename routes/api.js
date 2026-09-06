@@ -104,8 +104,6 @@ router.post('/users/register', authLimiter, UserController.register);
 router.post('/users/login', authLimiter, UserController.login);
 router.post('/users/logout', UserController.logout);
 router.get('/users/shareid', authenticate, UserController.getShareId);
-router.get('/users/forwardurls', authenticate, UserController.getForwardUrls);
-router.put('/users/forwardurls', writeLimiter, authenticate, UserController.updateForwardUrls);
 router.post('/users/change-password', writeLimiter, authenticate, UserController.changePassword);
 router.patch('/users/shareid', authenticate, UserController.toggleShareId);
 
