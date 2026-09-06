@@ -24,6 +24,7 @@ import {
 import { CanvasRenderer } from 'echarts/renderers';
 import type { TelemetryFrame, SeriesSource } from '@/lib/types';
 import { getSeriesData, getAvailableSeries } from '@/lib/pidDecode';
+import { colorForUnit, BRAND_TEAL, BRAND_TEAL_AREA } from '@/lib/chartColors';
 
 // Tree-shaken ECharts build — same as OverlayChart + MarkAreaComponent
 echarts.use([
@@ -174,10 +175,7 @@ function DiagnosticPanel({
     for (let i = 0; i < resolvedSources.length; i++) {
       const src = resolvedSources[i];
       const data = getSeriesData(frames, src);
-      const color = src.unit === 'rpm' ? '#009999' : src.unit === 'km/h' ? '#f97316'
-        : src.unit === 'V' ? '#16a34a' : src.unit === ':1' ? '#92400e'
-        : src.unit === '°C' ? '#dc2626' : src.unit === 'psi' ? '#06b6d4'
-        : ['#009999', '#16a34a', '#dc2626', '#d97706', '#8b5cf6', '#f97316'][i % 6];
+      const color = colorForUnit(src.unit, i);
 
       seriesOptions.push({
         name: src.short,
@@ -232,7 +230,7 @@ function DiagnosticPanel({
           seriesObj.markArea = {
             silent: true,
             itemStyle: {
-              color: markAreas[0]?.color ?? 'rgba(0,153,153,0.15)',
+              color: markAreas[0]?.color ?? BRAND_TEAL_AREA,
             },
             data: markAreas.map((ma) => [
               { yAxis: ma.yFrom, name: 'lower' },
@@ -272,8 +270,8 @@ function DiagnosticPanel({
             height: 20,
             borderColor: 'transparent',
             backgroundColor: 'rgba(0,153,153,0.08)',
-            fillerColor: 'rgba(0,153,153,0.15)',
-            handleStyle: { color: '#009999' },
+            fillerColor: BRAND_TEAL_AREA,
+            handleStyle: { color: BRAND_TEAL },
             textStyle: { color: '#6b7280', fontSize: 10 },
           },
         ],

@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import type { TelemetryFrame } from '@/lib/types';
 import { getSeriesData, findNearestFrameIndex } from '@/lib/pidDecode';
 import { usePlaybackStore } from '@/app/playbackStore';
+import { BRAND_TEAL, SERIES_COLORS } from '@/lib/chartColors';
 
 interface Props {
   frames: TelemetryFrame[];
@@ -192,21 +193,21 @@ export default function SessionSummaryCard({
           value={currentValues.rpm}
           max={maxRpm ?? 8000}
           unit=" rpm"
-          color="#009999"
+          color={BRAND_TEAL}
         />
         <RingGauge
           label="Coolant"
           value={currentValues.coolant}
           max={maxCoolant ?? 120}
           unit="°C"
-          color="#d97706"
+          color={SERIES_COLORS[3]}
         />
         <RingGauge
           label="Speed"
           value={currentValues.speed}
           max={maxSpeed ?? 240}
           unit=" km/h"
-          color="#16a34a"
+          color={SERIES_COLORS[1]}
         />
       </div>
 

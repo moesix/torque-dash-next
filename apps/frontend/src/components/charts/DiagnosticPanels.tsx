@@ -16,6 +16,7 @@ import type {
   DiagnosticPanelProps,
 } from './DiagnosticPanel';
 import { computeTotalTrim } from '@/lib/pidDecode';
+import { SERIES_COLOR_TRIM, BRAND_TEAL_AREA } from '@/lib/chartColors';
 
 // ── Props ────────────────────────────────────────────────────────────────
 
@@ -53,7 +54,7 @@ const FUEL_TRIM_MARK_LINES: MarkLineConfig[] = [
   { yAxis: 0, color: '#9ca3af', type: 'dashed' },
 ];
 const FUEL_TRIM_MARK_AREAS: MarkAreaConfig[] = [
-  { yFrom: -10, yTo: 10, color: 'rgba(0,153,153,0.15)' },
+  { yFrom: -10, yTo: 10, color: BRAND_TEAL_AREA },
 ];
 
 // ── Helpers ──────────────────────────────────────────────────────────────
@@ -72,7 +73,7 @@ export default function DiagnosticPanels({ frames, available, forceExpanded = fa
 
   const totalTrimSeries: ComputedSeries = useMemo(() => ({
     label: 'Total Trim',
-    color: '#dc2626',
+    color: SERIES_COLOR_TRIM,
     compute: () => totalTrimData,
     yAxisIndex: 0,
   }), [totalTrimData]);
