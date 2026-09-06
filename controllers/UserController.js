@@ -6,7 +6,7 @@ const { nanoid } = require('nanoid');
 const crypto = require('crypto');
 const runtime = require('../config/runtime');
 const { userByIdCache } = require('../config/passport');
-const { validateLlmThinkingMode, validateLlmMaxTokens, validateRetentionEnabled, validateRetentionDays, validateProvider } = require('../lib/validators');
+const { validateLlmThinkingMode, validateLlmMaxTokens, validateRetentionEnabled, validateRetentionDays, validateAnalysisRetentionDays, validateProvider } = require('../lib/validators');
 
 // Admin = first registered user (bootstrap at register time, plan 099). Any
 // admin-only mutation must call this first and return 403 when it fails.
@@ -297,6 +297,17 @@ class UserController {
               updateData.retentionDays = req.body.retentionDays;
             }
 
+            // Handle analysisRetentionDays if provided (nullable: null clears —
+            // disables the app-side Analyses prune job). Validated against the
+            // same 90-365 window as retentionDays; ONLY reachable behind the
+            // admin gate above. No add_retention_policy call — the Analyses
+            // prune job (services/analysesRetention.js) reads this value.
+            if (req.body.analysisRetentionDays !== undefined) {
+              const r = validateAnalysisRetentionDays(req.body.analysisRetentionDays);
+              if (!r.ok) return res.status(400).json({ error: r.error });
+              updateData.analysisRetentionDays = req.body.analysisRetentionDays;
+            }
+
             // API key requires encryption
             if (llmApiKey !== undefined) {
               if (llmApiKey === null) {
@@ -466,6 +477,7 @@ function settingsView(settings, extras = {}) {
         timezoneOffset: settings.timezoneOffset ?? 0,
         retentionEnabled: settings.retentionEnabled ?? false,
         retentionDays: settings.retentionDays ?? 365,
+        analysisRetentionDays: settings.analysisRetentionDays ?? null,
         ...extras,
     };
 }

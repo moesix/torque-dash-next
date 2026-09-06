@@ -25,6 +25,7 @@ const {
   validateLlmMaxTokens,
   validateRetentionEnabled,
   validateRetentionDays,
+  validateAnalysisRetentionDays,
 } = require('../lib/validators');
 const {
   formatDuration,
@@ -158,6 +159,42 @@ describe('validateRetentionDays', () => {
   });
 });
 
+// ── Analysis retention days ──────────────────────────────────────────
+
+describe('validateAnalysisRetentionDays', () => {
+  it('accepts null/undefined (prune job disabled)', () => {
+    assert.deepStrictEqual(validateAnalysisRetentionDays(null), { ok: true });
+    assert.deepStrictEqual(validateAnalysisRetentionDays(undefined), { ok: true });
+  });
+
+  it('rejects non-integer analysisRetentionDays', () => {
+    const r = validateAnalysisRetentionDays(36.5);
+    assert.strictEqual(r.ok, false);
+    assert.strictEqual(r.error, 'analysisRetentionDays must be an integer.');
+  });
+
+  it('rejects analysisRetentionDays below 90', () => {
+    const r = validateAnalysisRetentionDays(89);
+    assert.strictEqual(r.ok, false);
+    assert.strictEqual(r.error, 'analysisRetentionDays must be between 90 and 365.');
+  });
+
+  it('rejects analysisRetentionDays above 365', () => {
+    const r = validateAnalysisRetentionDays(366);
+    assert.strictEqual(r.ok, false);
+    assert.strictEqual(r.error, 'analysisRetentionDays must be between 90 and 365.');
+  });
+
+  it('accepts a valid analysisRetentionDays value (180)', () => {
+    assert.deepStrictEqual(validateAnalysisRetentionDays(180), { ok: true });
+  });
+
+  it('accepts boundary analysisRetentionDays values (90, 365)', () => {
+    assert.deepStrictEqual(validateAnalysisRetentionDays(90), { ok: true });
+    assert.deepStrictEqual(validateAnalysisRetentionDays(365), { ok: true });
+  });
+});
+
 // ── Settings response shape (REAL settingsView from UserController) ─
 
 describe('settings response shape (real settingsView)', () => {
@@ -169,10 +206,20 @@ describe('settings response shape (real settingsView)', () => {
     assert.strictEqual(res.retentionDays, 365);
   });
 
+  it('defaults analysisRetentionDays to null (prune job disabled)', () => {
+    const res = settingsView({});
+    assert.strictEqual(res.analysisRetentionDays, null);
+  });
+
   it('passes through provided values', () => {
     const full = settingsView({ retentionEnabled: true, retentionDays: 180 });
     assert.strictEqual(full.retentionEnabled, true);
     assert.strictEqual(full.retentionDays, 180);
+  });
+
+  it('passes through analysisRetentionDays when set', () => {
+    const full = settingsView({ analysisRetentionDays: 180 });
+    assert.strictEqual(full.analysisRetentionDays, 180);
   });
 
   it('does not include retentionPolicyApplied (updateSettings-only extra)', () => {

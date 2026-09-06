@@ -583,3 +583,91 @@ describe('PUT /api/settings — updateSettings llmProvider/llmModel validation (
     }
   });
 });
+
+// ── 7. updateSettings validates analysisRetentionDays (admin write path) ────
+
+describe('PUT /api/settings — updateSettings analysisRetentionDays validation (admin write path)', () => {
+  const adminReq = (body) => ({ user: { id: 1, isAdmin: true }, body });
+
+  function captureUpsert() {
+    const captured = [];
+    const originalUpsert = mockModels.Settings.upsert;
+    mockModels.Settings.upsert = async (data) => { captured.push(data); };
+    return { captured, restore: () => { mockModels.Settings.upsert = originalUpsert; } };
+  }
+
+  it('persists a valid analysisRetentionDays (180)', async () => {
+    const UserController = require('../controllers/UserController');
+    const { captured, restore } = captureUpsert();
+    try {
+      const { res, calls } = makeStubRes();
+      await UserController.updateSettings(adminReq({ analysisRetentionDays: 180 }), res);
+
+      assert.ok(calls.body, 'expected a JSON settings body on success');
+      assert.strictEqual(captured.length, 1);
+      assert.strictEqual(captured[0].analysisRetentionDays, 180);
+    } finally {
+      restore();
+    }
+  });
+
+  it('rejects an out-of-range analysisRetentionDays (7) with 400 and does NOT persist', async () => {
+    const UserController = require('../controllers/UserController');
+    const { captured, restore } = captureUpsert();
+    try {
+      const { res, calls } = makeStubRes();
+      await UserController.updateSettings(adminReq({ analysisRetentionDays: 7 }), res);
+
+      assert.strictEqual(calls.statusCode, 400);
+      assert.ok(calls.body.error.includes('analysisRetentionDays'),
+        `error should name analysisRetentionDays: ${JSON.stringify(calls.body)}`);
+      assert.strictEqual(captured.length, 0, 'invalid days must not reach Settings.upsert');
+    } finally {
+      restore();
+    }
+  });
+
+  it('rejects a non-integer analysisRetentionDays with 400', async () => {
+    const UserController = require('../controllers/UserController');
+    const { captured, restore } = captureUpsert();
+    try {
+      const { res, calls } = makeStubRes();
+      await UserController.updateSettings(adminReq({ analysisRetentionDays: 'abc' }), res);
+
+      assert.strictEqual(calls.statusCode, 400);
+      assert.strictEqual(captured.length, 0);
+    } finally {
+      restore();
+    }
+  });
+
+  it('accepts null (clearing/disabling the prune job) and persists null', async () => {
+    const UserController = require('../controllers/UserController');
+    const { captured, restore } = captureUpsert();
+    try {
+      const { res, calls } = makeStubRes();
+      await UserController.updateSettings(adminReq({ analysisRetentionDays: null }), res);
+
+      assert.ok(calls.body, 'expected a JSON settings body on success');
+      assert.strictEqual(captured.length, 1);
+      assert.strictEqual(captured[0].analysisRetentionDays, null);
+    } finally {
+      restore();
+    }
+  });
+
+  it('rejects analysisRetentionDays above 365', async () => {
+    const UserController = require('../controllers/UserController');
+    const { captured, restore } = captureUpsert();
+    try {
+      const { res, calls } = makeStubRes();
+      await UserController.updateSettings(adminReq({ analysisRetentionDays: 366 }), res);
+
+      assert.strictEqual(calls.statusCode, 400);
+      assert.ok(calls.body.error.includes('between 90 and 365'));
+      assert.strictEqual(captured.length, 0);
+    } finally {
+      restore();
+    }
+  });
+});
