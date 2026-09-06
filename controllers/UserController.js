@@ -7,7 +7,7 @@ const crypto = require('crypto');
 const runtime = require('../config/runtime');
 const { userByIdCache } = require('../config/passport');
 const Joi = require('joi');
-const { validateLlmThinkingMode, validateLlmMaxTokens, validateRetentionEnabled, validateRetentionDays } = require('../lib/validators');
+const { validateLlmThinkingMode, validateLlmMaxTokens, validateRetentionEnabled, validateRetentionDays, validateProvider } = require('../lib/validators');
 
 // Admin = first registered user (bootstrap at register time, plan 099). Any
 // admin-only mutation must call this first and return 403 when it fails.
@@ -263,8 +263,17 @@ class UserController {
             const { llmProvider, llmApiKey, llmModel, llmEndpoint,
                     vehicleMake, vehicleModel, vehicleYear, engineCc } = req.body;
 
-            if (llmProvider !== undefined) updateData.llmProvider = llmProvider;
-            if (llmModel !== undefined) updateData.llmModel = llmModel;
+            if (llmProvider !== undefined) {
+              const r = validateProvider(llmProvider);
+              if (!r.ok) return res.status(400).json({ error: r.error });
+              updateData.llmProvider = llmProvider;
+            }
+            if (llmModel !== undefined) {
+              if (typeof llmModel !== 'string' || llmModel.length > 200) {
+                return res.status(400).json({ error: 'llmModel must be a string of at most 200 characters.' });
+              }
+              updateData.llmModel = llmModel;
+            }
             if (llmEndpoint !== undefined) {
               if (llmEndpoint !== null) {
                 try { new URL(llmEndpoint); } catch {
