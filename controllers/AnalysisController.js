@@ -111,6 +111,11 @@ class AnalysisController {
         sample = [...firstBatch, ...randomBatch, ...lastBatch];
       }
 
+      // The sample mixes ASC (first), id-order (random), and DESC (last) batches —
+      // sort chronologically so the prompt's CSV Time column is monotonic and the
+      // model reads a real time series.
+      sample.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+
       // 4b. Connectivity-gap detection from the full-resolution timestamps fetched
       // in parallel with the count above (detectBackfillGaps sorts internally).
       const gapResult = detectBackfillGaps(tsRows.map(r => r.timestamp));

@@ -129,3 +129,57 @@ describe('buildTelemetryCsv', () => {
     assert.ok(result.includes('10:37:28'));
   });
 });
+
+describe('buildTelemetryCsv chronological ordering', () => {
+  it('emits a monotonic Time column for a mixed-batch sample once sorted chronologically', () => {
+    // The controller's large-session sample mixes an ASC head (first rows), an
+    // id-order middle, and a DESC tail (last rows fetched newest-first) — the raw
+    // assembly renders that tail newest-first in the prompt CSV. The controller
+    // now sorts the assembled sample before building the prompt; this seam test
+    // locks in the resulting guarantee at the CSV boundary: a chronologically
+    // sorted sample yields a non-decreasing Time column even when
+    // resampleTelemetry index-stepping engages (>maxRows input).
+    const iso = (secondsSinceStart) =>
+      new Date(Date.UTC(2026, 6, 27, 10, 0, secondsSinceStart)).toISOString();
+    const row = (timestamp, i) => ({
+      timestamp,
+      engine_rpm: 1000 + i,
+      vehicle_speed: 30 + (i % 20),
+      values: {},
+    });
+
+    const head = Array.from({ length: 40 }, (_, i) => row(iso(i), i)); // ASC: 0..39
+    const middle = Array.from({ length: 40 }, (_, i) => row(iso(40 + i), 40 + i)); // ASC: 40..79
+    const descTail = Array.from({ length: 40 }, (_, i) => row(iso(119 - i), 80 + i)); // DESC: 119..80
+
+    const unsorted = [...head, ...middle, ...descTail];
+
+    // Fixture sanity check: this exact bug shape must render out of order at the
+    // seam before the sort (the seam is order-preserving, so the sort upstream is
+    // what restores the timeline).
+    const rawCsv = buildTelemetryCsv(unsorted, []);
+    const rawTimes = rawCsv.split('\n').slice(1).map((line) => line.split(',')[0]);
+    assert.ok(
+      rawTimes.some((time, idx) => idx > 0 && time < rawTimes[idx - 1]),
+      'fixture should be out of chronological order before the sort'
+    );
+
+    // Same comparator the controller applies at its single choke point.
+    const sorted = [...unsorted].sort(
+      (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+    );
+
+    const csv = buildTelemetryCsv(sorted, []);
+    const lines = csv.split('\n');
+    assert.strictEqual(lines[0], 'Time,RPM,Speed');
+    const times = lines.slice(1).map((line) => line.split(',')[0]);
+    assert.ok(times.length > 1, 'sample is large enough to exercise resampling');
+
+    for (let i = 1; i < times.length; i++) {
+      assert.ok(
+        times[i] >= times[i - 1],
+        `Time column must be monotonically non-decreasing; row ${i} (${times[i]}) sorts before row ${i - 1} (${times[i - 1]})`
+      );
+    }
+  });
+});
