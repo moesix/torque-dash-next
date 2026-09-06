@@ -229,6 +229,7 @@ export async function updateSettings(
     timezoneOffset?: number;
     retentionEnabled?: boolean;
     retentionDays?: number;
+    analysisRetentionDays?: number | null;
   },
 ): Promise<Settings | undefined> {
   return request<Settings>('/api/settings', {

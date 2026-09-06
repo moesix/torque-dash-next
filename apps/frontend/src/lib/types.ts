@@ -130,6 +130,11 @@ export interface Settings {
   retentionEnabled?: boolean;
   /** Retention window in days (90-365). Only applies when retentionEnabled. */
   retentionDays?: number;
+
+  // ── Analysis retention (migration 019) ──────────────────────────
+  /** App-side prune window for stale Analysis rows (days, 90-365). NULL (or
+   *  absent) disables the prune job — analyses are kept indefinitely. */
+  analysisRetentionDays?: number | null;
 }
 
 /** Response from POST /api/settings/upload-token (token generation). The full

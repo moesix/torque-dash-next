@@ -50,6 +50,7 @@ export default function SettingsPage() {
     timezoneOffset: 0,
     retentionEnabled: false,
     retentionDays: 365,
+    analysisRetentionDays: null,
   });
 
   useEffect(() => {
@@ -373,6 +374,61 @@ export default function SettingsPage() {
               </span>
             </div>
           )}
+
+          {retentionError ? (
+            <p className="mt-2 text-sm leading-relaxed text-rose-600 dark:text-rose-400">{retentionError}</p>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
+        <div className="space-y-4">
+          <div>
+            <p className="text-sm leading-relaxed font-medium">Analysis Retention</p>
+            <p className="mt-1 text-sm leading-relaxed text-gray-500 dark:text-[var(--text-muted)]">
+              Automatically delete cached AI analysis rows older than the
+              specified number of days. Analyses live in a plain table (no
+              TimescaleDB policy), so the app prunes them on a schedule. When
+              off, analyses are retained indefinitely.
+            </p>
+          </div>
+
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+            <label htmlFor="analysis-retention-days" className="text-sm text-gray-700 dark:text-[var(--text-secondary)]">
+              Prune analyses older than:
+            </label>
+            <select
+              id="analysis-retention-days"
+              value={
+                [90, 120, 180, 365].includes(llmSettings.analysisRetentionDays ?? -1)
+                  ? (llmSettings.analysisRetentionDays ?? 90)
+                  : ''
+              }
+              onChange={(e) => {
+                const value = e.target.value;
+                const days = value === '' ? null : Number(value);
+                const next = { ...llmSettings, analysisRetentionDays: days };
+                setLlmSettings(next);
+                setRetentionError(null);
+                updateSettings({ analysisRetentionDays: days }).catch(() => {
+                  setRetentionError('Failed to save analysis retention days.');
+                  getFullSettings().then((s) => {
+                    if (s) setLlmSettings(s);
+                  });
+                });
+              }}
+              className="rounded border bg-white px-3 py-1.5 text-sm dark:border-[var(--border-default)] dark:bg-[var(--bg-surface)] dark:text-[var(--text-primary)]"
+            >
+              <option value="">Off</option>
+              <option value={90}>90 days</option>
+              <option value={120}>120 days</option>
+              <option value={180}>180 days</option>
+              <option value={365}>365 days</option>
+            </select>
+            <span className="text-sm text-gray-500 dark:text-[var(--text-muted)]">
+              (current: {llmSettings.analysisRetentionDays ? `${llmSettings.analysisRetentionDays} days` : 'Off'})
+            </span>
+          </div>
 
           {retentionError ? (
             <p className="mt-2 text-sm leading-relaxed text-rose-600 dark:text-rose-400">{retentionError}</p>
