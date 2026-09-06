@@ -136,7 +136,7 @@ router.delete('/sessions/:sessionId/analyses/:analysisId', authenticate, Analysi
 
 // ── Cross-vehicle analysis history ────────────────────────────────────
 router.get('/analyses', authenticate, AnalysisController.listAllAnalyses);
-router.get('/analyses/export', authenticate, AnalysisController.exportAnalyses);
+router.get('/analyses/export', exportLimiter, authenticate, AnalysisController.exportAnalyses);
 // Single analysis fetch (session pages expand past analyses). MUST stay
 // registered AFTER /analyses/export — Express matches in registration order
 // and would otherwise capture the literal 'export' as an :analysisId.
