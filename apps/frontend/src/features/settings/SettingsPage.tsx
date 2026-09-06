@@ -12,6 +12,12 @@ export default function SettingsPage() {
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
 
+  // Admin (first registered user, plan 099) status — read from the
+  // session-derived isAdmin field of the full-settings response. null = still
+  // loading, so neither the admin cards nor the non-admin notice flashes
+  // before the fetch resolves.
+  const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
+
   // Upload API token state
   const [hasUploadApiToken, setHasUploadApiToken] = useState(false);
   const [tokenFromEnv, setTokenFromEnv] = useState(false);
@@ -57,6 +63,7 @@ export default function SettingsPage() {
         setHasUploadApiToken(s.hasUploadApiToken);
         setTokenFromEnv(s.tokenFromEnv);
         setLlmSettings(s);
+        setIsAdmin(Boolean(s.isAdmin));
       })
       .catch(() => setError('Failed to load settings.'));
   }, []);
@@ -129,6 +136,18 @@ export default function SettingsPage() {
         </div>
         <p className="mt-1 text-sm leading-relaxed dark:text-[var(--text-secondary)]">Global site configuration.</p>
       </div>
+
+      {isAdmin === false ? (
+        <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
+          <p className="text-sm leading-relaxed font-medium">Account</p>
+          <p className="mt-1 text-sm leading-relaxed text-gray-500 dark:text-[var(--text-muted)]">
+            Server settings are managed by the administrator.
+          </p>
+        </div>
+      ) : null}
+
+      {isAdmin ? (
+      <>
       <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
         <div className="flex items-center justify-between">
           <div>
@@ -236,11 +255,17 @@ export default function SettingsPage() {
           ) : null}
         </div>
       </div>
+      </>
+      ) : null}
 
-      <AiProviderCard settings={llmSettings} onUpdate={setLlmSettings} />
+      {isAdmin ? (
+        <AiProviderCard settings={llmSettings} onUpdate={setLlmSettings} />
+      ) : null}
       <AnalysisHistory />
       <VehicleManager />
 
+      {isAdmin ? (
+      <>
       <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
         <div className="space-y-4">
           <div>
@@ -357,6 +382,8 @@ export default function SettingsPage() {
           ) : null}
         </div>
       </div>
+      </>
+      ) : null}
     </div>
   );
 }

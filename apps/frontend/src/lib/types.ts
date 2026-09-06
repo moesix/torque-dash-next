@@ -91,6 +91,10 @@ export interface Settings {
   /** True when the upload token is sourced from the UPLOAD_API_TOKEN env var
    *  (deploy-time override). When true, the UI generation/clear are disabled. */
   tokenFromEnv: boolean;
+  /** True when the session user is the admin (first registered user, plan 099).
+   *  Session-derived on the backend; only present on authenticated responses.
+   *  Admin-only settings cards are gated on this flag. */
+  isAdmin?: boolean;
 
   // ── BYOK LLM fields ────────────────────────────────────────────────
   hasLlmProvider: boolean;
