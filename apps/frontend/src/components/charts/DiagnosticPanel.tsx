@@ -10,7 +10,7 @@
  * - Dark mode compatible, matches OverlayChart styling
  */
 
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, memo } from 'react';
 import * as echarts from 'echarts/core';
 import { LineChart } from 'echarts/charts';
 import {
@@ -62,8 +62,10 @@ export interface MarkAreaConfig {
 export interface DiagnosticPanelProps {
   title: string;
   frames: TelemetryFrame[];
-  /** PID keys to plot — resolved internally against available series. */
-  pids: string[];
+  /** PID keys to plot — resolved internally against available series.
+   *  Readonly so callers can pass module-scope `as const` tuples (a stable
+   *  reference is required for React.memo to skip cursor-tick re-renders). */
+  pids: readonly string[];
   /** Computed series to overlay (e.g., Total Trim). */
   computedSeries?: ComputedSeries[];
   /** Reference lines (e.g., 0-line). */
@@ -90,7 +92,7 @@ function findSource(
 
 // ── Component ────────────────────────────────────────────────────────────
 
-export default function DiagnosticPanel({
+function DiagnosticPanel({
   title,
   frames,
   pids,
@@ -327,3 +329,9 @@ export default function DiagnosticPanel({
     </div>
   );
 }
+
+// Memoized: all props (title literal, query-cached `frames`, module-scope
+// pids/yAxisOverrides/markLines/markAreas, memoized computedSeries, boolean
+// forceExpanded) are referentially stable between unrelated parent renders, so
+// the data-rebuild effect below must not re-run on playback-cursor ticks.
+export default memo(DiagnosticPanel);

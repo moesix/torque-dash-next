@@ -53,12 +53,32 @@ function safeMax(values: (number | null)[]): number {
   return m;
 }
 
+// ── Playback-cursor bridge ────────────────────────────────────────────────
+
+/**
+ * Local playback-cursor bridge for the overlay charts.
+ *
+ * ReplayDashboard must NOT hold a whole-component `cursorTime` subscription:
+ * the value changes up to 60×/s during playback and scrubbing, and a
+ * dashboard-wide subscription would re-render every child on every tick
+ * (banner, PID panel, metrics table, memoized DiagnosticPanels, GPS map, ...).
+ * OverlayChart is props-driven for the cursor (its own store subscription is a
+ * separate plan), so this small component owns the `cursorTime` subscription
+ * and forwards it — only the two chart instances re-render per tick while
+ * ReplayDashboard only re-renders when session/UI state actually changes.
+ */
+function OverlayChartWithCursor(
+  props: Omit<React.ComponentProps<typeof OverlayChart>, 'cursorTime'>,
+) {
+  const cursorTime = usePlaybackStore((s) => s.cursorTime);
+  return <OverlayChart {...props} cursorTime={cursorTime} />;
+}
+
 // ── Component ────────────────────────────────────────────────────────────
 
 export default function ReplayDashboard() {
   const { id } = useParams<{ id: string }>();
   const setCursorTime = usePlaybackStore((s) => s.setCursorTime);
-  const cursorTime = usePlaybackStore((s) => s.cursorTime);
 
   // ── Data fetching ──────────────────────────────────────────────────
   const { session, frames, isLoading, error, truncated } = useSessionTelemetry(id);
@@ -415,10 +435,9 @@ export default function ReplayDashboard() {
               ↑
             </button>
           </div>
-          <OverlayChart
+          <OverlayChartWithCursor
             frames={frames}
             sources={selectedSources}
-            cursorTime={cursorTime}
             onCursorMove={handleCursorMove}
           />
         </div>
@@ -442,10 +461,9 @@ export default function ReplayDashboard() {
                 ↓
               </button>
             </div>
-            <OverlayChart
+            <OverlayChartWithCursor
               frames={frames}
               sources={selectedSources}
-              cursorTime={cursorTime}
               onCursorMove={handleCursorMove}
               className="h-full"
             />

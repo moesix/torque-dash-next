@@ -9,7 +9,12 @@
 import { useMemo } from 'react';
 import type { TelemetryFrame, SeriesSource } from '@/lib/types';
 import DiagnosticPanel from './DiagnosticPanel';
-import type { ComputedSeries, MarkLineConfig, MarkAreaConfig } from './DiagnosticPanel';
+import type {
+  ComputedSeries,
+  MarkLineConfig,
+  MarkAreaConfig,
+  DiagnosticPanelProps,
+} from './DiagnosticPanel';
 import { computeTotalTrim } from '@/lib/pidDecode';
 
 // ── Props ────────────────────────────────────────────────────────────────
@@ -20,6 +25,36 @@ interface Props {
   /** When true every panel renders expanded — print mode. */
   forceExpanded?: boolean;
 }
+
+// ── Module-level constants ────────────────────────────────────────────────
+//
+// Hoisted to module scope so every DiagnosticPanel prop keeps a stable
+// reference across parent re-renders. ReplayDashboard re-renders up to 60×/s
+// during playback (cursor ticks), and DiagnosticPanel is React.memo'd: fresh
+// inline array/object literals here would change identity on every render,
+// defeat the memo, and re-run each panel's full data-rebuild effect (a
+// 100k-frame getSeriesData rescan + a notMerge setOption) per tick.
+
+type AxisOverrides = NonNullable<DiagnosticPanelProps['yAxisOverrides']>;
+
+const PIDS_RPM_SPEED = ['engineRpm', 'vehicleSpeed'] as const;
+const PIDS_FUEL_TRIM = ['k6', 'k7'] as const;
+const PIDS_O2_AFR = ['kff1214', 'kff124d'] as const;
+const PIDS_COOLANT = ['k5'] as const;
+const PIDS_BOOST_MAF = ['kff1278', 'k10'] as const;
+const PIDS_THROTTLE_PEDAL = ['k11', 'k49'] as const;
+
+const YAXIS_RPM_SPEED: AxisOverrides = { 0: {}, 1: {} }; // RPM left, Speed right
+const YAXIS_O2_AFR: AxisOverrides = { 0: {}, 1: {} }; // O2 voltage left, AFR right
+const YAXIS_COOLANT: AxisOverrides = { 0: { min: 60, max: 95 } };
+const YAXIS_BOOST_MAF: AxisOverrides = { 0: {}, 1: {} }; // Boost left, MAF right
+
+const FUEL_TRIM_MARK_LINES: MarkLineConfig[] = [
+  { yAxis: 0, color: '#9ca3af', type: 'dashed' },
+];
+const FUEL_TRIM_MARK_AREAS: MarkAreaConfig[] = [
+  { yFrom: -10, yTo: 10, color: 'rgba(0,153,153,0.15)' },
+];
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -42,13 +77,13 @@ export default function DiagnosticPanels({ frames, available, forceExpanded = fa
     yAxisIndex: 0,
   }), [totalTrimData]);
 
-  // Fuel Trims mark config
-  const fuelTrimMarkLines: MarkLineConfig[] = [
-    { yAxis: 0, color: '#9ca3af', type: 'dashed' },
-  ];
-  const fuelTrimMarkAreas: MarkAreaConfig[] = [
-    { yFrom: -10, yTo: 10, color: 'rgba(0,153,153,0.15)' },
-  ];
+  // Stable wrapper array for the Total Trim series. An inline `[totalTrimSeries]`
+  // literal would be a fresh reference per render and defeat DiagnosticPanel's
+  // memo (per-tick rebuild of the Fuel Trims panel).
+  const totalTrimSeriesList: ComputedSeries[] = useMemo(
+    () => [totalTrimSeries],
+    [totalTrimSeries],
+  );
 
   // Check which panels should render (conditional PIDs)
   const showBoostMaf = hasPids(['kff1278', 'k10'], available);
@@ -60,11 +95,8 @@ export default function DiagnosticPanels({ frames, available, forceExpanded = fa
       <DiagnosticPanel
         title="Engine RPM & Vehicle Speed"
         frames={frames}
-        pids={['engineRpm', 'vehicleSpeed']}
-        yAxisOverrides={{
-          0: {}, // RPM left
-          1: {}, // Speed right
-        }}
+        pids={PIDS_RPM_SPEED}
+        yAxisOverrides={YAXIS_RPM_SPEED}
         forceExpanded={forceExpanded}
       />
 
@@ -72,10 +104,10 @@ export default function DiagnosticPanels({ frames, available, forceExpanded = fa
       <DiagnosticPanel
         title="Fuel Trims"
         frames={frames}
-        pids={['k6', 'k7']}
-        computedSeries={[totalTrimSeries]}
-        markLines={fuelTrimMarkLines}
-        markAreas={fuelTrimMarkAreas}
+        pids={PIDS_FUEL_TRIM}
+        computedSeries={totalTrimSeriesList}
+        markLines={FUEL_TRIM_MARK_LINES}
+        markAreas={FUEL_TRIM_MARK_AREAS}
         forceExpanded={forceExpanded}
       />
 
@@ -83,11 +115,8 @@ export default function DiagnosticPanels({ frames, available, forceExpanded = fa
       <DiagnosticPanel
         title="O2 Sensor & AFR"
         frames={frames}
-        pids={['kff1214', 'kff124d']}
-        yAxisOverrides={{
-          0: {}, // O2 Voltage left
-          1: {}, // AFR right
-        }}
+        pids={PIDS_O2_AFR}
+        yAxisOverrides={YAXIS_O2_AFR}
         forceExpanded={forceExpanded}
       />
 
@@ -95,10 +124,8 @@ export default function DiagnosticPanels({ frames, available, forceExpanded = fa
       <DiagnosticPanel
         title="Engine Coolant Temp"
         frames={frames}
-        pids={['k5']}
-        yAxisOverrides={{
-          0: { min: 60, max: 95 },
-        }}
+        pids={PIDS_COOLANT}
+        yAxisOverrides={YAXIS_COOLANT}
         forceExpanded={forceExpanded}
       />
 
@@ -107,11 +134,8 @@ export default function DiagnosticPanels({ frames, available, forceExpanded = fa
         <DiagnosticPanel
           title="Boost & MAF"
           frames={frames}
-          pids={['kff1278', 'k10']}
-          yAxisOverrides={{
-            0: {}, // Boost left
-            1: {}, // MAF right
-          }}
+          pids={PIDS_BOOST_MAF}
+          yAxisOverrides={YAXIS_BOOST_MAF}
           forceExpanded={forceExpanded}
         />
       )}
@@ -121,7 +145,7 @@ export default function DiagnosticPanels({ frames, available, forceExpanded = fa
         <DiagnosticPanel
           title="Throttle & Pedal"
           frames={frames}
-          pids={['k11', 'k49']}
+          pids={PIDS_THROTTLE_PEDAL}
           // Both are %, single Y-axis — no overrides needed
           forceExpanded={forceExpanded}
         />
