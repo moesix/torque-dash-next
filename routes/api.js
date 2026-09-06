@@ -50,12 +50,22 @@ const sharedLimiter = makeLimiter({
 // Authorization header cannot be used as a token oracle via response timing —
 // mirrors UploadController.processUpload's gate on the same secret.
 function uploadLimiterSkip(req) {
-    const token = runtime.getUploadApiToken();
-    if (!token) return false;
-    const header = req.headers.authorization || '';
-    const provided = header.startsWith('Bearer ') ? header.slice(7) : '';
-    if (provided.length !== token.length) return false;
-    return crypto.timingSafeEqual(Buffer.from(provided), Buffer.from(token));
+    try {
+        const token = runtime.getUploadApiToken();
+        if (!token) return false;
+        const header = req.headers.authorization || '';
+        const provided = header.startsWith('Bearer ') ? header.slice(7) : '';
+        // Pre-check on BYTE length (Buffer.byteLength), not UTF-16 code units:
+        // a non-ASCII configured token can be equal in .length to a wrong
+        // candidate while differing in bytes, and crypto.timingSafeEqual then
+        // throws ERR_CRYPTO_TIMING_SAFE_EQUAL_LENGTH on the hot /upload path.
+        if (Buffer.byteLength(provided, 'utf8') !== Buffer.byteLength(token, 'utf8')) return false;
+        return crypto.timingSafeEqual(Buffer.from(provided, 'utf8'), Buffer.from(token, 'utf8'));
+    } catch {
+        // A throw here must never escape into the request (it would 500 the
+        // upload hot path); treat any comparison failure as "do not skip".
+        return false;
+    }
 }
 
 const uploadLimiter = makeLimiter({
