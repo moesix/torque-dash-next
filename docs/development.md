@@ -57,7 +57,7 @@ Set these at the backend repo root (`.env` or exported in the shell).
 | --- | --- | --- | --- |
 | `DATABASE_URL` | **yes** | **REQUIRED** — no default | Postgres/TimescaleDB connection string. App **crashes on startup** if missing. Also used by `scripts/migrate.js`. |
 | `CORS_ORIGINS` | prod | `''` (empty) | Comma-separated list of SPA origins allowed to call `/api` **with cookies** (e.g. `https://app.example.com`). An empty value blocks all cross-origin SPA calls (see Known Issues, LOW). |
-| `COOKIE_SECURE` | prod | unset (`lax`) | Set `true` in production to set `sameSite:none; secure` on the session cookie (required for cross-origin SPA auth). Dev (same-origin) keeps `lax` and works without HTTPS. |
+| `COOKIE_SECURE` | prod | unset (`lax`) | Set `true` in production to set `sameSite:none; secure` on the session cookie (required for cross-origin SPA auth). Dev (same-origin) keeps `lax` and works without HTTPS. `SameSite` is derived from this variable in `app.js` — there is no separate `COOKIE_SAMESITE`. **Set `COOKIE_SECURE=true` / terminate TLS at the edge before using BYOK LLM keys** — an unencrypted deployment would ship LLM API keys over plain HTTP. |
 | `NODE_ENV` | no | unset | Optional. `production` skips the **app-internal** `sequelize.sync()` in `app.js`; any other value runs it on boot. This does NOT stop the Docker CMD bootstrap — the image runs an idempotent `sequelize.sync()` before `scripts/migrate.js` on **every** boot regardless of NODE_ENV. Migrations remain the source of truth for TimescaleDB-specific DDL (hypertable, continuous aggregate); base tables are sync-maintained. |
 | `PORT` | no | `3000` | Backend listen port. |
 | `SESSION_KEYS` | **yes** | **REQUIRED** — no default | express-session secrets (array accepted via comma-separated string). App **crashes on startup** if missing or if a placeholder value is used. Generate with `openssl rand -hex 24`. |
@@ -76,8 +76,13 @@ Set these at the backend repo root (`.env` or exported in the shell).
 
 ## 4. Running the Database Migration
 
-The migration script (`scripts/migrate.js`) loads **every `.sql` file** in
-`infra/timescale/` in lexicographic order and executes each statement via `pg`.
+The migration script (`scripts/migrate.js`) loads **every `.sql` file** under
+`infra/timescale/` — it walks the directory **recursively**, so the legacy
+nested `migrations/002_backfill_pid_columns.sql` is discovered and applied
+after the numbered top-level series — in lexicographic order and executes each
+statement via `pg`. A `_migrations` tracker table records each file by
+`(filename, content_hash)`; unchanged files are skipped, edited files are
+re-run.
 
 **In Docker, migrations run automatically.** The backend container's CMD
 (`Dockerfile`) executes `node scripts/migrate.js` at every container start,
@@ -93,17 +98,19 @@ node scripts/migrate.js
 ```
 
 The script:
-1. Reads all `.sql` files from `infra/timescale/`, sorted by filename.
+1. Reads all `.sql` files from `infra/timescale/` (recursively), sorted by
+   relative filename (top-level `0NN_*` files sort before `migrations/*`).
 2. Strips SQL comments and splits each file into individual statements on `;`.
 3. Runs each statement via `pg`; benign "already exists" / "does not exist"
-   errors are tolerated (idempotent re-runs).
+   errors are tolerated (idempotent re-runs). A file is marked applied in the
+   tracker only once all its statements succeed.
 
-**Current migration files** (in execution order):
+**Current migration files** — top-level series `001`–`020` (in execution order):
 
 | File | Purpose |
 | --- | --- |
-| `log_hypertable.sql` | Creates the `Logs` hypertable, promoted columns `engine_rpm` / `vehicle_speed`, unique index on `id`, and the `log_1min` continuous aggregate |
-| `settings.sql` | Seeds the `Settings` singleton row (misc global configuration) |
+| `001_log_hypertable.sql` | Creates the `Logs` hypertable, promoted columns `engine_rpm` / `vehicle_speed`, unique index on `id`, and the `log_1min` continuous aggregate |
+| `002_settings.sql` | Seeds the `Settings` singleton row (misc global configuration) |
 | `003_add_llm_settings.sql` | Adds `llmProvider`, `llmModel`, `llmEndpoint`, `llmApiKey` columns to Settings |
 | `004_add_analyses_table.sql` | Creates the `Analyses` table for cached AI analysis results |
 | `005_add_analysis_reasoning.sql` | Adds `reasoning` column to `Analyses` (stores LLM chain-of-thought) |
@@ -113,6 +120,19 @@ The script:
 | `009_add_vehicles.sql` | Creates the `Vehicles` table and adds `vehicleId` FK to Sessions |
 | `010_add_llm_max_tokens.sql` | Adds `llmMaxTokens` INTEGER column to Settings (NOT NULL, default 16384) |
 | `011_add_retention_settings.sql` | Adds `retentionEnabled` BOOLEAN (NOT NULL, default false) and `retentionDays` INTEGER (NOT NULL, default 365) columns to Settings for the data retention policy |
+| `012_upload_token.sql` | Numbering placeholder — the upload token column already lives in `002_settings.sql` |
+| `013_users_sessions_baseline.sql` | Idempotent `Users`/`Sessions` baseline DDL for sync-less databases (benign skips when sync created them) |
+| `014_add_token_version.sql` | Adds `Users.tokenVersion` INTEGER (default 0) — compared against the session cookie to invalidate stale sessions after a password change |
+| `015_normalize_emails.sql` | One-time lowercase fold of all existing `Users.email` values |
+| `016_denormalize_summaries.sql` | Adds `Sessions.firstTimestamp` / `lastTimestamp` summary columns (Plan 064) |
+| `017_user_admin.sql` | Adds `Users.isAdmin` BOOLEAN (default false); first-user bootstrap rule + lowest-id backfill for upgraded deployments (Plan 099) |
+| `018_drop_forward_urls.sql` | Drops the retired webhook forward-column from Users (Plan 120) |
+| `019_analysis_retention.sql` | Adds nullable `Settings.analysisRetentionDays` INTEGER for the app-side Analyses prune job (Plan 121) |
+| `020_analyses_created_id_unique.sql` | UNIQUE index on `Analyses("createdAt", "id")` — formalizes the keyset-pagination order |
+
+Nested under `migrations/`: `001_add_upload_token.sql` (no-op placeholder) and
+`002_backfill_pid_columns.sql` — the legacy `engine_rpm`/`vehicle_speed`
+backfill for pre-July-2026 data (Torque's `kc`/`kd` keys; see §12).
 
 Run this against a **TimescaleDB-enabled** database (the `timescaledb` extension
 must exist). For large existing datasets, run in a maintenance window
@@ -227,9 +247,9 @@ if (valErr) {
 | `addLocationSchema` | `SessionController.addLocation` | `{ locations: { start, end } }` strings |
 | `vehicleCreateSchema` | `VehicleController.create` | Vehicle fields: `name` required, `make`/`model`/`year`/`engineCc`/`vin` optional |
 | `vehicleUpdateSchema` | `VehicleController.update` | Same as create, all optional, `min(1)` — at least one field required |
-| `telemetryRangeSchema` | (available) | `{ from, to }` ISO dates + `limit` (1–10000, default 5000) + `offset` (≥0) |
+| `telemetryRangeSchema` | `TelemetryController.range` | `{ from, to }` ISO dates + `limit` (1–10000, default 5000) + `offset` (≥0) — wired so a malformed range returns `400`, not a `500` |
 
-**Pure validation helpers** (legacy, used in `UserController.updateSettings`):
+**Pure validation helpers** (used by `UserController.updateSettings`):
 
 | Helper | Validates |
 |--------|-----------|
@@ -238,6 +258,7 @@ if (valErr) {
 | `validateLlmMaxTokens(v)` | Integer 2048–32768 |
 | `validateRetentionEnabled(v)` | Boolean |
 | `validateRetentionDays(v)` | Integer 90–365 |
+| `validateAnalysisRetentionDays(v)` | Integer 90–365, or null/undefined (disabled) — analysis-retention setting (Plan 121) |
 
 ---
 
@@ -267,7 +288,8 @@ npm run build      # runs `tsc --noEmit && vite build` → apps/frontend/dist
 ### Frontend API client (`lib/api.ts`)
 
 The API client at `apps/frontend/src/lib/api.ts` provides typed fetch wrappers
-for all backend endpoints. New functions added in Plans 040–041:
+for all backend endpoints. Vehicle/notes functions date from Plans 040–041;
+analysis/settings wrappers were added with those features:
 
 | Function | Endpoint | Purpose |
 | --- | --- | --- |
@@ -279,10 +301,19 @@ for all backend endpoints. New functions added in Plans 040–041:
 | `setDefaultVehicle(id)` | `PATCH /api/vehicles/:id/default` | Set as default vehicle |
 | `reassignSessionVehicle(sessionId, vehicleId)` | `PATCH /api/sessions/:sessionId/vehicle` | Reassign session to a vehicle |
 | `updateSessionNotes(sessionId, notes)` | `PATCH /api/sessions/notes/:sessionId` | Update session notes |
+| `getSettings()` | `GET /api/settings` | Public settings — **only** `{ disableRegistration, tokenFromEnv }` |
+| `getFullSettings()` | `GET /api/settings/full` | Full settings incl. `isAdmin` (session-derived), retention + `analysisRetentionDays` |
+| `updateSettings(body)` | `PUT /api/settings` | Admin-only settings update (types accept `analysisRetentionDays: number \| null`) |
+| `generateUploadToken()` | `POST /api/settings/upload-token` | Admin-only — generate a one-time-visible upload token |
+| `deleteAnalysis(sessionId, analysisId)` | `DELETE /api/sessions/:id/analyses/:analysisId` | Per-row delete used by the session panel + Settings → Analysis History |
+| `exportSessionCsv(sessionId)` | `GET /api/sessions/:sessionId/export/csv` | HEAD pre-check then native `<a>` download |
 
 All functions use `request()` with `credentials: 'include'` for cookie-based
 auth. Vehicle types (`Vehicle`, `UpdateVehicle`) and the extended `Session`
-type (with `notes`, `vehicleId`, `vehicleName`) are defined in `lib/types.ts`.
+type (with `notes`, `vehicleId`, `vehicleName`) are defined in `lib/types.ts`;
+`PublicSettings` (anonymous two-field shape) and `Settings` (full, with
+optional `isAdmin`) are separate interfaces so callers can't accidentally read
+admin-only fields off the public endpoint.
 
 ---
 
@@ -334,6 +365,11 @@ POST /api/sessions/:id/analyze
   prompt.
 - **`lib/pidRegistry.js`** is imported to resolve PID short keys to human-readable
   names and units in both CSV column headers and the stats display.
+- **Vehicle profile wins** — the vehicle context block is built from the
+  **session's assigned `Vehicle` profile** (`resolveVehicleContext()` reads
+  `session.Vehicle` per-field) with the legacy Settings vehicle fields as the
+  fallback for unset profile fields; sessions without a Vehicle resolve to the
+  legacy fields verbatim, so the pre-profile prompt output is unchanged.
 
 ### 8.4 LLM Token Budget & Provider Status (Plan 043)
 
@@ -428,10 +464,18 @@ on every commit:
 
 ### 9.3 Test Commands
 
+**One-command verification:** run `npm run verify` from the repo root before
+every commit — it executes the backend suite + lint, then the frontend suite +
+TypeScript check:
+
+```sh
+npm run verify   # npm test && npm run lint && (cd apps/frontend && npm test && npx tsc --noEmit)
+```
+
 **Backend** (Node built-in test runner):
 ```sh
-npm test              # runs: node --test (discovers test/*.test.js)
-npm run test:coverage # runs: c8 node --test (coverage via c8)
+npm test              # node --test 'test/*.test.js' + scripts/checkMirrors.js + scripts/checkTestIntegrity.js
+npm run test:coverage # runs: c8 node --test + the same check scripts
 ```
 
 **Frontend** (Vitest):
@@ -441,6 +485,13 @@ npm test         # runs: vitest run
 npm run test:watch  # runs: vitest (watch mode)
 ```
 
+The frontend test stack is **Vitest 5 + jsdom + Testing Library**
+(`@testing-library/react`, `@testing-library/user-event`). Component tests that
+need a DOM (chart/render tests, the print-flow regression) opt in per file with
+`// @vitest-environment jsdom`; pure-logic tests keep the default node
+environment. Vitest 5 also lifted the peer-range conflict that previously
+forced `--legacy-peer-deps` in CI.
+
 ### 9.4 CI Pipeline
 
 A **GitHub Actions** workflow (`.github/workflows/ci.yml`) runs on every push
@@ -448,6 +499,11 @@ or pull request to the `development` branch:
 
 - **Backend checks:** `npm ci` → `npm test` → `npm run test:coverage` → `npm run lint`.
 - **Frontend checks:** `npm ci` → `npm run lint` (placeholder) → `npm test` (vitest) → `npx tsc --noEmit` (typecheck) → `npm run build`.
+
+CI installs with plain `npm ci` — **no `--legacy-peer-deps`** (the Vitest 5
+upgrade removed the need). `CLAUDE.md` / `AGENTS.md` are **not tracked** (they
+are gitignored, local-only instruction files) and must not be referenced from
+CI or docs as canonical.
 
 The frontend currently has **no lint coverage**: `typescript-eslint` cannot parse
 TypeScript ≥7 (its peer range tops out below 6.1 — tracked at
@@ -529,13 +585,17 @@ blockers are resolved and re-reviewed as PASS:
 
 ### Medium priority
 
-- **SSRF guard has a DNS-rebinding TOCTOU.** `lib/ssrfGuard.isSafeUrl` resolves
-  the hostname and validates the IP, but `UploadController` then calls
-  `fetch(url)` with the **original hostname**, which re-resolves at connect time
-  (attacker can swap the DNS record to an internal IP between check and fetch).
-  **Partially addressed:** the guard now validates against a resolved IP
-  snapshot, reducing the window, but a full fix (pin the resolved IP in the
-  request) is still pending.
+- **SSRF guard has a DNS-rebinding TOCTOU (BYOK custom-LLM path).**
+  `lib/ssrfGuard.isSafeUrl` resolves the hostname and validates the IP, but
+  `lib/llmProviders.js` then calls `fetch(url)` with the **original hostname**
+  (via `safeFetch`, which re-validates per redirect hop but not per resolve),
+  which re-resolves at connect time (attacker can swap the DNS record to an
+  internal IP between check and fetch). The upload webhook fan-out that this
+  guard originally protected was **retired (Plan 120)**; the remaining consumer
+  is the admin-configured BYOK LLM endpoint, where the threat model is the
+  operator's own DNS. **Partially addressed:** the guard validates against a
+  resolved IP snapshot, reducing the window, but a full fix (pin the resolved
+  IP in the request) is still pending.
   **Fix:** resolve once, validate, then connect to the **validated IP** (e.g.
   pass an `URL` with the resolved address, or pin the resolved IP in the
   request).
@@ -587,19 +647,31 @@ blockers are resolved and re-reviewed as PASS:
 - **Registration can be disabled.** Two layers: the env var `DISABLE_REGISTRATION`
   (`'true'`) is a hard kill-switch, and the runtime `Settings` singleton row
   (`disableRegistration` boolean, created by `infra/timescale/settings.sql`) is
-  togglable by any logged-in user via `GET/PUT /api/settings`. `GET /api/settings`
-  ORs in the env value so the SPA hides the signup form correctly when the env
-  switch is active. `UserController.register` enforces both and returns `403`
-  JSON. The SPA hides the signup form on `/login` and `/register` and a new
-  `/settings` page exposes the toggle. **Operator model:** the app is
-  single-operator, so ANY authenticated account may flip the toggle (there is no
-  RBAC). Documented as intended, not a bug.
-- **Upload API Token UI.** The `/settings` page additionally lets users generate,
-  view (one-time), copy, and clear the upload Bearer token. The token is stored
-  in the `Settings` DB row; when the `UPLOAD_API_TOKEN` env var is set, the UI
-  reports the token as env-managed and disables the generate/clear buttons.
-  `GET /api/settings` returns `hasUploadApiToken` / `tokenFromEnv` booleans, and
-  `POST /api/settings/upload-token` generates a new random hex token.
+  togglable by the **admin** via `PUT /api/settings` (Plan 099 — see
+  "Admin model & analysis retention" below). `GET /api/settings` ORs in the env
+  value so the SPA hides the signup form correctly when the env switch is
+  active. `UserController.register` enforces both and returns `403` JSON. The
+  SPA hides the signup form on `/login` and `/register`; non-admin users of the
+  `/settings` page see "Server settings are managed by the administrator." and
+  only the per-user cards (Analysis History, Vehicles).
+- **Upload API Token UI.** The `/settings` page additionally lets the **admin**
+  generate, view (one-time), copy, and clear the upload Bearer token. The token
+  is stored in the `Settings` DB row; when the `UPLOAD_API_TOKEN` env var is
+  set, the UI reports the token as env-managed and disables the
+  generate/clear buttons. `GET /api/settings` returns the public
+  `{ disableRegistration, tokenFromEnv }` shape (plus `isAdmin` when
+  authenticated); `GET /api/settings/full` exposes `hasUploadApiToken` /
+  `tokenFromEnv` to the settings UI, and `POST /api/settings/upload-token`
+  (admin-only) generates a new random hex token.
+- **Admin model & analysis retention (Plans 099 + 121).** The first registered
+  user is promoted to `isAdmin` at register time (migration 017 also backfills
+  the lowest-id user on upgraded deployments; `scripts/promote-admin.js
+  [--demote] <email>` recovers a mis-promoted account). `PUT /api/settings` and
+  `POST /api/settings/upload-token` return `403` for non-admins. Settings gains
+  `analysisRetentionDays` (Off/90/120/180/365, migration 019); the app-side
+  pruner in `services/analysesRetention.js` sweeps stale `Analysis` rows across
+  all users every 6 h. Covered by `test/adminGate.test.js`,
+  `test/analysesRetention.test.js`, `test/promoteAdmin.test.js`.
 - **PID Decode + Multi-series Overlay Chart.** The ReplayDashboard now features
   a single `OverlayChart.tsx` (replaces the old dual `TimeSeriesChart.tsx`) that
   renders all selected telemetry sources on a shared time axis with
@@ -625,14 +697,17 @@ blockers are resolved and re-reviewed as PASS:
   React replay dashboard (overlay chart + imperative Leaflet marker), CSV export,
   session management, BYOK AI analysis.
 - **Auth contract resolved and re-reviewed PASS.**
-- **Verification:** frontend via `npm run build` (`tsc --noEmit && vite build`),
-  backend via `node -c` syntax checks.
+- **Verification:** `npm run verify` from the repo root (backend tests + lint,
+  then frontend vitest + `tsc --noEmit`); `npm run build` for the frontend
+  bundle. Backend tests run under Node's built-in test runner
+  (`test/*.test.js`) plus `scripts/checkMirrors.js` / `scripts/checkTestIntegrity.js`
+  checks.
 - **Additional features implemented:**
   - Env-tunable upload rate limit with token-based burst exemption (a matching Bearer token bypasses the limiter).
   - Runtime-toggleable registration (`Settings` singleton +
-    `DISABLE_REGISTRATION` env kill-switch + SPA `/settings` toggle).
-  - **Upload API Token UI** on the `/settings` page (generate, view once, copy,
-    clear; env override respected).
+    `DISABLE_REGISTRATION` env kill-switch + admin-only SPA `/settings` toggle).
+  - **Upload API Token UI** on the `/settings` page (admin-only generate, view
+    once, copy, clear; env override respected).
   - **PID Decode + Multi-series Overlay Chart**: `pidDecode.ts` auto-discovers
     all OBD-II PIDs from the `values` JSONB; `OverlayChart.tsx` renders multiple
     series with per-unit-group y-axes; `PidTogglePanel` provides search,
@@ -664,8 +739,11 @@ blockers are resolved and re-reviewed as PASS:
 - **Configurable Data Retention Policy (Plan 046)** — `retentionEnabled` (BOOLEAN, default false — opt-in) and `retentionDays` (INTEGER, default 365, range 90–365) on the Settings singleton (migration `011_add_retention_settings.sql`). `PUT /api/settings` validates both fields (400 on non-boolean / non-integer / out-of-range) and applies a TimescaleDB `add_retention_policy`/`remove_retention_policy` on the `Logs` hypertable using a remove-then-add idempotent pattern; the response includes `retentionPolicyApplied`. Frontend Settings page gains a "Data Retention" card (enable Switch + 90/120/180/365-day select, local error state, rollback on save failure). Validation mirrored in `test/settingsValidation.test.js` (10 new cases; suite now **61 tests**).
 - **Bleeding-edge dependency upgrade (Plan 047)** — backend (root `package.json`): `joi` 18.2.3, `express-rate-limit` 8.6.2, `pg` 8.22.0, `cors` 2.8.6, `express-session` 1.19.0, `nodemon` 3.1.14, `globals` 17.9.0, `lint-staged` 17.3.0. Frontend: `react`/`react-dom` 19.2.8, `react-router` **8.3.0** (exact pin — replaces `react-router-dom`, resolves GHSA-qwww-vcr4-c8h2), `vite` 8.2.0, `@vitejs/plugin-react` 5.2.0, `typescript` 7.0.2, `tailwindcss` 4.3.3 + `@tailwindcss/vite` 4.3.3, `zustand` 5.0.14, `@tanstack/react-query` 5.101.4, `react-markdown` 10.1.0, `react-leaflet` 5.0.0, `@types/react` 19.2.18, `@types/react-dom` 19.2.4. Infra: both Dockerfiles on `node:22-bookworm-slim`, CI workflows on Node 22, `timescale/timescaledb:2.29.1-pg16` in compose.
 - **Tremor replaced with native Tailwind (Plan 049)** — the `@tremor/react` dependency was removed; every Tremor component was reimplemented with plain Tailwind utilities, including a new accessible `Toggle` switch (`components/ui/Toggle.tsx`, sr-only label). `index.css` dropped the Tremor safelist directives and typography tokens. Bundle shrunk ~65 kB; all chunks now <400 kB (largest ~380 kB echarts) via Rolldown `codeSplitting` groups in `vite.config.ts`. See `docs/architecture.md` §3.8.
-- **Remaining open issues:** SSRF TOCTOU (partially addressed — see section 10 above).
-- **Cross-vehicle analysis history** — `GET /api/analyses` lists all analyses across sessions (paginated, optional vehicle filter); `GET /api/analyses/export` streams all analyses as a Markdown file; `GET /api/sessions/:sessionId/analyses/:analysisId` returns a single analysis with full response/reasoning.
+- **Remaining open issues:** SSRF TOCTOU on the BYOK custom-LLM path (partially
+  addressed — the guard validates a resolved-IP snapshot; see section 10 above).
+- **Cross-vehicle analysis history** — `GET /api/analyses` lists all analyses across sessions (paginated, optional vehicle filter); `GET /api/analyses/export` streams all analyses as a Markdown file (**keyset-paginated** over `(createdAt, id)`, migration 020, under a dedicated 10/min export limiter — shared with the CSV export); `GET /api/sessions/:sessionId/analyses/:analysisId` returns a single analysis with full response/reasoning. Analyses can be deleted **per row** from the session panel and Settings → Analysis History (`DELETE /api/sessions/:id/analyses/:analysisId`).
+- **Analysis retention (Plan 121)** — admin-set `Settings.analysisRetentionDays` (Off/90/120/180/365, migration 019); the app-side pruner `services/analysesRetention.js` (started from `app.js`, 6 h interval, unref'd) sweeps stale `Analysis` rows across all users in bounded id batches. See `docs/architecture.md` §2.13.
+- **Perf & correctness hardening (Cycle 7 rollup)** — route-level code splitting (echarts/leaflet only load on the session route), SPA `<Link>` navigation replacing full-reload anchors, vendored Leaflet marker icons (no unpkg), centralized `chartColors.ts` + `layout/brand.tsx`, CSV export HEAD short-circuit, password change bumps `tokenVersion` (kills other sessions), Joi-validated telemetry range (`400` not `500`), timing-safe upload-token comparison, and the analyses keyset export. Frontend tests run on **Vitest 5 + jsdom + Testing Library** (per-file `// @vitest-environment jsdom`).
 - **Extracted controller helpers** — `SessionController` now uses `loadOwnedSession()`, `decorateWithSummaries()`, and `aggregateSummaries()` to eliminate duplicate code and the N+1 query pattern.
 - **Joi validation schemas** — `lib/validators.js` centralises input validation with Joi schemas for session operations (rename, notes, cut, filter, copy, join, addLocation) and vehicle CRUD (create/update), plus pure validation helpers for LLM settings.
 - **v2.0.0 branding & PWA** — product name normalized to **TorqueDash-Next** across `index.html`, Login/Register headings, and the AppShell topbar. `apps/frontend/public/` ships `brand/logo.svg` (interim mark; final owner-supplied SVG is a file-replacement swap), `favicon.svg`, PWA icons (`icon-192.png`, `icon-512.png`, `maskable-512.png`), and `manifest.webmanifest` (name TorqueDash-Next, theme `#009999`). `index.html` links favicon + manifest + theme-color, making the SPA installable to the Android home screen **without a service worker**. Login/Register share one `AuthBranding.tsx` left panel (mark, tagline, 5 USP rows) replacing three duplicated inline panels. AppShell + MobileDrawer render a `v{version}` badge (shared `lib/useVersion.ts`, module-level memoized `/api/version` fetch) and a GitHub link (new tab). See `docs/architecture.md` §3.12.
