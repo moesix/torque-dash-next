@@ -9,6 +9,9 @@ pre-built images from GitHub Container Registry (GHCR). No repo clone needed.
 
 - **Docker** 20.10+ and **Docker Compose** v2
 - A server with ports `8080` (frontend) and optionally `5432` (database) available
+- The Express API is reachable only on the internal compose network; the
+  frontend nginx proxies `/api` to it. No host port is published for the
+  backend.
 - `openssl` for generating secure keys
 
 ---
@@ -294,6 +297,8 @@ docker compose down -v
 - **db** — TimescaleDB 2.29 on PostgreSQL 16. Hypertable with compression (7-day
   policy). Data in `pgdata` volume.
 - **backend** — Node.js/Express API. Runs as non-root user (`appuser`).
-  Handles telemetry ingestion, auth, session management.
+  Handles telemetry ingestion, auth, session management. Reachable only on the
+  internal compose network — no host port is published; the frontend nginx
+  proxies `/api` to it.
 - **frontend** — Unprivileged Nginx serving the React SPA. Proxies `/api`
   requests to the backend.

@@ -44,8 +44,11 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER:-torquedash}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-torquedash}
       PORT: "3000"
       TZ: UTC
-    ports:
-      - "3000:3000"
+    # API reachable only on the compose network; the frontend nginx proxies
+    # /api to backend:3000. Not published on the host (rate-limit IP spoofing
+    # via trust proxy — see plans/098).
+    expose:
+      - "3000"
 
   frontend:
     image: ghcr.io/moesix/torque-dash-next-frontend:latest
