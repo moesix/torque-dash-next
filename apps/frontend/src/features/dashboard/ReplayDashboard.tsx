@@ -17,8 +17,9 @@ import React, { useState, useMemo, useCallback, useRef } from 'react';
 import { useParams } from 'react-router';
 import { exportSessionCsv, getVehicles, reassignSessionVehicle } from '@/lib/api';
 import type { AnalysisPanelHandle } from '@/components/ai/AnalysisPanel';
-import type { Vehicle } from '@/lib/types';
+import type { Session, Vehicle } from '@/lib/types';
 import VehicleReassignDialog from '@/components/vehicles/VehicleReassignDialog';
+import { queryClient } from '@/app/queryClient';
 import Skeleton from '@/components/ui/Skeleton';
 import ErrorAlert from '@/components/ui/ErrorAlert';
 import { usePlaybackStore } from '@/app/playbackStore';
@@ -91,6 +92,10 @@ export default function ReplayDashboard() {
   const [showAnalysisConfirm, setShowAnalysisConfirm] = useState(false);
   const [showReassign, setShowReassign] = useState(false);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  // Error surfacing for the vehicle-reassign flow: a failed vehicle-list load
+  // shows inline next to the button; a failed reassignment is rendered inside
+  // the dialog (which stays open) and mirrored here for the parent.
+  const [reassignError, setReassignError] = useState<string | null>(null);
   // View mode: 'dash' is the default landing view; 'map' shows the
   // GPS track near-fullscreen with the playback transport beneath it.
   const [viewMode, setViewMode] = useState<'dash' | 'map'>('dash');
@@ -407,9 +412,17 @@ export default function ReplayDashboard() {
             <button
               type="button"
               onClick={async () => {
-                const v = await getVehicles();
-                setVehicles(v ?? []);
-                setShowReassign(true);
+                if (!id) return;
+                setReassignError(null);
+                try {
+                  const v = await getVehicles();
+                  setVehicles(v ?? []);
+                  setShowReassign(true);
+                } catch (err) {
+                  setReassignError(
+                    err instanceof Error ? err.message : 'Failed to load vehicles.',
+                  );
+                }
               }}
               className="whitespace-nowrap rounded p-2.5 min-w-[44px] min-h-[44px] text-xs font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
               title="Reassign to a different vehicle"
@@ -418,6 +431,9 @@ export default function ReplayDashboard() {
             </button>
             {exportError && (
               <span className="text-xs text-red-500">{exportError}</span>
+            )}
+            {!showReassign && reassignError && (
+              <span className="text-xs text-red-500">{reassignError}</span>
             )}
           </div>
         </div>
@@ -544,10 +560,33 @@ export default function ReplayDashboard() {
           currentVehicleId={session.vehicleId}
           onReassign={async (vehicleId) => {
             if (!id) return;
-            await reassignSessionVehicle(id, vehicleId);
+            try {
+              await reassignSessionVehicle(id, vehicleId);
+              // Patch the session query cache BEFORE the dialog closes so the
+              // banner's vehicle chip reflects the assignment immediately.
+              // Query key mirrors useSessionTelemetry (['session', id]).
+              queryClient.setQueryData<Session | undefined>(['session', id], (old) => {
+                if (!old) return old;
+                const assigned = vehicles.find((v) => v.id === vehicleId);
+                return {
+                  ...old,
+                  vehicleId,
+                  vehicleName: assigned ? assigned.name : null,
+                };
+              });
+            } catch (err) {
+              // Rethrow so the dialog renders the error and stays open — it
+              // awaits onReassign and only closes after this resolves.
+              throw err instanceof Error
+                ? err
+                : new Error('Failed to reassign vehicle.');
+            }
+          }}
+          onError={setReassignError}
+          onClose={() => {
+            setReassignError(null);
             setShowReassign(false);
           }}
-          onClose={() => setShowReassign(false)}
         />
       )}
 
