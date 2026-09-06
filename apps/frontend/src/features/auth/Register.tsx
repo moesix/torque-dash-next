@@ -4,6 +4,7 @@ import { useNavigate, Navigate, Link } from 'react-router';
 import { register, getSettings } from '@/lib/api';
 import { useAuth } from './useAuth';
 import AuthBranding from './AuthBranding';
+import { MobileLogo } from '@/components/layout/brand';
 
 export default function Register() {
   const [email, setEmail] = useState('');
@@ -46,15 +47,7 @@ export default function Register() {
         <div className="flex flex-1 items-center justify-center p-4 md:p-6">
           <div className="w-full max-w-sm">
             {/* Mobile-only logo */}
-            <div className="mb-8 text-center lg:hidden">
-              <img src="/brand/logo.svg" alt="" loading="eager" className="mx-auto mb-4 h-12 w-12 rounded-xl" />
-              <h1
-                className="text-2xl font-bold text-gray-900 dark:text-white"
-                style={{ fontFamily: 'var(--font-mono)' }}
-              >
-                TorqueDash-Next
-              </h1>
-            </div>
+            <MobileLogo />
 
             <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
               Registration closed
@@ -86,15 +79,7 @@ export default function Register() {
       <div className="flex flex-1 items-center justify-center p-4 md:p-6">
         <div className="w-full max-w-sm">
           {/* Mobile-only logo */}
-          <div className="mb-8 text-center lg:hidden">
-            <img src="/brand/logo.svg" alt="" loading="eager" className="mx-auto mb-4 h-12 w-12 rounded-xl" />
-            <h1
-              className="text-2xl font-bold text-gray-900 dark:text-white"
-              style={{ fontFamily: 'var(--font-mono)' }}
-            >
-              TorqueDash-Next
-            </h1>
-          </div>
+          <MobileLogo />
 
           <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
             Create account
