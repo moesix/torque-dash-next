@@ -17,9 +17,12 @@ class AnalysisController {
     // there — every error reaching the catch would throw ReferenceError.
     let clientDisconnected = false;
     try {
-      // 1. Ownership check
+      // 1. Ownership check — eager-loads the assigned Vehicle profile so the AI
+      // prompt can describe the right car (plans/118); engineCc is not among the
+      // restricted attributes because the prompt's engine guardrail needs it.
       const session = await Session.findOne({
         where: { id: req.params.sessionId, userId: req.user.id },
+        include: [{ model: Vehicle, as: 'Vehicle' }],
       });
       if (!session) return res.status(404).json({ error: 'Session not found' });
 

@@ -1,6 +1,6 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert');
-const { computeSummaryStats, resampleTelemetry, buildTelemetryCsv } = require('../lib/llmPrompt');
+const { computeSummaryStats, resampleTelemetry, buildTelemetryCsv, buildAnalysisPrompt, buildContext } = require('../lib/llmPrompt');
 
 describe('computeSummaryStats', () => {
   it('computes min/max/mean/median for numeric fields', () => {
@@ -181,5 +181,109 @@ describe('buildTelemetryCsv chronological ordering', () => {
         `Time column must be monotonically non-decreasing; row ${i} (${times[i]}) sorts before row ${i - 1} (${times[i - 1]})`
       );
     }
+  });
+});
+
+describe('buildAnalysisPrompt vehicle context (plans/118)', () => {
+  // The controller passes { ...session.toJSON(), duration } where toJSON()
+  // serializes the eager-loaded Vehicle profile under the `Vehicle` key
+  // (Session.belongsTo(Vehicle, { as: 'Vehicle' })). The session's profile
+  // fields must win over the legacy Settings vehicle fields per-field, with
+  // legacy values as the fallback when the profile lacks a field.
+  const emptySample = [];
+  const noPids = [];
+
+  function buildPrompt(session, settings) {
+    return buildAnalysisPrompt(session, settings, emptySample, noPids, null);
+  }
+
+  it('prefers the session Vehicle profile over legacy settings fields', () => {
+    const session = {
+      name: 'Morning Commute',
+      Vehicle: { make: 'Mazda', model: 'CX-5', year: 2021, engineCc: 2500 },
+    };
+    const settings = {
+      vehicleYear: 2010,
+      vehicleMake: 'Ford',
+      vehicleModel: 'Fiesta',
+      engineCc: 1600,
+    };
+    const prompt = buildPrompt(session, settings);
+    assert.ok(prompt.includes('Vehicle: 2021 Mazda CX-5'));
+    assert.ok(prompt.includes('Engine: 2500cc'));
+    assert.ok(!prompt.includes('Ford'), 'legacy vehicleMake must not leak in');
+    assert.ok(!prompt.includes('Fiesta'), 'legacy vehicleModel must not leak in');
+    assert.ok(!prompt.includes('2010'), 'legacy vehicleYear must not leak in');
+    assert.ok(!prompt.includes('1600cc'), 'legacy engineCc must not leak in');
+  });
+
+  it('falls back to legacy settings fields when the session has no Vehicle (today behavior)', () => {
+    const session = { name: 'Morning Commute' };
+    const settings = {
+      vehicleYear: 2015,
+      vehicleMake: 'Honda',
+      vehicleModel: 'Civic',
+      engineCc: 1800,
+    };
+    const prompt = buildPrompt(session, settings);
+    // Pin the exact rendered lines: byte-identical to the pre-profile output.
+    assert.ok(prompt.includes('Vehicle: 2015 Honda Civic'));
+    assert.ok(prompt.includes('Engine: 1800cc'));
+    assert.ok(prompt.includes('a 1800cc engine'));
+  });
+
+  it('falls back per-field when the Vehicle profile leaves a field unset', () => {
+    // The real serialized shape carries engineCc: null for an unset profile
+    // field (nullable INTEGER, default null) — it must fall back to legacy.
+    const session = {
+      name: 'Morning Commute',
+      Vehicle: { make: 'Toyota', model: 'Camry', year: 2018, engineCc: null },
+    };
+    const settings = {
+      vehicleYear: 1998,
+      vehicleMake: 'Ford',
+      vehicleModel: 'Fiesta',
+      engineCc: 2400,
+    };
+    const prompt = buildPrompt(session, settings);
+    assert.ok(prompt.includes('Vehicle: 2018 Toyota Camry'));
+    assert.ok(!prompt.includes('Ford'), 'profile make must beat legacy vehicleMake');
+    assert.ok(prompt.includes('Engine: 2400cc'), 'engineCc must fall back to settings.engineCc');
+    assert.ok(prompt.includes('a 2400cc engine'));
+  });
+
+  it('uses the resolved engineCc in the Idle RPM/MAP guardrail line', () => {
+    const session = {
+      name: 'Morning Commute',
+      Vehicle: { make: 'BMW', model: '328i', year: 2016, engineCc: 2000 },
+    };
+    const settings = {
+      vehicleYear: 2010,
+      vehicleMake: 'Ford',
+      vehicleModel: 'Fiesta',
+      engineCc: 1600,
+    };
+    const prompt = buildPrompt(session, settings);
+    assert.ok(
+      prompt.includes('For a 2000cc engine under air conditioning'),
+      'guardrail must use the session profile engineCc'
+    );
+    assert.ok(
+      !prompt.includes('For a 1600cc engine'),
+      'guardrail must not use the legacy settings.engineCc'
+    );
+  });
+
+  it('resolves the same vehicle fields from buildContext directly', () => {
+    const session = {
+      name: 'Morning Commute',
+      Vehicle: { make: 'Subaru', model: 'Outback', year: 2019, engineCc: 2500 },
+    };
+    const settings = { vehicleMake: 'Ford', engineCc: 9999 };
+    const ctx = buildContext(session, settings, emptySample, noPids);
+    assert.ok(ctx.includes('Vehicle: 2019 Subaru Outback'));
+    assert.ok(ctx.includes('Engine: 2500cc'));
+    assert.ok(!ctx.includes('Ford'));
+    assert.ok(!ctx.includes('9999'));
   });
 });
