@@ -9,6 +9,7 @@ const { test, describe } = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 // Grab the REAL userCache module BEFORE we inject mocks into require.cache,
 // so the del() suite below still exercises production code.
@@ -388,5 +389,108 @@ describe('Upload hardening – userCache.del()', () => {
         const cache = new UserCache({ ttl: 10000, max: 10 });
         cache.del('nonexistent');
         assert.strictEqual(cache.get('nonexistent'), undefined);
+    });
+});
+
+// ── Bearer-token gate (UPLOAD_API_TOKEN configured) ─────────────────
+// The gate (UploadController.js:36-51) is only active when the runtime holds a
+// configured token. stubHappyPath() turns the gate OFF (token = null); these
+// cases turn it back ON through the mockRuntime.token seam and drive the
+// processUpload entry point so the real header checks + crypto comparison run.
+// A spy on crypto.timingSafeEqual proves the length pre-check short-circuits
+// before the (expensive, panic-prone) constant-time compare runs.
+
+describe('Upload hardening – bearer-token gate', () => {
+    const CONFIGURED_TOKEN = 'aabbccdd11223344'; // 16 chars
+
+    function makeAuthReq(query, authorization) {
+        const req = makeReq(query);
+        if (authorization !== undefined) req.headers.authorization = authorization;
+        return req;
+    }
+
+    // Count timingSafeEqual invocations; restore the real fn afterwards so
+    // other suites in this file are unaffected.
+    function spyTimingSafeEqual() {
+        const original = crypto.timingSafeEqual;
+        const spyCalls = { count: 0 };
+        crypto.timingSafeEqual = (a, b) => {
+            spyCalls.count += 1;
+            return original(a, b);
+        };
+        return {
+            spyCalls,
+            restore() { crypto.timingSafeEqual = original; },
+        };
+    }
+
+    const VALID_QUERY = { eml: 'user@x.com', session: 'abc-123', v: 'Car' };
+
+    test('configured token + missing Authorization header returns 401 before any DB access', async () => {
+        stubHappyPath();
+        mockRuntime.token = CONFIGURED_TOKEN;
+        const { res, calls } = makeRes();
+        await UploadController.processUpload(makeAuthReq(VALID_QUERY), res);
+        assert.strictEqual(calls.statusCode, 401);
+        assert.deepStrictEqual(calls.body, {
+            error: 'Authorization header required',
+            hint: 'Set Authorization: Bearer <your-token> in Torque Pro',
+        });
+        assert.strictEqual(findOneCalls.length, 0, 'gate must reject before resolveUser hits the DB');
+    });
+
+    test('configured token + non-Bearer header returns 401', async () => {
+        stubHappyPath();
+        mockRuntime.token = CONFIGURED_TOKEN;
+        const { res, calls } = makeRes();
+        await UploadController.processUpload(makeAuthReq(VALID_QUERY, `Token ${CONFIGURED_TOKEN}`), res);
+        assert.strictEqual(calls.statusCode, 401);
+        assert.strictEqual(findOneCalls.length, 0);
+    });
+
+    test('configured token + wrong token of equal length returns 401 via timingSafeEqual', async () => {
+        stubHappyPath();
+        mockRuntime.token = CONFIGURED_TOKEN;
+        const spy = spyTimingSafeEqual();
+        try {
+            const wrong = 'X'.repeat(CONFIGURED_TOKEN.length);
+            const { res, calls } = makeRes();
+            await UploadController.processUpload(makeAuthReq(VALID_QUERY, `Bearer ${wrong}`), res);
+            assert.strictEqual(calls.statusCode, 401);
+            assert.deepStrictEqual(calls.body, { error: 'Invalid upload token' });
+            assert.strictEqual(spy.spyCalls.count, 1, 'equal-length wrong token must reach timingSafeEqual and fail');
+            assert.strictEqual(findOneCalls.length, 0);
+        } finally {
+            spy.restore();
+        }
+    });
+
+    test('configured token + correct token passes the gate and ingests', async () => {
+        stubHappyPath();
+        mockRuntime.token = CONFIGURED_TOKEN;
+        const { res, calls } = makeRes();
+        await UploadController.processUpload(makeAuthReq(VALID_QUERY, `Bearer ${CONFIGURED_TOKEN}`), res);
+        assert.strictEqual(calls.statusCode, 200);
+        assert.strictEqual(calls.body, 'OK!');
+        assert.strictEqual(findOneCalls.length, 1, 'resolveUser runs once the gate passes');
+        assert.strictEqual(ingestCalls.length, 1, 'ingest is reached after authentication');
+    });
+
+    test('configured token + length-mismatched header returns 401 WITHOUT calling timingSafeEqual', async () => {
+        stubHappyPath();
+        mockRuntime.token = CONFIGURED_TOKEN;
+        const spy = spyTimingSafeEqual();
+        try {
+            const { res, calls } = makeRes();
+            // Short garbage: the length pre-check must reject before the
+            // constant-time compare is ever invoked.
+            await UploadController.processUpload(makeAuthReq(VALID_QUERY, 'Bearer x'), res);
+            assert.strictEqual(calls.statusCode, 401);
+            assert.deepStrictEqual(calls.body, { error: 'Invalid upload token' });
+            assert.strictEqual(spy.spyCalls.count, 0, 'length mismatch must short-circuit timingSafeEqual');
+            assert.strictEqual(findOneCalls.length, 0);
+        } finally {
+            spy.restore();
+        }
     });
 });
