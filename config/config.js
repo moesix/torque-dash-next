@@ -75,7 +75,9 @@ let config = {
         // cost-bound operations — each request calls an external LLM API.
         ai: {
             windowMs: Number(process.env.AI_RATE_LIMIT_WINDOW_MS) || 60000,
-            max: Number(process.env.AI_RATE_LIMIT_MAX) || 5
+            // Default matches .env.example's shipped suggestion (10). Each hit
+            // calls an external LLM API, so this bounds worst-case cost.
+            max: Number(process.env.AI_RATE_LIMIT_MAX) || 10
         }
     }
 };

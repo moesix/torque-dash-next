@@ -180,9 +180,8 @@ After creating all user accounts, disable public registration via the Settings U
 | `POSTGRES_PASSWORD` | **REQUIRED** | Database password for Docker deployments. Generate with `openssl rand -base64 24`. |
 | `SESSION_KEYS` | **REQUIRED** | Comma-separated express-session secrets. App crashes on startup if missing. |
 | `PORT` | `3000` | Backend HTTP port. |
-| `NODE_ENV` | _(unset)_ | Set to `production` to skip `sequelize.sync()` (use migrations instead). |
-| `COOKIE_SECURE` | `false` | `true` to set `Secure` on session cookies (requires HTTPS). |
-| `COOKIE_SAMESITE` | `lax` | `SameSite` policy for session cookies. |
+| `NODE_ENV` | _(unset)_ | Optional. `production` skips the app-internal `sequelize.sync()` in `app.js`. The Docker image CMD still runs an idempotent `sequelize.sync()` bootstrap before `scripts/migrate.js` on every boot, regardless of NODE_ENV; migrations remain the source of truth for TimescaleDB DDL. |
+| `COOKIE_SECURE` | `false` | `true` to set `Secure` on session cookies (requires HTTPS). `SameSite` is derived from it in `app.js` (`none` when true, else `lax`) — there is no separate `COOKIE_SAMESITE` variable. |
 | `CORS_ORIGINS` | _(empty)_ | Comma-separated allowed origins for cross-origin API access. Also serves as the CSRF trust list. |
 | `PUBLIC_ORIGIN` | _(unset)_ | Overrides the expected CSRF origin. Set when nginx terminates HTTPS but forwards HTTP to the backend. |
 | `UPLOAD_API_TOKEN` | **REQUIRED for production** | Uploads require `Authorization: Bearer <token>`; without a matching header they return 401. Set here — the env value wins and locks the Settings UI — or generate from the Settings page after first login. |
@@ -194,6 +193,8 @@ After creating all user accounts, disable public registration via the Settings U
 | `WRITE_RATE_LIMIT_WINDOW_MS` | `60000` | Write rate-limit window in milliseconds. |
 | `READ_RATE_LIMIT_MAX` | `600` | Max requests to all other `/api` routes per window per IP. |
 | `READ_RATE_LIMIT_WINDOW_MS` | `60000` | Global `/api` rate-limit window in milliseconds. |
+| `AI_RATE_LIMIT_MAX` | `10` | Max AI analysis starts per window per IP (each hit calls an external LLM API). |
+| `AI_RATE_LIMIT_WINDOW_MS` | `60000` | AI analysis rate-limit window in milliseconds. |
 | `DISABLE_REGISTRATION` | _(unset)_ | If `true`, public sign-up is disabled. |
 | `LLM_ENCRYPTION_KEY` | _(unset)_ | 64-char hex key for AES-256-GCM encryption of LLM API keys at rest. Generate with `openssl rand -hex 32`. Required for AI analysis feature. |
 
