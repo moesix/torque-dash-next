@@ -401,6 +401,14 @@ class SessionController {
             const session = await loadOwnedSession(req.params.sessionId, req.user.id);
             if (!session) return res.status(404).json({ error: 'Session not found' });
 
+            // 1a. HEAD short-circuit. The client fires HEAD /export/csv as a cheap
+            // reachability/auth pre-check before the real download, and Express
+            // dispatches HEAD to this GET handler. Without this, HEAD runs the full
+            // export (PID discovery + paginated scan) with the body discarded. The
+            // ownership check above already proved session existence + user match, so
+            // answering 200 with no body still proves authorization for the client.
+            if (req.method === 'HEAD') return res.end();
+
             // 2. Discover all k* PID keys via jsonb_object_keys SQL
             const pidKeys = await discoverPidKeys(session.id, sequelize);
 
