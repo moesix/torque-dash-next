@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Outlet, useLocation, useNavigate } from 'react-router';
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router';
 import { logout } from '@/lib/api';
 import MobileDrawer from '@/components/layout/MobileDrawer';
 import { toggleTheme, getTheme } from '@/lib/theme';
@@ -45,18 +45,32 @@ export default function AppShell() {
           </span>
         </div>
         <nav className="flex flex-col gap-1 text-sm text-gray-600 dark:text-[var(--text-secondary)]">
-          <a
-            href="/"
-            className="rounded-md px-3 py-2 font-medium text-gray-900 hover:bg-gray-100 dark:text-[var(--text-primary)] dark:hover:bg-[var(--bg-surface)]"
+          <NavLink
+            to="/"
+            end
+            className={({ isActive }) =>
+              `rounded-md px-3 py-2 font-medium hover:bg-gray-100 dark:hover:bg-[var(--bg-surface)] ${
+                isActive
+                  ? 'text-gray-900 dark:text-[var(--text-primary)]'
+                  : 'text-gray-600 dark:text-[var(--text-secondary)]'
+              }`
+            }
           >
             Sessions
-          </a>
-          <a
-            href="/settings"
-            className="rounded-md px-3 py-2 font-medium text-gray-600 hover:bg-gray-100 dark:text-[var(--text-secondary)] dark:hover:bg-[var(--bg-surface)]"
+          </NavLink>
+          <NavLink
+            to="/settings"
+            end
+            className={({ isActive }) =>
+              `rounded-md px-3 py-2 font-medium hover:bg-gray-100 dark:hover:bg-[var(--bg-surface)] ${
+                isActive
+                  ? 'text-gray-900 dark:text-[var(--text-primary)]'
+                  : 'text-gray-600 dark:text-[var(--text-secondary)]'
+              }`
+            }
           >
             Settings
-          </a>
+          </NavLink>
           {version && (
             <span className="px-3 py-1 text-xs text-gray-400 dark:text-[var(--text-muted)]">
               v{version}

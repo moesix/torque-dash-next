@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import type { FormEvent } from 'react';
-import { useNavigate, Navigate } from 'react-router';
+import { useNavigate, Navigate, Link } from 'react-router';
 import { login, getSettings, getVersion } from '@/lib/api';
 import { useAuth } from './useAuth';
 import AuthBranding from './AuthBranding';
@@ -127,12 +127,12 @@ export default function Login() {
             ) : (
               <>
                 No account?{' '}
-                <a
+                <Link
+                  to="/register"
                   className="font-medium text-teal-600 hover:text-teal-500 dark:text-teal-400"
-                  href="/register"
                 >
                   Register
-                </a>
+                </Link>
               </>
             )}
           </p>

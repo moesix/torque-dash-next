@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import type { FormEvent } from 'react';
-import { useNavigate, Navigate } from 'react-router';
+import { useNavigate, Navigate, Link } from 'react-router';
 import { register, getSettings } from '@/lib/api';
 import { useAuth } from './useAuth';
 import AuthBranding from './AuthBranding';
@@ -64,12 +64,12 @@ export default function Register() {
             </p>
             <p className="mt-6 text-center text-sm text-gray-500 dark:text-gray-400">
               Already have an account?{' '}
-              <a
+              <Link
+                to="/login"
                 className="font-medium text-teal-600 hover:text-teal-500 dark:text-teal-400"
-                href="/login"
               >
                 Sign in
-              </a>
+              </Link>
             </p>
           </div>
         </div>
@@ -158,12 +158,12 @@ export default function Register() {
 
           <p className="mt-6 text-center text-sm text-gray-500 dark:text-gray-400">
             Already have an account?{' '}
-              <a
-                className="font-medium text-teal-600 hover:text-teal-500 dark:text-teal-400"
-                href="/login"
-              >
-                Sign in
-              </a>
+            <Link
+              to="/login"
+              className="font-medium text-teal-600 hover:text-teal-500 dark:text-teal-400"
+            >
+              Sign in
+            </Link>
           </p>
         </div>
       </div>

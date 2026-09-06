@@ -4,6 +4,7 @@ import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import { analyzeSession, listAnalyses, getAnalysis, getFullSettings } from '@/lib/api';
+import { Link } from 'react-router';
 import StreamRenderer from './StreamRenderer';
 import type { Analysis, AnalysisPreview, Settings } from '@/lib/types';
 import { stripMarkdown } from '@/lib/utils';
@@ -145,9 +146,9 @@ export default function AnalysisPanel({ sessionId, ref, printMode = false }: Pro
           <h3 className="text-lg font-semibold leading-relaxed">AI Analysis</h3>
           <p className="mt-2 text-sm leading-relaxed text-gray-500 dark:text-[var(--text-muted)]">
             Configure an AI provider in{' '}
-            <a href="/settings" className="text-indigo-600 hover:underline dark:text-indigo-400">
+            <Link to="/settings" className="text-indigo-600 hover:underline dark:text-indigo-400">
               Settings
-            </a>{' '}
+            </Link>{' '}
             to enable session analysis.
           </p>
         </div>
