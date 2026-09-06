@@ -3,7 +3,7 @@ import type { Ref } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
-import { analyzeSession, listAnalyses, getAnalysis, getFullSettings } from '@/lib/api';
+import { analyzeSession, listAnalyses, deleteAnalysis, getAnalysis, getFullSettings } from '@/lib/api';
 import { Link } from 'react-router';
 import StreamRenderer from './StreamRenderer';
 import type { Analysis, AnalysisPreview, Settings } from '@/lib/types';
@@ -34,6 +34,7 @@ export default function AnalysisPanel({ sessionId, ref, printMode = false }: Pro
     const [copiedId, setCopiedId] = useState<number | null>(null);
     const [copiedTextId, setCopiedTextId] = useState<number | null>(null);
     const [copiedStream, setCopiedStream] = useState(false);
+    const [deleteErrorId, setDeleteErrorId] = useState<number | null>(null);
     const latestResponseRef = useRef('');
     const panelRef = useRef<HTMLDivElement>(null);
 
@@ -89,6 +90,26 @@ export default function AnalysisPanel({ sessionId, ref, printMode = false }: Pro
       setAnalyzing(false);
       latestResponseRef.current = fullText;
       listAnalyses(sessionId).then((rows) => setPastAnalyses(rows ?? [])).catch(() => {});
+    }
+
+    async function handleDeleteAnalysis(preview: AnalysisPreview) {
+      if (!confirm('Delete this analysis? This cannot be undone. Export or copy it first if you need to keep it.')) {
+        return;
+      }
+      try {
+        await deleteAnalysis(sessionId, preview.id);
+        setDeleteErrorId(null);
+        setPastAnalyses((rows) => rows.filter((x) => x.id !== preview.id));
+        setExpandedMap((prev) => {
+          if (!prev.has(preview.id)) return prev;
+          const next = new Map(prev);
+          next.delete(preview.id);
+          return next;
+        });
+        if (loadingId === preview.id) setLoadingId(null);
+      } catch {
+        setDeleteErrorId(preview.id);
+      }
     }
 
     async function copyAsPlainText(text: string, id?: number) {
@@ -203,14 +224,34 @@ export default function AnalysisPanel({ sessionId, ref, printMode = false }: Pro
                     className="rounded border border-[var(--border-default)] p-3 dark:border-[var(--border-strong)]"
                   >
                     <summary
-                      className="cursor-pointer text-sm text-gray-600 dark:text-gray-400"
+                      className="flex cursor-pointer items-center justify-between gap-2 text-sm text-gray-600 dark:text-gray-400"
                       onClick={(e) => {
                         e.preventDefault();
                         toggleExpand(a);
                       }}
                     >
-                      {isLoading ? 'Loading...' : `${a.provider}/${a.model} — ${new Date(a.createdAt).toLocaleString()}`}
+                      <span className="min-w-0 truncate">
+                        {isLoading ? 'Loading...' : `${a.provider}/${a.model} — ${new Date(a.createdAt).toLocaleString()}`}
+                      </span>
+                      <button
+                        type="button"
+                        aria-label="Delete analysis"
+                        onClick={(e) => {
+                          // Stop the row's expand toggle (summary click) from firing.
+                          e.preventDefault();
+                          e.stopPropagation();
+                          handleDeleteAnalysis(a);
+                        }}
+                        className="shrink-0 text-xs text-gray-500 hover:text-rose-600 dark:text-gray-400 dark:hover:text-rose-400"
+                      >
+                        Delete
+                      </button>
                     </summary>
+                    {deleteErrorId === a.id && (
+                      <p className="mt-1 text-xs text-rose-600 dark:text-rose-400" role="alert">
+                        Failed to delete analysis.
+                      </p>
+                    )}
                     {full && (
                       <>
                         <div className="flex justify-end mt-1 mb-1">

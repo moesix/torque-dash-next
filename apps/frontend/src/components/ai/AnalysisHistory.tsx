@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
-import { getAllAnalyses, getAnalysis, exportAnalyses, getVehicles } from '@/lib/api';
+import { getAllAnalyses, getAnalysis, exportAnalyses, getVehicles, deleteAnalysis } from '@/lib/api';
 import type { AnalysisPreview, Analysis, Vehicle } from '@/lib/types';
 
 /**
@@ -65,6 +65,39 @@ export default function AnalysisHistory() {
       // Silently ignore
     } finally {
       setLoadingId(null);
+    }
+  }
+
+  async function handleDeleteAnalysis(preview: AnalysisPreview) {
+    // Cross-session rows carry the owning sessionId on the preview (the
+    // listAllAnalyses endpoint selects it); the delete endpoint re-checks
+    // ownership server-side regardless.
+    const sessionId = preview.sessionId;
+    if (sessionId == null) {
+      setError('This analysis is missing its session and cannot be deleted.');
+      return;
+    }
+    if (!confirm('Delete this analysis? This cannot be undone. Export or copy it first if you need to keep it.')) {
+      return;
+    }
+    try {
+      await deleteAnalysis(String(sessionId), preview.id);
+      setError(null);
+      setAnalyses((rows) => rows.filter((x) => x.id !== preview.id));
+      setExpandedMap((prev) => {
+        if (!prev.has(preview.id)) return prev;
+        const next = new Map(prev);
+        next.delete(preview.id);
+        return next;
+      });
+      setTotal((t) => Math.max(0, t - 1));
+      // If the deleted row was the last one on a non-first page, step back so
+      // the list doesn't strand the user on an empty page.
+      if (analyses.length === 1 && page > 0) {
+        setPage((p) => p - 1);
+      }
+    } catch {
+      setError('Failed to delete analysis.');
     }
   }
 
@@ -141,8 +174,27 @@ export default function AnalysisHistory() {
                       {a.provider}/{a.model} — {new Date(a.createdAt).toLocaleString()}
                     </p>
                   </div>
-                  <span className="text-xs text-gray-400 shrink-0 ml-2">
-                    {isLoading ? '...' : full ? '−' : '+'}
+                  <span className="flex shrink-0 items-center ml-2">
+                    <button
+                      type="button"
+                      aria-label="Delete analysis"
+                      onClick={(e) => {
+                        // Stop the card's expand toggle (header click) from firing.
+                        e.stopPropagation();
+                        handleDeleteAnalysis(a);
+                      }}
+                      onKeyDown={(e) => {
+                        // Enter/Space on the button must not reach the header's
+                        // role="button" key handler and toggle the card.
+                        e.stopPropagation();
+                      }}
+                      className="text-xs text-gray-500 hover:text-rose-600 dark:text-gray-400 dark:hover:text-rose-400 mr-3"
+                    >
+                      Delete
+                    </button>
+                    <span className="text-xs text-gray-400">
+                      {isLoading ? '...' : full ? '−' : '+'}
+                    </span>
                   </span>
                 </div>
 
