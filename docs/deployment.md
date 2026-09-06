@@ -173,6 +173,37 @@ docker compose up -d
 Data is persisted in the `pgdata` Docker volume — it survives container
 recreations. The TimescaleDB migration runs automatically on startup if needed.
 
+### Admin account on upgrade
+
+On an **upgraded** deployment (users created before migration `017`), the
+migration promotes the **lowest-id user** to admin (`isAdmin = true`), because
+that account predates the first-registered-user bootstrap rule. On a
+multi-user deployment the operator may **not** be that account — without admin
+access the token rotation, LLM, registration and retention controls are
+unreachable.
+
+Verify who was promoted after upgrading:
+
+```bash
+docker compose exec db \
+  psql -U torquedash -d torquedash -c 'SELECT id, email, "isAdmin" FROM "Users";'
+```
+
+To promote (or demote) a specific account, run the recovery script on the
+backend host (reads `DATABASE_URL` from your environment, like `migrate.js`):
+
+```bash
+# Promote the operator's account to admin
+node scripts/promote-admin.js operator@example.com
+
+# Remove admin from an account
+node scripts/promote-admin.js --demote someone@example.com
+```
+
+The script prints the affected user's `id` + `email`, is idempotent
+(re-running is a no-op), and exits non-zero with a clear message if no user
+matches.
+
 ### ⚠️ TimescaleDB extension upgrade (2.15.3 → 2.29.1)
 
 The TimescaleDB **extension does NOT auto-upgrade with the container image**.
