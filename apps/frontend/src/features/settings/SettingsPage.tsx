@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { getSettings, getFullSettings, updateSettings, generateUploadToken, getVersion } from '@/lib/api';
+import { getFullSettings, updateSettings, generateUploadToken } from '@/lib/api';
+import { useVersion } from '@/lib/useVersion';
 import type { Settings } from '@/lib/types';
 import Toggle from '@/components/ui/Toggle';
 import AiProviderCard from './AiProviderCard';
@@ -29,7 +30,7 @@ export default function SettingsPage() {
   // Data retention card-local error state (rendered inside the retention card)
   const [retentionError, setRetentionError] = useState<string | null>(null);
 
-  const [version, setVersion] = useState<string>('');
+  const { version } = useVersion();
 
   const [llmSettings, setLlmSettings] = useState<Settings>({
     disableRegistration: false,
@@ -50,10 +51,6 @@ export default function SettingsPage() {
     retentionEnabled: false,
     retentionDays: 365,
   });
-
-  useEffect(() => {
-    getVersion().then((v) => setVersion(v.version)).catch(() => {});
-  }, []);
 
   useEffect(() => {
     getFullSettings()

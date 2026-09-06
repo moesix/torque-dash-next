@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
 import type { FormEvent } from 'react';
 import { useNavigate, Navigate, Link } from 'react-router';
-import { login, getSettings, getVersion } from '@/lib/api';
+import { login, getSettings } from '@/lib/api';
 import { useAuth } from './useAuth';
 import AuthBranding from './AuthBranding';
+import { useVersion } from '@/lib/useVersion';
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -11,18 +12,14 @@ export default function Login() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [registrationDisabled, setRegistrationDisabled] = useState(false);
-  const [version, setVersion] = useState<string>('');
   const navigate = useNavigate();
   const { isAuthenticated } = useAuth();
+  const { version } = useVersion();
 
   useEffect(() => {
     getSettings()
       .then((s) => setRegistrationDisabled(s?.disableRegistration ?? false))
       .catch(() => setRegistrationDisabled(false));
-  }, []);
-
-  useEffect(() => {
-    getVersion().then((v) => setVersion(v.version)).catch(() => {});
   }, []);
 
   if (isAuthenticated) return <Navigate to="/" replace />;
