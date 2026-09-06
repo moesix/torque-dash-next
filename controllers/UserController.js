@@ -67,8 +67,12 @@ class UserController {
             // an identity that migration 015 already folded.
             email = String(email || '').toLowerCase();
 
-            // Validate if user data ok
-            const { error } = User.validate(req.body);
+            // Validate if user data ok. Runs AFTER the lowercase assignment so
+            // Joi validates the exact identity that gets persisted — email
+            // normalization happens in the model's hooks anyway, and the
+            // register test suite asserts the 400 path fires on the validator
+            // message regardless of casing.
+            const { error } = User.validate({ email, password });
             if (error) {
                 return res.status(400).json({ error: error.message });
             }
@@ -144,7 +148,14 @@ class UserController {
             if (req.user && req.user.id) {
                 body.isAdmin = Boolean(req.user.isAdmin);
             }
-            res.set('Cache-Control', 'public, max-age=30');
+            // Authenticated responses embed the session-derived isAdmin, so
+            // they are private per-user; only the anonymous two-field shape
+            // may be cached in shared caches.
+            if (req.user && req.user.id) {
+                res.set('Cache-Control', 'private, max-age=30');
+            } else {
+                res.set('Cache-Control', 'public, max-age=30');
+            }
             res.json(body);
         } catch (err) {
             console.error(err.message || err);

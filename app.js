@@ -34,7 +34,6 @@ const session = require('express-session');
 const PgSession = require('connect-pg-simple')(session);
 const passport = require('passport');
 const csrfGuard = require('./middleware/csrfGuard');
-const User = require('./models').User;
 const runtime = require('./config/runtime');
 const models = require('./models');
 require('./config/passport')(passport);

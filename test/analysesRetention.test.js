@@ -24,7 +24,6 @@ const servicePath = require.resolve('../services/analysesRetention');
 let settingsRow;
 let destroyCalls;
 let destroyImpl;
-let getSingletonImpl;
 
 function makeSettingsRow() {
   return {
@@ -68,7 +67,6 @@ beforeEach(() => {
   settingsRow = makeSettingsRow();
   destroyCalls = [];
   destroyImpl = null;
-  getSingletonImpl = null;
   mockModels.Settings.getSingleton = async () => settingsRow;
   delete require.cache[servicePath];
 });
