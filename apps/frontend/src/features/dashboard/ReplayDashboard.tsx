@@ -98,6 +98,14 @@ export default function ReplayDashboard() {
   // window.print(); cleared again after the print dialog closes.
   const [printMode, setPrintMode] = useState(false);
   const [isPrinting, setIsPrinting] = useState(false);
+  // Ids of the in-flight double-rAF chain that calls window.print(). Stored so
+  // a navigating/unmounting component can cancel the chain — window.print()
+  // must never fire on a page the user has already left.
+  const printRafRef = useRef<number[]>([]);
+  // True only between the moment window.print() is actually invoked and the
+  // reset that follows. Gates the reset effect's timeout fallback so a
+  // backgrounded tab (rAF stalled) cannot collapse the report pre-print.
+  const printInvokedRef = useRef(false);
 
   // ── Computed values ────────────────────────────────────────────────
   const available = useMemo(
@@ -161,12 +169,17 @@ export default function ReplayDashboard() {
     setIsPrinting(true);
     setPrintMode(true);
     // Double rAF so React commits the expanded panels AND ECharts' lazy init
-    // gets a frame to render before the print dialog opens.
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
+    // gets a frame to render before the print dialog opens. Ids are stored so a
+    // navigating/unmounting component can cancel the chain — window.print()
+    // must never fire on a page the user has already left.
+    const raf1 = requestAnimationFrame(() => {
+      const raf2 = requestAnimationFrame(() => {
+        printInvokedRef.current = true;
         window.print();
       });
+      printRafRef.current.push(raf2);
     });
+    printRafRef.current.push(raf1);
   }
 
   // Reset print mode AFTER printing completes. `afterprint` is not fired by
@@ -174,17 +187,39 @@ export default function ReplayDashboard() {
   // isPrinting true (spinner visible) until the dialog actually closes.
   React.useEffect(() => {
     if (!isPrinting) return;
+    // Armed when isPrinting flips true — BEFORE handlePrint's rAF chain runs
+    // and sets it true. This keeps the ordering deterministic.
+    printInvokedRef.current = false;
     const finishPrint = () => {
+      printInvokedRef.current = false;
       setPrintMode(false);
       setIsPrinting(false);
     };
     window.addEventListener('afterprint', finishPrint);
-    const fallback = window.setTimeout(finishPrint, 500);
+    // Fallback ONLY for engines where afterprint never fires — and only once
+    // window.print() has actually been invoked (a backgrounded tab stalls
+    // rAF; without this gate the fallback would reset printMode before the
+    // print, degrading the report).
+    const fallback = window.setTimeout(() => {
+      if (printInvokedRef.current) finishPrint();
+    }, 500);
     return () => {
       window.removeEventListener('afterprint', finishPrint);
       window.clearTimeout(fallback);
+      printRafRef.current.forEach((id) => cancelAnimationFrame(id));
+      printRafRef.current = [];
     };
   }, [isPrinting]);
+
+  // Unmount-only cleanup: navigation away mid-chain cancels the pending
+  // window.print() so it can never fire on whatever page mounts next.
+  React.useEffect(
+    () => () => {
+      printRafRef.current.forEach((id) => cancelAnimationFrame(id));
+      printRafRef.current = [];
+    },
+    [],
+  );
 
   // Reset playback cursor when switching sessions.
   React.useEffect(() => {
