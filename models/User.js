@@ -22,6 +22,14 @@ module.exports = (sequelize, DataTypes) => {
             defaultValue: 0,
             allowNull: false,
         },
+        // Plan 099: the first registered user is the admin. Set at register time
+        // (bootstrap: isAdmin = count === 0) and read from the DB row on every
+        // authenticated request — never trusted from the session cookie.
+        isAdmin: {
+            type: DataTypes.BOOLEAN,
+            allowNull: false,
+            defaultValue: false,
+        },
         forwardUrls: {
             type: DataTypes.ARRAY(DataTypes.STRING)
         }

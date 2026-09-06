@@ -70,8 +70,13 @@ class UserController {
                 return res.status(409).json({ error: 'Registration failed. Please try a different email.' });
             }
 
-            // Save new user to db
-            user = await User.create({ email: email, password: password });
+            // Save new user to db. First-registered-user bootstrap (plan 099):
+            // when no user row exists yet, this account becomes the admin
+            // (isAdmin = count === 0). Count and create are not atomic together,
+            // so a theoretical simultaneous-registration race could yield two
+            // admins — acceptable for a personal deployment.
+            const userCount = await User.count();
+            user = await User.create({ email: email, password: password, isAdmin: userCount === 0 });
 
             // Send response
             return res.status(201).json({ ok: true });
