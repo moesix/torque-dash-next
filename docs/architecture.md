@@ -795,23 +795,35 @@ See `docs/deployment.md` for the full deployment guide.
 | `POST /api/users/login` | none | login (sets cookie) |
 | `POST /api/users/change-password` | cookie | change password (requires currentPassword + newPassword; regenerates session) |
 | `POST /api/users/logout` | cookie | logout |
+| `GET /api/users/shareid` | cookie | get the user's shareId (empty until sharing is enabled) |
+| `PATCH /api/users/shareid` | cookie | toggle sharing on/off — enable generates a shareId, disable clears it |
+| `GET /api/users/forwardurls` | cookie | get webhook forward URLs that receive a copy of each upload (`string[]`; empty when none) |
+| `PUT /api/users/forwardurls` | cookie | set webhook forward URLs (body: `{ urls: string[] }`; max 10, URI-validated; empty/missing clears) |
 | `GET /api/version` | none | returns `{ version: string }` from package.json |
 | `GET /api/sessions?limit&offset` | cookie | list sessions (paginated: `{ sessions, total, limit, offset }`) |
 | `GET /api/sessions/:id` | cookie + owner | session metadata (no full logs) |
 | `GET /api/sessions/:id/telemetry?from&to&limit` | cookie + owner | paged telemetry frames |
 | `GET /api/sessions/:id/export/csv` | cookie + owner | stream all telemetry as CSV with dynamic PID column discovery |
 | `PATCH /api/sessions/rename/:id` | cookie + owner | rename session (body: `{ name }`) |
+| `PATCH /api/sessions/addlocation/:sessionId` | cookie + owner | set start/end location labels (body: `{ locations: { start, end } }`) |
 | `PATCH /api/sessions/notes/:sessionId` | cookie + owner | update session notes (body: `{ notes: string\|null }`) |
+| `PATCH /api/sessions/filter/:sessionId` | cookie + owner | downsample telemetry to every Nth row (body: `{ filterNumber }`); recomputes summary |
+| `PATCH /api/sessions/cut/:sessionId` | cookie + owner | delete telemetry rows within a time window (body: `{ from, to }` ISO dates); recomputes summary |
 | `PATCH /api/sessions/:sessionId/vehicle` | cookie + owner | reassign session to a vehicle or unassign (body: `{ vehicleId: number\|null }`) |
 | `DELETE /api/sessions/:id` | cookie + owner | delete a session |
-| `GET /api/sessions/:id/shared/:shareId` | shareId | shared view |
+| `POST /api/sessions/copy/:sessionId` | cookie + owner | duplicate a session and its telemetry under a new name (body: `{ name }`) |
+| `POST /api/sessions/join/:sessionId` | cookie + owner | merge this session and another into a new session (body: `{ joinSessionId, name }`) |
+| `GET /api/sessions/shared/:shareId` | shareId | list a user's shareable sessions (sanitized — no logs; paginated: `{ sessions, total, limit, offset }`) |
+| `GET /api/sessions/shared/:shareId/:sessionId` | shareId | get one shared session (sanitized metadata — no logs) |
 | `POST /api/sessions/:id/analyze` | cookie + owner | trigger AI analysis for a session (SSE stream) |
 | `GET /api/sessions/:id/analyses` | cookie + owner | list cached analyses for a session |
 | `GET /api/sessions/:id/analyses/:analysisId` | cookie + owner | get a single analysis (full response + reasoning) |
 | `DELETE /api/sessions/:id/analyses/:analysisId` | cookie + owner | delete a cached analysis |
 | `GET /api/analyses` | cookie | cross-vehicle analysis history (paginated: `{ analyses, total, limit, offset }`; optional `vehicleId` filter, optional `limit`/`offset`). Each analysis includes session name and vehicle. |
 | `GET /api/analyses/export` | cookie | export all analyses as a Markdown file download (optional `vehicleId` filter) |
-| `GET /api/settings` | none | public settings (disableRegistration, hasUploadApiToken, hasLlmProvider, llmMaxTokens, retentionEnabled, retentionDays, vehicle fields) |
+| `GET /api/analyses/:analysisId` | cookie | get a single analysis by id across vehicles (full response + reasoning) |
+| `GET /api/settings` | none | public settings for unauthenticated register/login pages (disableRegistration, tokenFromEnv; appends `isAdmin` when authenticated) |
+| `GET /api/settings/full` | cookie | full settings for the settings UI (disableRegistration, hasUploadApiToken, tokenFromEnv, isAdmin, LLM provider/model/endpoint, hasLlmApiKey, llmMaxTokens, llmThinkingMode, llmReasoningEffort, timezoneOffset, retentionEnabled, retentionDays, vehicle fields) |
 | `PUT /api/settings` | cookie | update settings (disableRegistration, uploadApiToken, llmProvider, llmApiKey, llmModel, llmEndpoint, llmThinkingMode, llmReasoningEffort, llmMaxTokens, retentionEnabled, retentionDays, vehicle fields); response includes `retentionPolicyApplied` |
 | `POST /api/settings/upload-token` | cookie | generate a new upload API token (shown once) |
 | `POST /api/settings/test-llm` | cookie | test LLM connection (returns streaming response) |
@@ -821,7 +833,7 @@ See `docs/deployment.md` for the full deployment guide.
 | `PUT /api/vehicles/:vehicleId` | cookie | update a vehicle (body: partial fields) |
 | `DELETE /api/vehicles/:vehicleId` | cookie | delete a vehicle (sessions unassigned via SET NULL) |
 | `PATCH /api/vehicles/:vehicleId/default` | cookie | set a vehicle as the user's default (unsets all others) |
-| `POST /api/upload` (`/upload` from Torque) | email-gated + **Bearer token required** (when a token is configured — the required production posture) | ingest (`401` without matching token) |
+| `GET /api/upload` (`/upload` from Torque) | email-gated + **Bearer token required** (when a token is configured — the required production posture) | ingest (`401` without matching token) |
 | `GET /health` | none | probe |
 
 > See `routes/api.js` for the authoritative route table. The SPA auth contract
