@@ -191,6 +191,45 @@ describe('GET /api/sessions/:id/telemetry — TelemetryController.range', { skip
         }
     });
 
+    test('malformed (non-ISO) from returns 400 via the range schema, no DB access', async () => {
+        const calls = installDbMocks({ ownedSession: OWNED_SESSION });
+
+        const { status, body } = await withServer({ id: 1 }, (base) =>
+            getJson(base, TELEMETRY_PATH(`from=not-a-date&to=${encodeURIComponent(TO)}`))
+        );
+
+        assert.strictEqual(status, 400);
+        assert.ok(body.error && body.error.includes('from'),
+            `schema error should name the "from" field, got: ${JSON.stringify(body)}`);
+        assert.strictEqual(calls.userFindOne.length, 0, 'no user lookup on malformed range');
+        assert.strictEqual(calls.sessionFindOne.length, 0, 'no session lookup on malformed range');
+        assert.strictEqual(calls.logFindAll.length, 0, 'no log query on malformed range (was a Postgres 500)');
+    });
+
+    test('malformed (non-ISO) to returns 400 via the range schema, no DB access', async () => {
+        const calls = installDbMocks({ ownedSession: OWNED_SESSION });
+
+        const { status, body } = await withServer({ id: 1 }, (base) =>
+            getJson(base, TELEMETRY_PATH(`from=${encodeURIComponent(FROM)}&to=also-not-a-date`))
+        );
+
+        assert.strictEqual(status, 400);
+        assert.ok(body.error && body.error.includes('to'),
+            `schema error should name the "to" field, got: ${JSON.stringify(body)}`);
+        assert.strictEqual(calls.logFindAll.length, 0);
+    });
+
+    test('non-numeric limit returns 400 via the range schema, no DB access', async () => {
+        const calls = installDbMocks({ ownedSession: OWNED_SESSION });
+
+        const { status } = await withServer({ id: 1 }, (base) =>
+            getJson(base, TELEMETRY_PATH(`${qsFromTo()}&limit=banana`))
+        );
+
+        assert.strictEqual(status, 400);
+        assert.strictEqual(calls.logFindAll.length, 0, 'no log query on malformed limit');
+    });
+
     test('owner match returns 200 with rows and a between-scoped Log query', async () => {
         const rows = [
             { id: 1, timestamp: FROM, lon: 1.5, lat: 2.5, values: {}, engine_rpm: 2500, vehicle_speed: 60 },
