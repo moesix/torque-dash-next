@@ -344,10 +344,21 @@ export async function getAnalysis(id: number): Promise<Analysis | undefined> {
   return request<Analysis>(`/api/analyses/${id}`);
 }
 
-/** Export analyses as a markdown file download. */
+/** Export analyses as a markdown file download.
+ *  Triggers a native browser download via a hidden anchor (mirrors
+ *  {@link exportSessionCsv}) — the backend streams the markdown with
+ *  Content-Disposition: attachment. Deliberately no full-page navigation:
+ *  window.location.href would reload the whole SPA to fetch the file.
+ *  No HEAD pre-check (matches exportSessionCsv's current form). */
 export async function exportAnalyses(vehicleId?: number): Promise<void> {
-  const params = vehicleId ? `?vehicleId=${vehicleId}` : '';
-  window.location.href = `/api/analyses/export${params}`;
+  const query = vehicleId ? `?vehicleId=${vehicleId}` : '';
+  const a = document.createElement('a');
+  a.href = `/api/analyses/export${query}`;
+  a.download = 'analyses.md';
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
 }
 
 // ── CSV Export ─────────────────────────────────────────────────────────
