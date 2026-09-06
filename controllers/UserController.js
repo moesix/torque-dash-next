@@ -417,6 +417,12 @@ class UserController {
             // Update password (beforeUpdate hook will hash it)
             await user.update({ password: newPassword });
 
+            // Invalidate every OTHER session: deserializeUser compares the tv stored in
+            // each client's cookie against this column and rejects mismatches. Bump it
+            // AFTER the password update (two separate update() calls keep the beforeUpdate
+            // password-hashing hook from re-hashing on this call).
+            await user.update({ tokenVersion: (user.tokenVersion || 0) + 1 });
+
             // Invalidate the deserializeUser cache so the next request re-reads
             // this user from the DB instead of serving a pre-change snapshot.
             userByIdCache.del(user.id);

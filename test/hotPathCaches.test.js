@@ -190,7 +190,7 @@ describe('deserializeUser – production cache', () => {
         const { res, calls } = makeRes();
         await UserController.changePassword(req, res);
         assert.strictEqual(calls.body.ok, true, 'changePassword completed');
-        assert.deepStrictEqual(updatePatches, [{ password: 'brand-new-pass' }]);
+        assert.deepStrictEqual(updatePatches, [{ password: 'brand-new-pass' }, { tokenVersion: 1 }]);
         const dbCallsAfterChange = findByPkCalls.length; // warm-up + changePassword's own read
 
         // THE assertion: the wiring deleted the cache entry for this user.

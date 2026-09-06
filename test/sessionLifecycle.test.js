@@ -142,6 +142,36 @@ describe('deserializeUser', () => {
             done();
         });
     });
+
+    test('rejects a stale cookie (tv one behind) after changePassword bumps tokenVersion', (_, done) => {
+        // Regression for plan 096: after changePassword bumps tokenVersion 0 -> 1,
+        // cookies minted before the change carry tv 0 and must be rejected.
+        mockUserFindByPkResult = {
+            id: 1, email: 'test@example.com', tokenVersion: 1,
+            get() { return { id: this.id, email: this.email, tokenVersion: this.tokenVersion }; }
+        };
+        const session = { id: 1, tv: 0 }; // cookie minted before the password change
+        passport.deserializeUser(session, (err, user) => {
+            assert.ifError(err);
+            assert.strictEqual(user, false, 'stale cookie must be rejected once tokenVersion is bumped');
+            done();
+        });
+    });
+
+    test('accepts the current cookie (tv matching) after changePassword bumps tokenVersion', (_, done) => {
+        // req.logIn re-serializes with the NEW tokenVersion, so the device that
+        // changed the password keeps working with its refreshed cookie.
+        mockUserFindByPkResult = {
+            id: 1, email: 'test@example.com', tokenVersion: 1,
+            get() { return { id: this.id, email: this.email, tokenVersion: this.tokenVersion }; }
+        };
+        const session = { id: 1, tv: 1 }; // cookie re-minted by changePassword's req.logIn
+        passport.deserializeUser(session, (err, user) => {
+            assert.ifError(err);
+            assert.strictEqual(user.tokenVersion, 1, 'current session accepted after the bump');
+            done();
+        });
+    });
 });
 
 describe('logout', () => {
@@ -182,5 +212,48 @@ describe('logout', () => {
         UserController.logout(h.req, h.res);
         assert.strictEqual(h.wasDestroyCalled(), true, 'destroy must run despite logout error');
         assert.deepStrictEqual(h.calls.body, { ok: true }, 'response contract must hold even on logout error');
+    });
+});
+
+describe('changePassword', () => {
+    // Behavioral harness for UserController.changePassword: stubs the model
+    // methods and session plumbing the controller touches, following the same
+    // pattern as the logout harness above.
+    beforeEach(() => {
+        userByIdCache.store.clear();
+    });
+
+    function makeChangePasswordHarness({ currentPassword = 'old-secret', newPassword = 'brand-new-pass' } = {}) {
+        const req = {
+            body: { currentPassword, newPassword },
+            user: { id: 1 },
+            session: { regenerate: (cb) => cb(null) },
+            logIn: (u, cb) => cb(null),
+        };
+        const calls = { statusCode: null, body: null };
+        const res = {
+            status(code) { calls.statusCode = code; return res; },
+            json(obj) { calls.body = obj; return res; },
+        };
+        return { req, res, calls };
+    }
+
+    test('bumps tokenVersion by one, after the password update', async () => {
+        const updateCalls = [];
+        mockUserFindByPkResult = {
+            id: 1,
+            email: 'test@example.com',
+            tokenVersion: 2,
+            comparePassword: async () => true,
+            update: async (patch) => { updateCalls.push(patch); },
+            get() { return { id: this.id, email: this.email, tokenVersion: this.tokenVersion }; },
+        };
+        const { req, res, calls } = makeChangePasswordHarness();
+        await UserController.changePassword(req, res);
+        assert.strictEqual(calls.body.ok, true, 'changePassword completed');
+        assert.deepStrictEqual(updateCalls, [
+            { password: 'brand-new-pass' },
+            { tokenVersion: 3 }, // old tokenVersion (2) + 1
+        ], 'password updated first, then tokenVersion bumped so deserializeUser rejects other sessions');
     });
 });
