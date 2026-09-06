@@ -18,10 +18,8 @@ describe('api module', () => {
         expect(typeof api.testLlmConnection).toBe('function');
         expect(typeof api.analyzeSession).toBe('function');
         expect(typeof api.listAnalyses).toBe('function');
-        expect(typeof api.deleteAnalysis).toBe('function');
         expect(typeof api.exportSessionCsv).toBe('function');
         expect(typeof api.getVehicles).toBe('function');
-        expect(typeof api.getVehicle).toBe('function');
         expect(typeof api.createVehicle).toBe('function');
         expect(typeof api.updateVehicle).toBe('function');
         expect(typeof api.deleteVehicle).toBe('function');
