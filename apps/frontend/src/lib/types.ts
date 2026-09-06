@@ -81,7 +81,19 @@ export interface UpdateVehicle {
   engineCc?: number | null;
 }
 
-/** Global site settings, read via GET /api/settings. */
+/** Public settings returned by the unauthenticated GET /api/settings. The
+ *  endpoint intentionally exposes only these two fields (routes/api.js →
+ *  UserController public handler) — anything richer must use
+ *  GET /api/settings/full (getFullSettings). */
+export interface PublicSettings {
+  /** When true, public registration is closed. */
+  disableRegistration: boolean;
+  /** True when the upload token is sourced from the UPLOAD_API_TOKEN env var
+   *  (deploy-time override). */
+  tokenFromEnv: boolean;
+}
+
+/** Global site settings (authenticated full view), read via GET /api/settings/full. */
 export interface Settings {
   /** When true, public registration is closed. */
   disableRegistration: boolean;
@@ -160,7 +172,10 @@ export interface Analysis {
   model: string;
   response: string;
   reasoning?: string | null;
-  tokenUsage: Record<string, unknown> | null;
+  /** Token accounting from the provider. The analysis-list/one endpoints do not
+   *  select this column (controllers/AnalysisController.js), so it is absent
+   *  at runtime — optional here to reflect that. */
+  tokenUsage?: Record<string, unknown> | null;
   createdAt: string;
 }
 

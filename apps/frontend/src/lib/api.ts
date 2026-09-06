@@ -3,6 +3,7 @@ import type {
   TelemetryFrame,
   RawTelemetryRow,
   Settings,
+  PublicSettings,
   GenerateUploadTokenResponse,
   Analysis,
   AnalysisPreview,
@@ -206,8 +207,11 @@ export async function getTelemetry(
   return { frames: items.map(normalizeRow), truncated };
 }
 
-export async function getSettings(): Promise<Settings | undefined> {
-  return request<Settings>('/api/settings');
+/** Public settings — the unauthenticated /api/settings endpoint only returns
+ *  { disableRegistration, tokenFromEnv }. Callers needing the full shape MUST
+ *  use getFullSettings() instead. */
+export async function getSettings(): Promise<PublicSettings | undefined> {
+  return request<PublicSettings>('/api/settings');
 }
 
 /** Authenticated full settings (LLM provider, API-key-presence flag, vehicle,
