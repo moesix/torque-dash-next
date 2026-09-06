@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef } from 'react';
 import { MapContainer, TileLayer, Polyline, Marker } from 'react-leaflet';
 import L from 'leaflet';
 import { usePlaybackStore } from '@/app/playbackStore';
+import { findNearestFrameIndex } from '@/lib/pidDecode';
 import type { TelemetryFrame } from '@/lib/types';
 
 /**
@@ -21,37 +22,6 @@ const DefaultIcon = L.icon({
 });
 L.Marker.prototype.options.icon = DefaultIcon;
 
-/** Binary search for the frame whose timestamp is nearest `t` (epoch ms). */
-function findNearestFrame(
-  frames: TelemetryFrame[],
-  t: number,
-): TelemetryFrame | null {
-  if (frames.length === 0) return null;
-  let lo = 0;
-  let hi = frames.length - 1;
-  while (lo < hi) {
-    const mid = (lo + hi) >> 1;
-    const mt = new Date(frames[mid].timestamp).getTime();
-    if (mt < t) lo = mid + 1;
-    else hi = mid;
-  }
-  const tsAt = (idx: number) =>
-    idx >= 0 && idx < frames.length
-      ? new Date(frames[idx].timestamp).getTime()
-      : null;
-  const a = tsAt(lo);
-  const b = tsAt(lo - 1);
-  let chosen = lo;
-  if (b !== null && a !== null && Math.abs(t - b) <= Math.abs(t - a)) {
-    chosen = lo - 1;
-  } else if (a === null && b !== null) {
-    chosen = lo - 1;
-  }
-  const f = frames[chosen];
-  if (f.lat == null || f.lon == null) return null;
-  return f;
-}
-
 /**
  * Resolve the frame the marker should pin to when the map mounts with an
  * already-set playback cursor. The imperative subscription below only fires
@@ -63,8 +33,15 @@ export function resolveFrameAtCursor(
   frames: TelemetryFrame[],
   cursorTime: number | null,
 ): TelemetryFrame | null {
-  if (cursorTime == null) return null;
-  return findNearestFrame(frames, cursorTime);
+  if (cursorTime == null || frames.length === 0) return null;
+  // Precompute epoch-ms timestamps for the shared binary search.  The
+  // nearest frame = frames[findNearestFrameIndex(timestamps, t)]; keep the
+  // GPS-null policy: a chosen frame lacking lat/lon resolves to null.
+  const timestamps = frames.map((f) => new Date(f.timestamp).getTime());
+  const idx = findNearestFrameIndex(timestamps, cursorTime);
+  const f = frames[idx];
+  if (f == null || f.lat == null || f.lon == null) return null;
+  return f;
 }
 
 interface Props {
@@ -91,6 +68,13 @@ export default function GpsTrackMap({ frames, className }: Props) {
     [frames],
   );
 
+  // Precompute epoch-ms timestamps once so cursor ticks binary-search without
+  // re-parsing `new Date(...)` per comparison.
+  const timestamps = useMemo<number[]>(
+    () => frames.map((f) => new Date(f.timestamp).getTime()),
+    [frames],
+  );
+
   const center: [number, number] = positions[0] ?? [0, 0];
 
   // Imperative subscription: move the marker whenever cursorTime changes.
@@ -98,8 +82,10 @@ export default function GpsTrackMap({ frames, className }: Props) {
     const unsubscribe = usePlaybackStore.subscribe((state) => {
       const t = state.cursorTime;
       if (t == null) return;
-      const f = findNearestFrame(frames, t);
-      if (!f || !markerRef.current) return;
+      const idx = findNearestFrameIndex(timestamps, t);
+      const f = idx >= 0 ? frames[idx] : undefined;
+      // GPS-null policy: if the chosen frame lacks lat/lon, don't move.
+      if (!f || f.lat == null || f.lon == null || !markerRef.current) return;
       markerRef.current.setLatLng([f.lat as number, f.lon as number]);
     });
 
@@ -115,7 +101,7 @@ export default function GpsTrackMap({ frames, className }: Props) {
     }
 
     return unsubscribe;
-  }, [frames]);
+  }, [frames, timestamps]);
 
   return (
     <MapContainer

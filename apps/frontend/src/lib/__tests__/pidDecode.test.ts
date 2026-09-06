@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { coerceScalar, getAvailableSeries, computeStats } from '../pidDecode';
+import { coerceScalar, getAvailableSeries, computeStats, findNearestFrameIndex } from '../pidDecode';
 
 describe('coerceScalar', () => {
     it('returns null for null/undefined', () => {
@@ -159,5 +159,34 @@ describe('computeStats', () => {
             [2000, null],
         ];
         expect(computeStats(data)).toBeNull();
+    });
+});
+
+describe('findNearestFrameIndex', () => {
+    it('returns the EARLIER index on an exact midpoint tie', () => {
+        // t = 5000 sits exactly between 0 and 10000: earlier (0) must win.
+        expect(findNearestFrameIndex([0, 10000, 20000], 5000)).toBe(0);
+        expect(findNearestFrameIndex([0, 10000, 20000], 15000)).toBe(1);
+    });
+    it('returns 0 when t precedes all timestamps', () => {
+        expect(findNearestFrameIndex([1000, 2000, 3000], 0)).toBe(0);
+    });
+    it('returns the last index when t follows all timestamps', () => {
+        expect(findNearestFrameIndex([1000, 2000, 3000], 5000)).toBe(2);
+    });
+    it('returns -1 for an empty array', () => {
+        expect(findNearestFrameIndex([], 1000)).toBe(-1);
+    });
+    it('returns 0 for a single element', () => {
+        expect(findNearestFrameIndex([1000], 999)).toBe(0);
+        expect(findNearestFrameIndex([1000], 1000)).toBe(0);
+        expect(findNearestFrameIndex([1000], 1001)).toBe(0);
+    });
+    it('returns an exact timestamp hit', () => {
+        expect(findNearestFrameIndex([0, 10000, 20000], 10000)).toBe(1);
+    });
+    it('returns the closer non-tie neighbour', () => {
+        expect(findNearestFrameIndex([0, 10000, 20000], 16000)).toBe(2);
+        expect(findNearestFrameIndex([0, 10000, 20000], 4000)).toBe(0);
     });
 });
