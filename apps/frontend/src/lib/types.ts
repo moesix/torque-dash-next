@@ -81,7 +81,19 @@ export interface UpdateVehicle {
   engineCc?: number | null;
 }
 
-/** Global site settings, read via GET /api/settings. */
+/** Public settings returned by the unauthenticated GET /api/settings. The
+ *  endpoint intentionally exposes only these two fields (routes/api.js →
+ *  UserController public handler) — anything richer must use
+ *  GET /api/settings/full (getFullSettings). */
+export interface PublicSettings {
+  /** When true, public registration is closed. */
+  disableRegistration: boolean;
+  /** True when the upload token is sourced from the UPLOAD_API_TOKEN env var
+   *  (deploy-time override). */
+  tokenFromEnv: boolean;
+}
+
+/** Global site settings (authenticated full view), read via GET /api/settings/full. */
 export interface Settings {
   /** When true, public registration is closed. */
   disableRegistration: boolean;
@@ -91,6 +103,10 @@ export interface Settings {
   /** True when the upload token is sourced from the UPLOAD_API_TOKEN env var
    *  (deploy-time override). When true, the UI generation/clear are disabled. */
   tokenFromEnv: boolean;
+  /** True when the session user is the admin (first registered user, plan 099).
+   *  Session-derived on the backend; only present on authenticated responses.
+   *  Admin-only settings cards are gated on this flag. */
+  isAdmin?: boolean;
 
   // ── BYOK LLM fields ────────────────────────────────────────────────
   hasLlmProvider: boolean;
@@ -114,6 +130,11 @@ export interface Settings {
   retentionEnabled?: boolean;
   /** Retention window in days (90-365). Only applies when retentionEnabled. */
   retentionDays?: number;
+
+  // ── Analysis retention (migration 019) ──────────────────────────
+  /** App-side prune window for stale Analysis rows (days, 90-365). NULL (or
+   *  absent) disables the prune job — analyses are kept indefinitely. */
+  analysisRetentionDays?: number | null;
 }
 
 /** Response from POST /api/settings/upload-token (token generation). The full
@@ -156,7 +177,10 @@ export interface Analysis {
   model: string;
   response: string;
   reasoning?: string | null;
-  tokenUsage: Record<string, unknown> | null;
+  /** Token accounting from the provider. The analysis-list/one endpoints do not
+   *  select this column (controllers/AnalysisController.js), so it is absent
+   *  at runtime — optional here to reflect that. */
+  tokenUsage?: Record<string, unknown> | null;
   createdAt: string;
 }
 

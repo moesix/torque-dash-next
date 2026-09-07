@@ -101,6 +101,17 @@ module.exports = (sequelize, DataTypes) => {
             allowNull: false,
             defaultValue: 365,
         },
+
+        // ── Analysis retention (migration 019) ────────────────────
+        // App-side prune window for stale Analysis rows (plain Postgres table —
+        // no hypertable, no native retention policy). NULL disables the prune
+        // job; set to a 90–365 day integer to enable. The job reads this value;
+        // updateSettings persists it but never calls add_retention_policy.
+        analysisRetentionDays: {
+            type: DataTypes.INTEGER,
+            allowNull: true,
+            defaultValue: null,
+        },
     });
 
     // ── In-memory TTL cache ─────────────────────────────────────────────
@@ -133,6 +144,7 @@ module.exports = (sequelize, DataTypes) => {
                 timezoneOffset: 0,
                 retentionEnabled: false,
                 retentionDays: 365,
+                analysisRetentionDays: null,
             },
         });
         _settingsCache = row;

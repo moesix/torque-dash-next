@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react';
 import type { FormEvent } from 'react';
-import { useNavigate, Navigate } from 'react-router';
-import { login, getSettings, getVersion } from '@/lib/api';
+import { useNavigate, Navigate, Link } from 'react-router';
+import { login, getSettings } from '@/lib/api';
 import { useAuth } from './useAuth';
 import AuthBranding from './AuthBranding';
+import { useVersion } from '@/lib/useVersion';
+import { MobileLogo } from '@/components/layout/brand';
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -11,18 +13,14 @@ export default function Login() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [registrationDisabled, setRegistrationDisabled] = useState(false);
-  const [version, setVersion] = useState<string>('');
   const navigate = useNavigate();
   const { isAuthenticated } = useAuth();
+  const { version } = useVersion();
 
   useEffect(() => {
     getSettings()
       .then((s) => setRegistrationDisabled(s?.disableRegistration ?? false))
       .catch(() => setRegistrationDisabled(false));
-  }, []);
-
-  useEffect(() => {
-    getVersion().then((v) => setVersion(v.version)).catch(() => {});
   }, []);
 
   if (isAuthenticated) return <Navigate to="/" replace />;
@@ -51,15 +49,7 @@ export default function Login() {
       <div className="flex flex-1 items-center justify-center p-4 md:p-6">
         <div className="animate-slide-up w-full max-w-sm">
           {/* Mobile-only logo */}
-          <div className="mb-8 text-center lg:hidden">
-            <img src="/brand/logo.svg" alt="" loading="eager" className="mx-auto mb-4 h-12 w-12 rounded-xl" />
-            <h1
-              className="text-2xl font-bold text-gray-900 dark:text-white"
-              style={{ fontFamily: 'var(--font-mono)' }}
-            >
-              TorqueDash-Next
-            </h1>
-          </div>
+          <MobileLogo />
 
           <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
             Sign in
@@ -127,12 +117,12 @@ export default function Login() {
             ) : (
               <>
                 No account?{' '}
-                <a
+                <Link
+                  to="/register"
                   className="font-medium text-teal-600 hover:text-teal-500 dark:text-teal-400"
-                  href="/register"
                 >
                   Register
-                </a>
+                </Link>
               </>
             )}
           </p>

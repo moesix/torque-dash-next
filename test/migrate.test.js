@@ -1,9 +1,10 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
+const path = require('path');
 const { listMigrationFiles, isBenignError } = require('../scripts/migrate');
 
 describe('migration loader', () => {
-    it('returns files in strict lexicographic order 001–016', () => {
+    it('returns files in strict lexicographic path order 001–020 then migrations/', () => {
         const files = listMigrationFiles();
         const expected = [
             '001_log_hypertable.sql',
@@ -22,13 +23,38 @@ describe('migration loader', () => {
             '014_add_token_version.sql',
             '015_normalize_emails.sql',
             '016_denormalize_summaries.sql',
+            '017_user_admin.sql',
+            '018_drop_forward_urls.sql',
+            '019_analysis_retention.sql',
+            '020_analyses_created_id_unique.sql',
+            'migrations/001_add_upload_token.sql',
+            'migrations/002_backfill_pid_columns.sql',
         ];
         assert.deepEqual(files, expected);
     });
 
+    it('discovers the nested migrations/ directory (incl. the PID backfill)', () => {
+        const files = listMigrationFiles();
+        assert.ok(
+            files.includes('migrations/002_backfill_pid_columns.sql'),
+            'nested backfill must be in the discovered set so it actually executes'
+        );
+        assert.ok(files.includes('migrations/001_add_upload_token.sql'));
+    });
+
+    it('orders top-level files before nested migrations/ files', () => {
+        const files = listMigrationFiles();
+        const lastTopLevel = files.findIndex((f) => f.startsWith('migrations/'));
+        assert.ok(lastTopLevel > 0, 'nested dir should sort after top-level files');
+        assert.ok(
+            files.slice(lastTopLevel).every((f) => f.startsWith('migrations/')),
+            'all nested files must sort contiguously after top-level files'
+        );
+    });
+
     it('has no unnumbered SQL files', () => {
         const files = listMigrationFiles();
-        const unnumbered = files.filter((f) => !/^\d{3}_/.test(f));
+        const unnumbered = files.filter((f) => !/^\d{3}_/.test(path.basename(f)));
         assert.deepEqual(unnumbered, [], `unexpected unnumbered files: ${unnumbered.join(', ')}`);
     });
 });

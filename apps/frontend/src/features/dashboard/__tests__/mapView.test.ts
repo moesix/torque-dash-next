@@ -61,6 +61,14 @@ describe('resolveFrameAtCursor', () => {
     expect(near!.timestamp).toBe('2026-01-01T00:00:20.000Z');
   });
 
+  it('pins to the EARLIER frame on an exact tie (unified cursor semantics)', () => {
+    // 00:00:05 is exactly halfway between frame 0 and frame 1: the map
+    // marker (and summary gauges) must agree on the EARLIER frame.
+    const f = resolveFrameAtCursor(frames, at('2026-01-01T00:00:05.000Z'));
+    expect(f).not.toBeNull();
+    expect(f!.timestamp).toBe('2026-01-01T00:00:00.000Z');
+  });
+
   it('returns null when the nearest frame has no coordinates', () => {
     const gpsless: TelemetryFrame[] = [
       frame('2026-01-01T00:00:00.000Z', null, null),

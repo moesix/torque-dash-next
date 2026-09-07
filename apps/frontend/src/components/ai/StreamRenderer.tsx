@@ -68,6 +68,19 @@ export default function StreamRenderer({ stream, onDone, onError, onWarning }: P
 
   useEffect(() => {
     let cancelled = false;
+
+    // New stream arriving (second analysis run): reset accumulators so tokens
+    // append to a clean slate instead of the previous run's text.
+    contentRef.current = '';
+    reasoningRef.current = '';
+    setContentText('');
+    setReasoningText('');
+    setDone(false);
+    if (flushTimerRef.current) {
+      clearTimeout(flushTimerRef.current);
+      flushTimerRef.current = null;
+    }
+
     const reader = stream.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
@@ -89,7 +102,9 @@ export default function StreamRenderer({ stream, onDone, onError, onWarning }: P
             if (data === '[DONE]') {
               flushNow();
               setDone(true);
-              onDoneRef.current?.(contentRef.current);
+              if (!cancelled) {
+                onDoneRef.current?.(contentRef.current);
+              }
               return;
             }
             try {
@@ -118,7 +133,9 @@ export default function StreamRenderer({ stream, onDone, onError, onWarning }: P
         }
         flushNow();
         setDone(true);
-        onDoneRef.current?.(contentRef.current);
+        if (!cancelled) {
+          onDoneRef.current?.(contentRef.current);
+        }
       } catch (err) {
         if (!cancelled) {
           onErrorRef.current?.(err instanceof Error ? err.message : 'Stream failed');

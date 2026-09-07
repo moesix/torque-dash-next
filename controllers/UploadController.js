@@ -4,7 +4,6 @@ const Session = require('../models').Session;
 const Vehicle = require('../models').Vehicle;
 const Settings = require('../models').Settings;
 const userCache = require('../lib/userCache');
-const ssrfGuard = require('../lib/ssrfGuard');
 const ingestBuffer = require('../services/ingestBuffer');
 const runtime = require('../config/runtime');
 
@@ -148,23 +147,6 @@ class UploadController {
 
             // Respond immediately — do NOT await the DB flush.
             res.status(200).send('OK!');
-
-            // Fire-and-forget forwardUrls (SSRF-guarded via safeFetch, 3s timeout).
-            // Deliberately outside the request path: never awaited.
-            if (Array.isArray(user.forwardUrls) && user.forwardUrls.length) {
-                setImmediate(async () => {
-                    for (const url of user.forwardUrls) {
-                        try {
-                            await ssrfGuard.safeFetch(url, {
-                                method: 'GET',
-                                signal: AbortSignal.timeout(3000)
-                            });
-                        } catch (e) {
-                            // unsafe URLs / network errors — skip this URL
-                        }
-                    }
-                });
-            }
         } catch (err) {
             res.status(500).json({ error: 'Internal server error' });
             console.error(err.message || err);

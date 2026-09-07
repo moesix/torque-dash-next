@@ -1,11 +1,15 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Vehicle } from '@/lib/types';
 
 interface Props {
   vehicles: Vehicle[];
   currentVehicleId: number | null | undefined;
-  onReassign: (vehicleId: number | null) => void;
+  onReassign: (vehicleId: number | null) => void | Promise<void>;
   onClose: () => void;
+  /** Optional notifier fired when a reassignment attempt fails. The dialog
+   *  renders the error itself (see below) and stays open so the user can
+   *  retry; parents may use this to surface the failure elsewhere too. */
+  onError?: (message: string) => void;
 }
 
 export default function VehicleReassignDialog({
@@ -13,12 +17,29 @@ export default function VehicleReassignDialog({
   currentVehicleId,
   onReassign,
   onClose,
+  onError,
 }: Props) {
   const dialogRef = useRef<HTMLDialogElement | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     dialogRef.current?.showModal();
   }, []);
+
+  /** Await the parent's reassignment, then close only on success. On failure
+   *  the dialog shows the error inline and stays open for a retry. */
+  async function handleSelect(vehicleId: number | null) {
+    try {
+      setError(null);
+      await onReassign(vehicleId);
+      onClose();
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : 'Failed to reassign vehicle.';
+      setError(message);
+      onError?.(message);
+    }
+  }
 
   return (
     <dialog
@@ -35,7 +56,7 @@ export default function VehicleReassignDialog({
       <div className="mt-4 space-y-2">
         <button
           type="button"
-          onClick={() => onReassign(null)}
+          onClick={() => void handleSelect(null)}
           className={`w-full rounded border px-4 py-2 text-left text-sm hover:bg-gray-50 dark:border-[var(--border-default)] dark:hover:bg-[var(--bg-surface)] ${
             currentVehicleId == null
               ? 'border-indigo-500 bg-indigo-50 dark:border-indigo-400 dark:bg-indigo-900/20'
@@ -48,7 +69,7 @@ export default function VehicleReassignDialog({
           <button
             key={v.id}
             type="button"
-            onClick={() => onReassign(v.id)}
+            onClick={() => void handleSelect(v.id)}
             className={`w-full rounded border px-4 py-2 text-left text-sm hover:bg-gray-50 dark:border-[var(--border-default)] dark:hover:bg-[var(--bg-surface)] ${
               currentVehicleId === v.id
                 ? 'border-indigo-500 bg-indigo-50 dark:border-indigo-400 dark:bg-indigo-900/20'
@@ -62,6 +83,14 @@ export default function VehicleReassignDialog({
           </button>
         ))}
       </div>
+      {error ? (
+        <p
+          role="alert"
+          className="mt-3 text-sm text-rose-600 dark:text-rose-400"
+        >
+          {error}
+        </p>
+      ) : null}
       <div className="mt-4 flex justify-end">
         <button
           type="button"

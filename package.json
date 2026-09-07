@@ -8,6 +8,7 @@
     "lint": "eslint .",
     "test": "node --test 'test/*.test.js' && node scripts/checkMirrors.js && node scripts/checkTestIntegrity.js",
     "test:coverage": "c8 node --test 'test/*.test.js' && node scripts/checkMirrors.js && node scripts/checkTestIntegrity.js",
+    "verify": "npm test && npm run lint && cd apps/frontend && npm test && npx tsc --noEmit",
     "prepare": "husky || true"
   },
   "keywords": [],

@@ -9,6 +9,9 @@ pre-built images from GitHub Container Registry (GHCR). No repo clone needed.
 
 - **Docker** 20.10+ and **Docker Compose** v2
 - A server with ports `8080` (frontend) and optionally `5432` (database) available
+- The Express API is reachable only on the internal compose network; the
+  frontend nginx proxies `/api` to it. No host port is published for the
+  backend.
 - `openssl` for generating secure keys
 
 ---
@@ -48,7 +51,8 @@ Pro uploads:
 - **Set `UPLOAD_API_TOKEN` in `.env` (recommended)** — generate with
   `openssl rand -hex 24`. The env value wins over any Settings-UI token and
   locks the UI while it is set.
-- **Or generate from the Settings UI** after first login (shown once).
+- **Or generate from the Settings UI** after first login (shown once). Token
+  rotation in the UI is **admin-only** (the first registered user; see §5/§6).
 
 Once a token is configured anywhere, uploads without a matching
 `Authorization: Bearer <token>` header return `401`. Email-only ingestion
@@ -60,7 +64,7 @@ that is insecure for production.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `LLM_ENCRYPTION_KEY` | _(unset)_ | 64-char hex key for AES-256-GCM encryption of LLM API keys at rest. Generate with `openssl rand -hex 32`. Required for AI analysis feature. |
-| `COOKIE_SECURE` | `false` | Set to `true` behind a HTTPS reverse proxy (recommended for production). |
+| `COOKIE_SECURE` | `false` | Set to `true` behind a HTTPS reverse proxy (recommended for production). `SameSite` is derived from this variable (`none` when true, else `lax`) — there is no separate `COOKIE_SAMESITE`. Required before entering BYOK LLM keys (see §5). |
 
 ### Other variables
 
@@ -81,7 +85,7 @@ This pulls three images and starts the services:
 | Service | Image | Port |
 |---------|-------|------|
 | `db` | `timescale/timescaledb:2.29.1-pg16` | internal only |
-| `backend` | `ghcr.io/moesix/torque-dash-next-backend` | `3000` |
+| `backend` | `ghcr.io/moesix/torque-dash-next-backend` | `3000` (internal `expose` only — not published on the host) |
 | `frontend` | `ghcr.io/moesix/torque-dash-next-frontend` | `8080` |
 
 Images are tagged with:
@@ -126,11 +130,13 @@ chain:
 ## 5. First-time setup
 
 1. Open **http://localhost:8080** in your browser.
-2. Register the first account at the sign-up page.
+2. Register the first account at the sign-up page — **this account becomes the
+   site admin** (`isAdmin`), the only account that can change server settings.
 3. Sign in with your credentials.
 4. Configure the upload API token — **required for production** (see step 2's
    "Upload API token" section): either set `UPLOAD_API_TOKEN` in `.env` before
-   launching, or generate one from **Settings** now.
+   launching, or generate one from **Settings** now (admin only — which the
+   first account is).
 5. Configure Torque Pro (see below).
 
 ### Configure Torque Pro
@@ -144,7 +150,7 @@ In Torque Pro → *Settings → Web Preferences*:
 ### Disable public registration
 
 After creating all user accounts, disable public sign-up via the **Settings**
-UI toggle or set `DISABLE_REGISTRATION=true` in your `.env` file.
+UI toggle (admin only) or set `DISABLE_REGISTRATION=true` in your `.env` file.
 
 ### AI analysis (optional)
 
@@ -152,6 +158,13 @@ torqueDASH-Next supports BYOK (Bring Your Own Key) AI-powered session analysis.
 Go to **Settings** to configure an LLM provider (OpenAI, Anthropic, DeepSeek,
 Ollama, or any OpenAI-compatible endpoint). Set `LLM_ENCRYPTION_KEY` in your
 `.env` to encrypt API keys at rest.
+
+> **LLM keys are admin-managed and need TLS.** Only the admin account (the
+> first registered user; see §6) can configure the LLM provider. **Set
+> `COOKIE_SECURE=true` / terminate TLS at the edge before using BYOK LLM
+> keys** — the keys are submitted over the browser connection and would
+> otherwise travel over plain HTTP. Custom (OpenAI-compatible) endpoints are
+> SSRF-checked server-side before any request.
 
 ---
 
@@ -169,6 +182,37 @@ docker compose up -d
 
 Data is persisted in the `pgdata` Docker volume — it survives container
 recreations. The TimescaleDB migration runs automatically on startup if needed.
+
+### Admin account on upgrade
+
+On an **upgraded** deployment (users created before migration `017`), the
+migration promotes the **lowest-id user** to admin (`isAdmin = true`), because
+that account predates the first-registered-user bootstrap rule. On a
+multi-user deployment the operator may **not** be that account — without admin
+access the token rotation, LLM, registration and retention controls are
+unreachable.
+
+Verify who was promoted after upgrading:
+
+```bash
+docker compose exec db \
+  psql -U torquedash -d torquedash -c 'SELECT id, email, "isAdmin" FROM "Users";'
+```
+
+To promote (or demote) a specific account, run the recovery script on the
+backend host (reads `DATABASE_URL` from your environment, like `migrate.js`):
+
+```bash
+# Promote the operator's account to admin
+node scripts/promote-admin.js operator@example.com
+
+# Remove admin from an account
+node scripts/promote-admin.js --demote someone@example.com
+```
+
+The script prints the affected user's `id` + `email`, is idempotent
+(re-running is a no-op), and exits non-zero with a clear message if no user
+matches.
 
 ### ⚠️ TimescaleDB extension upgrade (2.15.3 → 2.29.1)
 
@@ -294,6 +338,8 @@ docker compose down -v
 - **db** — TimescaleDB 2.29 on PostgreSQL 16. Hypertable with compression (7-day
   policy). Data in `pgdata` volume.
 - **backend** — Node.js/Express API. Runs as non-root user (`appuser`).
-  Handles telemetry ingestion, auth, session management.
+  Handles telemetry ingestion, auth, session management. Reachable only on the
+  internal compose network — no host port is published; the frontend nginx
+  proxies `/api` to it.
 - **frontend** — Unprivileged Nginx serving the React SPA. Proxies `/api`
   requests to the backend.

@@ -305,3 +305,24 @@ export function computeTotalTrim(frames: TelemetryFrame[]): [number, number | nu
 
   return data;
 }
+
+// ── Cursor frame helpers ────────────────────────────────────────────────────
+
+/** Index of the frame whose timestamp is nearest `t` (epoch ms).
+ *  Tie-break: the EARLIER frame wins (matches the map marker semantics
+ *  established by the original GpsTrackMap binary search). */
+export function findNearestFrameIndex(timestamps: number[], t: number): number {
+  if (timestamps.length === 0) return -1;
+  let lo = 0, hi = timestamps.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (timestamps[mid] < t) lo = mid + 1; else hi = mid;
+  }
+  if (lo > 0) {
+    const diffPrev = Math.abs(timestamps[lo - 1] - t);
+    const diffCurr = Math.abs(timestamps[lo] - t);
+    // <= : earlier frame wins ties (lo-1 is the earlier neighbor)
+    if (diffPrev <= diffCurr) return lo - 1;
+  }
+  return lo;
+}

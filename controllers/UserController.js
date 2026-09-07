@@ -6,8 +6,17 @@ const { nanoid } = require('nanoid');
 const crypto = require('crypto');
 const runtime = require('../config/runtime');
 const { userByIdCache } = require('../config/passport');
-const Joi = require('joi');
-const { validateLlmThinkingMode, validateLlmMaxTokens, validateRetentionEnabled, validateRetentionDays } = require('../lib/validators');
+const { validateLlmThinkingMode, validateLlmMaxTokens, validateRetentionEnabled, validateRetentionDays, validateAnalysisRetentionDays, validateProvider } = require('../lib/validators');
+
+// Admin = first registered user (bootstrap at register time, plan 099). Any
+// admin-only mutation must call this first and return 403 when it fails.
+function requireAdmin(req, res) {
+    if (!req.user || !req.user.isAdmin) {
+        res.status(403).json({ error: 'Admin access required.' });
+        return false;
+    }
+    return true;
+}
 
 class UserController {
     static async login(req, res, next) {
@@ -58,8 +67,12 @@ class UserController {
             // an identity that migration 015 already folded.
             email = String(email || '').toLowerCase();
 
-            // Validate if user data ok
-            const { error } = User.validate(req.body);
+            // Validate if user data ok. Runs AFTER the lowercase assignment so
+            // Joi validates the exact identity that gets persisted — email
+            // normalization happens in the model's hooks anyway, and the
+            // register test suite asserts the 400 path fires on the validator
+            // message regardless of casing.
+            const { error } = User.validate({ email, password });
             if (error) {
                 return res.status(400).json({ error: error.message });
             }
@@ -70,62 +83,19 @@ class UserController {
                 return res.status(409).json({ error: 'Registration failed. Please try a different email.' });
             }
 
-            // Save new user to db
-            user = await User.create({ email: email, password: password });
+            // Save new user to db. First-registered-user bootstrap (plan 099):
+            // when no user row exists yet, this account becomes the admin
+            // (isAdmin = count === 0). Count and create are not atomic together,
+            // so a theoretical simultaneous-registration race could yield two
+            // admins — acceptable for a personal deployment.
+            const userCount = await User.count();
+            user = await User.create({ email: email, password: password, isAdmin: userCount === 0 });
 
             // Send response
             return res.status(201).json({ ok: true });
 
         } catch (err) {
             console.error('Error:', err.message);
-            res.status(500).json({ error: 'Internal server error' });
-        }
-    }
-    static async getForwardUrls(req, res) {
-        try{
-            let user = await User.findOne({
-                where: { id: req.user.id }
-            });
-            let forwardUrls = user.forwardUrls;
-            if(!forwardUrls) return res.send([]);
-            res.send(forwardUrls);
-        }
-        catch(err) {
-            console.error(err.message || err);
-            res.status(500).json({ error: 'Internal server error' });
-        }
-    }
-    static async updateForwardUrls(req, res) {
-        try{
-            let urls = req.body.urls;
-            let user = await User.findOne({
-                where: { id: req.user.id }
-            });
-            if(!user) return res.status(404).json({ error: 'User not found' });
-            if(!urls) {
-                await user.update({
-                    forwardUrls: null
-                });
-                return res.sendStatus(200);
-            }
-            if(!Array.isArray(urls)) {
-                return res.status(400).json({ error: 'URLs must be an array.' });
-            }
-            if(urls.length > 10) {
-                return res.status(400).json({ error: 'Too many URLs. Maximum is 10.' });
-            }
-            const schema = Joi.array().items(Joi.string().uri());
-            const { error } = schema.validate(urls);
-            if(error) {
-                return res.status(400).json({ error: 'Invalid URL: ' + error.details[0].message });
-            }
-            await user.update({
-                forwardUrls: urls
-            });
-            res.sendStatus(200);
-        }
-        catch(err) {
-            console.error(err.message || err);
             res.status(500).json({ error: 'Internal server error' });
         }
     }
@@ -168,11 +138,25 @@ class UserController {
         try {
             const settings = await Settings.getSingleton();
             const envDisabled = process.env.DISABLE_REGISTRATION === 'true';
-            res.set('Cache-Control', 'public, max-age=30');
-            res.json({
+            const body = {
                 disableRegistration: settings.disableRegistration || envDisabled,
                 tokenFromEnv: runtime.isFromEnv(),
-            });
+            };
+            // isAdmin is derived from the SESSION (never from client input) and
+            // only surfaced when authenticated. Anonymous callers (the login and
+            // register pages) keep the original two-field public shape.
+            if (req.user && req.user.id) {
+                body.isAdmin = Boolean(req.user.isAdmin);
+            }
+            // Authenticated responses embed the session-derived isAdmin, so
+            // they are private per-user; only the anonymous two-field shape
+            // may be cached in shared caches.
+            if (req.user && req.user.id) {
+                res.set('Cache-Control', 'private, max-age=30');
+            } else {
+                res.set('Cache-Control', 'public, max-age=30');
+            }
+            res.json(body);
         } catch (err) {
             console.error(err.message || err);
             res.status(500).json({ error: 'Internal server error' });
@@ -182,20 +166,29 @@ class UserController {
         try {
             const settings = await Settings.getSingleton();
             const envDisabled = process.env.DISABLE_REGISTRATION === 'true';
-            res.set('Cache-Control', 'private, max-age=30');
-            res.json(settingsView(settings, {
+            const extras = {
                 disableRegistration: settings.disableRegistration || envDisabled,
-            }));
+            };
+            // Same session-derived isAdmin as getSettings: lets the SPA decide
+            // whether to render admin-only cards from the full-settings payload.
+            if (req.user && req.user.id) {
+                extras.isAdmin = Boolean(req.user.isAdmin);
+            }
+            res.set('Cache-Control', 'private, max-age=30');
+            res.json(settingsView(settings, extras));
         } catch (err) {
             console.error(err.message || err);
             res.status(500).json({ error: 'Internal server error' });
         }
     }
-    // Authenticated toggle of site settings. NOTE: the app is single-operator,
-    // so ANY authenticated user is treated as an operator and may flip this.
-    // The deploy-time DISABLE_REGISTRATION env var always wins over this toggle.
+    // Authenticated toggle of site settings. ADMIN-ONLY (plan 099): the first
+    // registered user is the operator, so only that account may flip the
+    // registration toggle, rotate the upload token, or change LLM/vehicle/
+    // retention/timezone config. The deploy-time DISABLE_REGISTRATION env var
+    // always wins over the runtime toggle.
     static async updateSettings(req, res) {
         try {
+            if (!requireAdmin(req, res)) return;
             const { disableRegistration, uploadApiToken } = req.body;
             const envDisabled = process.env.DISABLE_REGISTRATION === 'true';
 
@@ -232,8 +225,17 @@ class UserController {
             const { llmProvider, llmApiKey, llmModel, llmEndpoint,
                     vehicleMake, vehicleModel, vehicleYear, engineCc } = req.body;
 
-            if (llmProvider !== undefined) updateData.llmProvider = llmProvider;
-            if (llmModel !== undefined) updateData.llmModel = llmModel;
+            if (llmProvider !== undefined) {
+              const r = validateProvider(llmProvider);
+              if (!r.ok) return res.status(400).json({ error: r.error });
+              updateData.llmProvider = llmProvider;
+            }
+            if (llmModel !== undefined) {
+              if (typeof llmModel !== 'string' || llmModel.length > 200) {
+                return res.status(400).json({ error: 'llmModel must be a string of at most 200 characters.' });
+              }
+              updateData.llmModel = llmModel;
+            }
             if (llmEndpoint !== undefined) {
               if (llmEndpoint !== null) {
                 try { new URL(llmEndpoint); } catch {
@@ -306,6 +308,17 @@ class UserController {
               updateData.retentionDays = req.body.retentionDays;
             }
 
+            // Handle analysisRetentionDays if provided (nullable: null clears —
+            // disables the app-side Analyses prune job). Validated against the
+            // same 90-365 window as retentionDays; ONLY reachable behind the
+            // admin gate above. No add_retention_policy call — the Analyses
+            // prune job (services/analysesRetention.js) reads this value.
+            if (req.body.analysisRetentionDays !== undefined) {
+              const r = validateAnalysisRetentionDays(req.body.analysisRetentionDays);
+              if (!r.ok) return res.status(400).json({ error: r.error });
+              updateData.analysisRetentionDays = req.body.analysisRetentionDays;
+            }
+
             // API key requires encryption
             if (llmApiKey !== undefined) {
               if (llmApiKey === null) {
@@ -373,6 +386,9 @@ class UserController {
     // and also held in the runtime in-memory holder for fast rate-limiter checks.
     static async generateUploadToken(req, res) {
         try {
+            // Admin-only: rotating the shared upload token locks out every
+            // configured Torque client, so only the operator may do it.
+            if (!requireAdmin(req, res)) return;
             if (runtime.isFromEnv()) {
                 return res.status(403).json({
                     error: 'Upload API token is managed via the UPLOAD_API_TOKEN environment variable. Unset it to use the app UI.',
@@ -416,6 +432,12 @@ class UserController {
 
             // Update password (beforeUpdate hook will hash it)
             await user.update({ password: newPassword });
+
+            // Invalidate every OTHER session: deserializeUser compares the tv stored in
+            // each client's cookie against this column and rejects mismatches. Bump it
+            // AFTER the password update (two separate update() calls keep the beforeUpdate
+            // password-hashing hook from re-hashing on this call).
+            await user.update({ tokenVersion: (user.tokenVersion || 0) + 1 });
 
             // Invalidate the deserializeUser cache so the next request re-reads
             // this user from the DB instead of serving a pre-change snapshot.
@@ -466,6 +488,7 @@ function settingsView(settings, extras = {}) {
         timezoneOffset: settings.timezoneOffset ?? 0,
         retentionEnabled: settings.retentionEnabled ?? false,
         retentionDays: settings.retentionDays ?? 365,
+        analysisRetentionDays: settings.analysisRetentionDays ?? null,
         ...extras,
     };
 }

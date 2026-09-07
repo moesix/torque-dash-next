@@ -1,7 +1,8 @@
 import { useMemo } from 'react';
 import type { TelemetryFrame } from '@/lib/types';
-import { getSeriesData } from '@/lib/pidDecode';
+import { getSeriesData, findNearestFrameIndex } from '@/lib/pidDecode';
 import { usePlaybackStore } from '@/app/playbackStore';
+import { BRAND_TEAL, SERIES_COLORS } from '@/lib/chartColors';
 
 interface Props {
   frames: TelemetryFrame[];
@@ -107,35 +108,6 @@ function RingGauge({ label, value, max, unit, color }: GaugeProps) {
   );
 }
 
-// ── Binary search for closest frame to cursorTime ───────────────────────────
-
-function findClosestFrame(
-  timestamps: number[],
-  cursorTime: number,
-): number {
-  if (timestamps.length === 0) return -1;
-
-  let lo = 0;
-  let hi = timestamps.length - 1;
-
-  while (lo < hi) {
-    const mid = (lo + hi) >>> 1;
-    if (timestamps[mid] < cursorTime) {
-      lo = mid + 1;
-    } else {
-      hi = mid;
-    }
-  }
-
-  // lo is now the first index >= cursorTime; check neighbours for closest
-  if (lo > 0) {
-    const diffPrev = Math.abs(timestamps[lo - 1] - cursorTime);
-    const diffCurr = Math.abs(timestamps[lo] - cursorTime);
-    if (diffPrev < diffCurr) return lo - 1;
-  }
-  return lo;
-}
-
 // ── Main Component ──────────────────────────────────────────────────────────
 
 export default function SessionSummaryCard({
@@ -200,7 +172,7 @@ export default function SessionSummaryCard({
       return { rpm: 0, coolant: 0, speed: 0 };
     }
 
-    const idx = findClosestFrame(sortedTimestamps, cursorTime);
+    const idx = findNearestFrameIndex(sortedTimestamps, cursorTime);
     if (idx < 0) return { rpm: 0, coolant: 0, speed: 0 };
 
     return {
@@ -221,21 +193,21 @@ export default function SessionSummaryCard({
           value={currentValues.rpm}
           max={maxRpm ?? 8000}
           unit=" rpm"
-          color="#009999"
+          color={BRAND_TEAL}
         />
         <RingGauge
           label="Coolant"
           value={currentValues.coolant}
           max={maxCoolant ?? 120}
           unit="°C"
-          color="#d97706"
+          color={SERIES_COLORS[3]}
         />
         <RingGauge
           label="Speed"
           value={currentValues.speed}
           max={maxSpeed ?? 240}
           unit=" km/h"
-          color="#16a34a"
+          color={SERIES_COLORS[1]}
         />
       </div>
 

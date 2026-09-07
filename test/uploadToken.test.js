@@ -1,8 +1,14 @@
 'use strict';
 
+// Set dummy env vars BEFORE any module loading so config.js doesn't throw and
+// routes/api.js (the real limiter + uploadLimiterSkip) can be imported.
+process.env.DATABASE_URL = process.env.DATABASE_URL || 'postgres://x:x@localhost/x';
+process.env.SESSION_KEYS = process.env.SESSION_KEYS || 'abc123';
+
 const { test } = require('node:test');
 const assert = require('node:assert');
 const express = require('express');
+const crypto = require('crypto');
 const rateLimit = require('express-rate-limit');
 const runtime = require('../config/runtime');
 
@@ -10,9 +16,10 @@ const runtime = require('../config/runtime');
 // truth. This requires the config module to load, which needs DATABASE_URL
 // and SESSION_KEYS.  Step 6 ensures CI always provides these env vars.
 let makeLimiter;
+let uploadLimiterSkip;
 let canLoadReal;
 try {
-  ({ makeLimiter } = require('../routes/api'));
+  ({ makeLimiter, uploadLimiterSkip } = require('../routes/api'));
   canLoadReal = true;
 } catch {
   canLoadReal = false;
@@ -31,7 +38,21 @@ function localMakeLimiter({ windowMs, max, skip }) {
     });
 }
 
+// Stand-in copy of the production predicate (routes/api.js uploadLimiterSkip)
+// used only when routes/api.js cannot be imported (no DATABASE_URL/SESSION_KEYS).
+// Same constant-time shape: the byte-length pre-check short-circuits before
+// crypto.timingSafeEqual.
+function localUploadLimiterSkip(req) {
+    const token = runtime.getUploadApiToken();
+    if (!token) return false;
+    const header = req.headers.authorization || '';
+    const provided = header.startsWith('Bearer ') ? header.slice(7) : '';
+    if (Buffer.byteLength(provided, 'utf8') !== Buffer.byteLength(token, 'utf8')) return false;
+    return crypto.timingSafeEqual(Buffer.from(provided, 'utf8'), Buffer.from(token, 'utf8'));
+}
+
 const limiter = canLoadReal ? makeLimiter : localMakeLimiter;
+if (!uploadLimiterSkip) uploadLimiterSkip = localUploadLimiterSkip;
 
 function startServer(configure) {
     const app = express();
@@ -171,4 +192,96 @@ test('runtime skip without token set', async () => {
     } finally {
         server.close();
     }
+});
+
+// ---------------------------------------------------------------------------
+// uploadLimiterSkip predicate — the exported function the real /upload limiter
+// runs (routes/api.js). Constant-time: a length pre-check must short-circuit
+// BEFORE crypto.timingSafeEqual so the header can't time the token's bytes.
+// ---------------------------------------------------------------------------
+
+const UPLOAD_TOKEN = 'tok1234567890abcdef'; // 19 chars
+// Real Node HTTP requests expose headers lower-cased (req.headers.authorization).
+const bearer = (t) => ({ headers: { authorization: `Bearer ${t}` } });
+
+test('uploadLimiterSkip: no configured token returns false even with a Bearer header', () => {
+    runtime.setUploadApiToken(null);
+    assert.strictEqual(uploadLimiterSkip(bearer('whatever-token-here')), false);
+});
+
+test('uploadLimiterSkip: wrong-length token returns false without calling timingSafeEqual', () => {
+    runtime.setUploadApiToken(UPLOAD_TOKEN);
+    const original = crypto.timingSafeEqual;
+    let calls = 0;
+    crypto.timingSafeEqual = (...args) => { calls += 1; return original(...args); };
+    try {
+        // 'short' (5 chars) != token length (20): must bail on the length check.
+        assert.strictEqual(uploadLimiterSkip(bearer('short')), false);
+        // Oversized candidates must also bail on length.
+        assert.strictEqual(uploadLimiterSkip(bearer('x'.repeat(21))), false);
+        // Missing header and non-Bearer schemes produce '' -> length mismatch.
+        assert.strictEqual(uploadLimiterSkip({ headers: {} }), false);
+        assert.strictEqual(uploadLimiterSkip({ headers: { authorization: 'Basic abc' } }), false);
+        assert.strictEqual(calls, 0, 'timingSafeEqual must never run on a length mismatch');
+    } finally {
+        crypto.timingSafeEqual = original;
+    }
+});
+
+test('uploadLimiterSkip: equal-length wrong token returns false (timingSafeEqual decides)', () => {
+    runtime.setUploadApiToken(UPLOAD_TOKEN);
+    const original = crypto.timingSafeEqual;
+    let calls = 0;
+    crypto.timingSafeEqual = (...args) => { calls += 1; return original(...args); };
+    try {
+        const wrong = 'x'.repeat(UPLOAD_TOKEN.length);
+        assert.strictEqual(uploadLimiterSkip(bearer(wrong)), false);
+        assert.strictEqual(calls, 1, 'same-length candidates must be compared with timingSafeEqual');
+    } finally {
+        crypto.timingSafeEqual = original;
+    }
+});
+
+test('uploadLimiterSkip: exact matching token returns true', () => {
+    runtime.setUploadApiToken(UPLOAD_TOKEN);
+    assert.strictEqual(uploadLimiterSkip(bearer(UPLOAD_TOKEN)), true);
+});
+
+test('uploadLimiterSkip: empty runtime token returns false', () => {
+    runtime.setUploadApiToken('');
+    assert.strictEqual(uploadLimiterSkip(bearer('')), false);
+    runtime.setUploadApiToken(null);
+});
+
+// Regression (non-ASCII configured token): the skip pre-check must compare
+// BYTE lengths, not UTF-16 code-unit lengths. 'tøken-…' is 8 chars but 10
+// bytes ('ø' and '…' are multi-byte), so an equal-UTF-16-length wrong
+// candidate ('tøken-xx' is also 8 chars) is a DIFFERENT byte length and must
+// bail without ever reaching timingSafeEqual — otherwise the Buffers differ
+// in length and timingSafeEqual throws ERR_CRYPTO_TIMING_SAFE_EQUAL_LENGTH,
+// which would 500 the /upload hot path.
+const UNICODE_TOKEN = 'tøken-…'; // 8 UTF-16 code units, 10 UTF-8 bytes
+const UNICODE_WRONG = 'tøken-xx'; // 8 UTF-16 code units, 9 UTF-8 bytes
+
+test('uploadLimiterSkip: non-ASCII token with equal-UTF16-length wrong candidate returns false WITHOUT throwing', () => {
+    runtime.setUploadApiToken(UNICODE_TOKEN);
+    const original = crypto.timingSafeEqual;
+    let calls = 0;
+    crypto.timingSafeEqual = (...args) => { calls += 1; return original(...args); };
+    try {
+        assert.strictEqual(
+            uploadLimiterSkip(bearer(UNICODE_WRONG)),
+            false,
+            'equal-UTF16-length but different-byte candidate must be rejected on the byte-length pre-check'
+        );
+        assert.strictEqual(calls, 0, 'timingSafeEqual must never see different-length Buffers');
+    } finally {
+        crypto.timingSafeEqual = original;
+    }
+});
+
+test('uploadLimiterSkip: non-ASCII exact token returns true', () => {
+    runtime.setUploadApiToken(UNICODE_TOKEN);
+    assert.strictEqual(uploadLimiterSkip(bearer(UNICODE_TOKEN)), true);
+    runtime.setUploadApiToken(null);
 });

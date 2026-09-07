@@ -17,8 +17,9 @@ import React, { useState, useMemo, useCallback, useRef } from 'react';
 import { useParams } from 'react-router';
 import { exportSessionCsv, getVehicles, reassignSessionVehicle } from '@/lib/api';
 import type { AnalysisPanelHandle } from '@/components/ai/AnalysisPanel';
-import type { Vehicle } from '@/lib/types';
+import type { Session, Vehicle } from '@/lib/types';
 import VehicleReassignDialog from '@/components/vehicles/VehicleReassignDialog';
+import { queryClient } from '@/app/queryClient';
 import Skeleton from '@/components/ui/Skeleton';
 import ErrorAlert from '@/components/ui/ErrorAlert';
 import { usePlaybackStore } from '@/app/playbackStore';
@@ -53,12 +54,32 @@ function safeMax(values: (number | null)[]): number {
   return m;
 }
 
+// ── Playback-cursor bridge ────────────────────────────────────────────────
+
+/**
+ * Local playback-cursor bridge for the overlay charts.
+ *
+ * ReplayDashboard must NOT hold a whole-component `cursorTime` subscription:
+ * the value changes up to 60×/s during playback and scrubbing, and a
+ * dashboard-wide subscription would re-render every child on every tick
+ * (banner, PID panel, metrics table, memoized DiagnosticPanels, GPS map, ...).
+ * OverlayChart is props-driven for the cursor (its own store subscription is a
+ * separate plan), so this small component owns the `cursorTime` subscription
+ * and forwards it — only the two chart instances re-render per tick while
+ * ReplayDashboard only re-renders when session/UI state actually changes.
+ */
+function OverlayChartWithCursor(
+  props: Omit<React.ComponentProps<typeof OverlayChart>, 'cursorTime'>,
+) {
+  const cursorTime = usePlaybackStore((s) => s.cursorTime);
+  return <OverlayChart {...props} cursorTime={cursorTime} />;
+}
+
 // ── Component ────────────────────────────────────────────────────────────
 
 export default function ReplayDashboard() {
   const { id } = useParams<{ id: string }>();
   const setCursorTime = usePlaybackStore((s) => s.setCursorTime);
-  const cursorTime = usePlaybackStore((s) => s.cursorTime);
 
   // ── Data fetching ──────────────────────────────────────────────────
   const { session, frames, isLoading, error, truncated } = useSessionTelemetry(id);
@@ -71,6 +92,10 @@ export default function ReplayDashboard() {
   const [showAnalysisConfirm, setShowAnalysisConfirm] = useState(false);
   const [showReassign, setShowReassign] = useState(false);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  // Error surfacing for the vehicle-reassign flow: a failed vehicle-list load
+  // shows inline next to the button; a failed reassignment is rendered inside
+  // the dialog (which stays open) and mirrored here for the parent.
+  const [reassignError, setReassignError] = useState<string | null>(null);
   // View mode: 'dash' is the default landing view; 'map' shows the
   // GPS track near-fullscreen with the playback transport beneath it.
   const [viewMode, setViewMode] = useState<'dash' | 'map'>('dash');
@@ -78,6 +103,14 @@ export default function ReplayDashboard() {
   // window.print(); cleared again after the print dialog closes.
   const [printMode, setPrintMode] = useState(false);
   const [isPrinting, setIsPrinting] = useState(false);
+  // Ids of the in-flight double-rAF chain that calls window.print(). Stored so
+  // a navigating/unmounting component can cancel the chain — window.print()
+  // must never fire on a page the user has already left.
+  const printRafRef = useRef<number[]>([]);
+  // True only between the moment window.print() is actually invoked and the
+  // reset that follows. Gates the reset effect's timeout fallback so a
+  // backgrounded tab (rAF stalled) cannot collapse the report pre-print.
+  const printInvokedRef = useRef(false);
 
   // ── Computed values ────────────────────────────────────────────────
   const available = useMemo(
@@ -141,12 +174,17 @@ export default function ReplayDashboard() {
     setIsPrinting(true);
     setPrintMode(true);
     // Double rAF so React commits the expanded panels AND ECharts' lazy init
-    // gets a frame to render before the print dialog opens.
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
+    // gets a frame to render before the print dialog opens. Ids are stored so a
+    // navigating/unmounting component can cancel the chain — window.print()
+    // must never fire on a page the user has already left.
+    const raf1 = requestAnimationFrame(() => {
+      const raf2 = requestAnimationFrame(() => {
+        printInvokedRef.current = true;
         window.print();
       });
+      printRafRef.current.push(raf2);
     });
+    printRafRef.current.push(raf1);
   }
 
   // Reset print mode AFTER printing completes. `afterprint` is not fired by
@@ -154,17 +192,39 @@ export default function ReplayDashboard() {
   // isPrinting true (spinner visible) until the dialog actually closes.
   React.useEffect(() => {
     if (!isPrinting) return;
+    // Armed when isPrinting flips true — BEFORE handlePrint's rAF chain runs
+    // and sets it true. This keeps the ordering deterministic.
+    printInvokedRef.current = false;
     const finishPrint = () => {
+      printInvokedRef.current = false;
       setPrintMode(false);
       setIsPrinting(false);
     };
     window.addEventListener('afterprint', finishPrint);
-    const fallback = window.setTimeout(finishPrint, 500);
+    // Fallback ONLY for engines where afterprint never fires — and only once
+    // window.print() has actually been invoked (a backgrounded tab stalls
+    // rAF; without this gate the fallback would reset printMode before the
+    // print, degrading the report).
+    const fallback = window.setTimeout(() => {
+      if (printInvokedRef.current) finishPrint();
+    }, 500);
     return () => {
       window.removeEventListener('afterprint', finishPrint);
       window.clearTimeout(fallback);
+      printRafRef.current.forEach((id) => cancelAnimationFrame(id));
+      printRafRef.current = [];
     };
   }, [isPrinting]);
+
+  // Unmount-only cleanup: navigation away mid-chain cancels the pending
+  // window.print() so it can never fire on whatever page mounts next.
+  React.useEffect(
+    () => () => {
+      printRafRef.current.forEach((id) => cancelAnimationFrame(id));
+      printRafRef.current = [];
+    },
+    [],
+  );
 
   // Reset playback cursor when switching sessions.
   React.useEffect(() => {
@@ -352,9 +412,17 @@ export default function ReplayDashboard() {
             <button
               type="button"
               onClick={async () => {
-                const v = await getVehicles();
-                setVehicles(v ?? []);
-                setShowReassign(true);
+                if (!id) return;
+                setReassignError(null);
+                try {
+                  const v = await getVehicles();
+                  setVehicles(v ?? []);
+                  setShowReassign(true);
+                } catch (err) {
+                  setReassignError(
+                    err instanceof Error ? err.message : 'Failed to load vehicles.',
+                  );
+                }
               }}
               className="whitespace-nowrap rounded p-2.5 min-w-[44px] min-h-[44px] text-xs font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
               title="Reassign to a different vehicle"
@@ -363,6 +431,9 @@ export default function ReplayDashboard() {
             </button>
             {exportError && (
               <span className="text-xs text-red-500">{exportError}</span>
+            )}
+            {!showReassign && reassignError && (
+              <span className="text-xs text-red-500">{reassignError}</span>
             )}
           </div>
         </div>
@@ -415,10 +486,9 @@ export default function ReplayDashboard() {
               ↑
             </button>
           </div>
-          <OverlayChart
+          <OverlayChartWithCursor
             frames={frames}
             sources={selectedSources}
-            cursorTime={cursorTime}
             onCursorMove={handleCursorMove}
           />
         </div>
@@ -442,10 +512,9 @@ export default function ReplayDashboard() {
                 ↓
               </button>
             </div>
-            <OverlayChart
+            <OverlayChartWithCursor
               frames={frames}
               sources={selectedSources}
-              cursorTime={cursorTime}
               onCursorMove={handleCursorMove}
               className="h-full"
             />
@@ -491,10 +560,33 @@ export default function ReplayDashboard() {
           currentVehicleId={session.vehicleId}
           onReassign={async (vehicleId) => {
             if (!id) return;
-            await reassignSessionVehicle(id, vehicleId);
+            try {
+              await reassignSessionVehicle(id, vehicleId);
+              // Patch the session query cache BEFORE the dialog closes so the
+              // banner's vehicle chip reflects the assignment immediately.
+              // Query key mirrors useSessionTelemetry (['session', id]).
+              queryClient.setQueryData<Session | undefined>(['session', id], (old) => {
+                if (!old) return old;
+                const assigned = vehicles.find((v) => v.id === vehicleId);
+                return {
+                  ...old,
+                  vehicleId,
+                  vehicleName: assigned ? assigned.name : null,
+                };
+              });
+            } catch (err) {
+              // Rethrow so the dialog renders the error and stays open — it
+              // awaits onReassign and only closes after this resolves.
+              throw err instanceof Error
+                ? err
+                : new Error('Failed to reassign vehicle.');
+            }
+          }}
+          onError={setReassignError}
+          onClose={() => {
+            setReassignError(null);
             setShowReassign(false);
           }}
-          onClose={() => setShowReassign(false)}
         />
       )}
 

@@ -10,7 +10,7 @@
  * - Dark mode compatible, matches OverlayChart styling
  */
 
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, memo } from 'react';
 import * as echarts from 'echarts/core';
 import { LineChart } from 'echarts/charts';
 import {
@@ -24,6 +24,7 @@ import {
 import { CanvasRenderer } from 'echarts/renderers';
 import type { TelemetryFrame, SeriesSource } from '@/lib/types';
 import { getSeriesData, getAvailableSeries } from '@/lib/pidDecode';
+import { colorForUnit, BRAND_TEAL, BRAND_TEAL_AREA } from '@/lib/chartColors';
 
 // Tree-shaken ECharts build — same as OverlayChart + MarkAreaComponent
 echarts.use([
@@ -62,8 +63,10 @@ export interface MarkAreaConfig {
 export interface DiagnosticPanelProps {
   title: string;
   frames: TelemetryFrame[];
-  /** PID keys to plot — resolved internally against available series. */
-  pids: string[];
+  /** PID keys to plot — resolved internally against available series.
+   *  Readonly so callers can pass module-scope `as const` tuples (a stable
+   *  reference is required for React.memo to skip cursor-tick re-renders). */
+  pids: readonly string[];
   /** Computed series to overlay (e.g., Total Trim). */
   computedSeries?: ComputedSeries[];
   /** Reference lines (e.g., 0-line). */
@@ -90,7 +93,7 @@ function findSource(
 
 // ── Component ────────────────────────────────────────────────────────────
 
-export default function DiagnosticPanel({
+function DiagnosticPanel({
   title,
   frames,
   pids,
@@ -172,10 +175,7 @@ export default function DiagnosticPanel({
     for (let i = 0; i < resolvedSources.length; i++) {
       const src = resolvedSources[i];
       const data = getSeriesData(frames, src);
-      const color = src.unit === 'rpm' ? '#009999' : src.unit === 'km/h' ? '#f97316'
-        : src.unit === 'V' ? '#16a34a' : src.unit === ':1' ? '#92400e'
-        : src.unit === '°C' ? '#dc2626' : src.unit === 'psi' ? '#06b6d4'
-        : ['#009999', '#16a34a', '#dc2626', '#d97706', '#8b5cf6', '#f97316'][i % 6];
+      const color = colorForUnit(src.unit, i);
 
       seriesOptions.push({
         name: src.short,
@@ -230,7 +230,7 @@ export default function DiagnosticPanel({
           seriesObj.markArea = {
             silent: true,
             itemStyle: {
-              color: markAreas[0]?.color ?? 'rgba(0,153,153,0.15)',
+              color: markAreas[0]?.color ?? BRAND_TEAL_AREA,
             },
             data: markAreas.map((ma) => [
               { yAxis: ma.yFrom, name: 'lower' },
@@ -270,8 +270,8 @@ export default function DiagnosticPanel({
             height: 20,
             borderColor: 'transparent',
             backgroundColor: 'rgba(0,153,153,0.08)',
-            fillerColor: 'rgba(0,153,153,0.15)',
-            handleStyle: { color: '#009999' },
+            fillerColor: BRAND_TEAL_AREA,
+            handleStyle: { color: BRAND_TEAL },
             textStyle: { color: '#6b7280', fontSize: 10 },
           },
         ],
@@ -327,3 +327,9 @@ export default function DiagnosticPanel({
     </div>
   );
 }
+
+// Memoized: all props (title literal, query-cached `frames`, module-scope
+// pids/yAxisOverrides/markLines/markAreas, memoized computedSeries, boolean
+// forceExpanded) are referentially stable between unrelated parent renders, so
+// the data-rebuild effect below must not re-run on playback-cursor ticks.
+export default memo(DiagnosticPanel);
