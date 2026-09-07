@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
-import { getAllAnalyses, getAnalysis, exportAnalyses, getVehicles } from '@/lib/api';
+import { getAllAnalyses, getAnalysis, exportAnalyses, getVehicles, deleteAnalysis, ApiError } from '@/lib/api';
 import type { AnalysisPreview, Analysis, Vehicle } from '@/lib/types';
 
 /**
@@ -18,6 +18,9 @@ export default function AnalysisHistory() {
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [expandedMap, setExpandedMap] = useState<Map<number, Analysis>>(new Map());
   const [loadingId, setLoadingId] = useState<number | null>(null);
+  // Rows with a delete in flight. A Set (not a single id slot) so row A's
+  // completion can't re-enable row B's button while B is still deleting.
+  const [deletingIds, setDeletingIds] = useState<Set<number>>(new Set());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -66,6 +69,67 @@ export default function AnalysisHistory() {
     } finally {
       setLoadingId(null);
     }
+  }
+
+  async function handleDeleteAnalysis(preview: AnalysisPreview) {
+    // A delete is already in flight for this row — ignore the double-click
+    // instead of firing a second DELETE that would 404 on the now-missing row.
+    if (deletingIds.has(preview.id)) return;
+    // Cross-session rows carry the owning sessionId on the preview (the
+    // listAllAnalyses endpoint selects it); the delete endpoint re-checks
+    // ownership server-side regardless.
+    const sessionId = preview.sessionId;
+    if (sessionId == null) {
+      setError('This analysis is missing its session and cannot be deleted.');
+      return;
+    }
+    if (!confirm('Delete this analysis? This cannot be undone. Export or copy it first if you need to keep it.')) {
+      return;
+    }
+    setDeletingIds((ids) => new Set(ids).add(preview.id));
+    setError(null);
+    try {
+      await deleteAnalysis(String(sessionId), preview.id);
+      removeAnalysisLocally(preview);
+      setTotal((t) => Math.max(0, t - 1));
+      // If the deleted row was the last one on a non-first page, step back so
+      // the list doesn't strand the user on an empty page.
+      if (analyses.length === 1 && page > 0) {
+        setPage((p) => p - 1);
+      }
+    } catch (err) {
+      // A 404 means the row is ALREADY gone (e.g. the double-clicked second
+      // DELETE, or another tab deleted it) — the desired end state is met,
+      // so treat it as success rather than showing a spurious error.
+      if (err instanceof ApiError && err.status === 404) {
+        removeAnalysisLocally(preview);
+        setTotal((t) => Math.max(0, t - 1));
+        if (analyses.length === 1 && page > 0) {
+          setPage((p) => p - 1);
+        }
+      } else {
+        setError('Failed to delete analysis.');
+      }
+    } finally {
+      setDeletingIds((ids) => {
+        const next = new Set(ids);
+        next.delete(preview.id);
+        return next;
+      });
+    }
+  }
+
+  /** Drop a row from the local list and any expanded detail, no matter which
+   *  delete path (success or already-deleted 404) reached the end state. */
+  function removeAnalysisLocally(preview: AnalysisPreview) {
+    setAnalyses((rows) => rows.filter((x) => x.id !== preview.id));
+    setExpandedMap((prev) => {
+      if (!prev.has(preview.id)) return prev;
+      const next = new Map(prev);
+      next.delete(preview.id);
+      return next;
+    });
+    if (loadingId === preview.id) setLoadingId(null);
   }
 
   const totalPages = Math.ceil(total / limit);
@@ -141,8 +205,29 @@ export default function AnalysisHistory() {
                       {a.provider}/{a.model} — {new Date(a.createdAt).toLocaleString()}
                     </p>
                   </div>
-                  <span className="text-xs text-gray-400 shrink-0 ml-2">
-                    {isLoading ? '...' : full ? '−' : '+'}
+                  <span className="flex shrink-0 items-center ml-2">
+                    <button
+                      type="button"
+                      aria-label="Delete analysis"
+                      disabled={deletingIds.has(a.id)}
+                      aria-busy={deletingIds.has(a.id) || undefined}
+                      onClick={(e) => {
+                        // Stop the card's expand toggle (header click) from firing.
+                        e.stopPropagation();
+                        handleDeleteAnalysis(a);
+                      }}
+                      onKeyDown={(e) => {
+                        // Enter/Space on the button must not reach the header's
+                        // role="button" key handler and toggle the card.
+                        e.stopPropagation();
+                      }}
+                      className="text-xs text-gray-500 hover:text-rose-600 dark:text-gray-400 dark:hover:text-rose-400 disabled:opacity-50 disabled:cursor-wait mr-3"
+                    >
+                      {deletingIds.has(a.id) ? 'Deleting…' : 'Delete'}
+                    </button>
+                    <span className="text-xs text-gray-400">
+                      {isLoading ? '...' : full ? '−' : '+'}
+                    </span>
                   </span>
                 </div>
 

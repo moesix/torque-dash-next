@@ -2,8 +2,8 @@
 
 This document describes the architecture of the Tier-2 modernization of
 `torque-dash`. It covers the high-level topology, backend internals, frontend
-internals, the synchronized-replay data flow, and the (currently conceptual)
-containerisation topology.
+internals, the synchronized-replay data flow, and the containerisation
+topology (the production Docker Compose deployment — see `docs/deployment.md`).
 
 ---
 
@@ -43,10 +43,10 @@ flowchart LR
    (email-gated +        │   │    ├─ lib/userCache (positive+neg)     │
     Bearer token req'd)  │   │    ├─ services/ingestBuffer           │──▶  PostgreSQL
                           │   │    │     └─ Log.bulkCreate (batched)  │      + TimescaleDB
-   Browser SPA  ──/api──▶ │   │    └─ lib/ssrfGuard (forwardUrls)     │      hypertable Logs
+   Browser SPA  ──/api──▶ │   │                              │      hypertable Logs
     CORS + express-session  │   ├─ SessionController (list/metadata)    │
                           │   ├─ TelemetryController.range (paged)    │
-                          │   └─ UserController (auth/forwardUrls)    │
+                          │   └─ UserController (auth)                │
                           └─────────────────────────────────────────┘
 ```
 
@@ -54,9 +54,6 @@ flowchart LR
 `Torque Pro` → `GET /api/upload` → `UploadController.processUpload` →
 resolve user (cached) → `findOrCreate` session (resolved numeric FK) →
 `ingestBuffer.ingest()` → buffered `Log.bulkCreate` → `200 OK`.
-
-`forwardUrls` fan-out is fire-and-forget (`setImmediate`), SSRF-guarded, native
-`fetch` with a 3s `AbortController` timeout.
 
 ### Read path
 `Browser SPA` → `CORS` + `express-session` → `/api/*` → `authenticate`
@@ -97,8 +94,6 @@ which enforces ownership (or `?shareId=` for shared sessions) and returns
   When `v` is absent or no match is found, the controller falls back to the
   user's default vehicle (`isDefault: true`). The resolved `vehicleId` is stored
   on the `Session` and returned in session metadata.
-- **SSRF-guarded `forwardUrls`:** each URL is checked with `lib/ssrfGuard.isSafeUrl`
-  before a fire-and-forget `fetch`.
 - Responds `200 OK` immediately; the DB flush is asynchronous.
 
 ### 2.2 `ingestBuffer` (`services/ingestBuffer.js`)
@@ -122,6 +117,9 @@ which enforces ownership (or `?shareId=` for shared sessions) and returns
 - `Log.findAll` with `timestamp BETWEEN from AND to`, capped `limit`
   (`min(limit||5000, 10000)`), ordered ASC, **limited attributes**
   (`timestamp, lon, lat, values, engine_rpm, vehicle_speed`).
+- **Joi-validated range** — `from`/`to`/`limit`/`offset` are validated against
+  `telemetryRangeSchema` before the query, so a malformed range returns `400`
+  instead of throwing a `500` from the SQL layer.
 - Returns JSON frames (unlike the legacy `getOne`/`getAll` which eager-load
   the full `Log` array). Session list endpoints use **denormalized session
   summaries** — `aggregateSummaries()` runs a single `GROUP BY` query across
@@ -149,6 +147,23 @@ which enforces ownership (or `?shareId=` for shared sessions) and returns
 > Columns are **camelCase** (`sessionId`, `engine_rpm`) because no
 > `underscore: true` is set; the SQL uses quoted identifiers accordingly.
 
+**Migration layout & numbering:** `scripts/migrate.js` walks
+`infra/timescale/` **recursively** and runs every `.sql` file in lexicographic
+order — top-level files (`001_log_hypertable.sql` … `020_analyses_created_id_unique.sql`)
+sort before the nested `migrations/` directory, so the legacy PID backfill
+(`migrations/002_backfill_pid_columns.sql`) is now discovered and applied after
+the numbered series (previously orphaned). The current series is **001–020**:
+`017_user_admin.sql` adds `Users.isAdmin` (first-user bootstrap + lowest-id
+upgrade backfill), `018_drop_forward_urls.sql` drops the retired webhook
+forward-column, `019_analysis_retention.sql` adds
+`Settings.analysisRetentionDays`, and `020_analyses_created_id_unique.sql` adds
+the `(createdAt, id)` keyset index.
+Notable non-hypertable members: `013_users_sessions_baseline.sql` (idempotent
+Users/Sessions baseline DDL for sync-less databases), `014_add_token_version.sql`
+(`Users.tokenVersion`, compared against the session cookie to invalidate stale
+sessions after a password change), `015_normalize_emails.sql` (lowercase fold),
+`016_denormalize_summaries.sql` (`Sessions.firstTimestamp`/`lastTimestamp`).
+
 ### 2.5 `TelemetryController.exportCsv` (`controllers/TelemetryController.js`)
 - `GET /api/sessions/:sessionId/export/csv` — authenticated (cookie + owner), streams
   all telemetry frames for a session as a CSV download.
@@ -161,8 +176,13 @@ which enforces ownership (or `?shareId=` for shared sessions) and returns
   `Content-Disposition: attachment`, so even large sessions don't exhaust server
   memory. CSV is written row-by-row using a lightweight streaming approach
   instead of buffering the full result set.
-- **Frontend trigger** — a "↓ CSV" button in the `ReplayDashboard` header calls
-  this endpoint, prompting a file download in the browser.
+- **HEAD short-circuit** — `HEAD /export/csv` is answered cheaply (empty body,
+  no pagination/aggregation) so the frontend's pre-download auth probe never
+  runs the full export server-side.
+- **Dedicated rate limiter** — the route uses a 10/min `exportLimiter`
+  (full-table-scan per request); the analyses export shares it.
+- **Frontend trigger** — a "↓ CSV" button in the `ReplayDashboard` header does a
+  HEAD pre-check then triggers a native `<a href>` download (no Blob buffering).
 - Returns `404` if the session doesn't exist or doesn't belong to the user.
 
 ---
@@ -263,6 +283,11 @@ from session telemetry:
 - **`buildContext(session, settings, telemetrySample, pidKeys)`** — Generates the
   vehicle/session context block (vehicle make/model/year, engine displacement,
   session name, location, duration, data point count, discovered PID keys).
+  **Vehicle fields now come from the session's assigned `Vehicle` profile**
+  (`resolveVehicleContext()` reads `session.Vehicle` per-field), falling back
+  to the legacy Settings vehicle fields for any field the profile leaves unset
+  — a session with no Vehicle resolves to the legacy fields verbatim, so prompt
+  output stays byte-identical to the pre-profile behaviour.
 - **`computeSummaryStats(telemetrySample, pidKeys)`** — Pre-computes min, max,
   mean, and median for every numeric PID across the full telemetry sample.
   Also computes Combined Fuel Trim (STFT + LTFT) per-row to prevent index
@@ -379,6 +404,57 @@ configurable TimescaleDB retention policy for automatic cleanup:
   keeps local error state and rolls the form back to the server-side settings on
   save failure.
 
+### 2.13 Admin Model & Analysis Retention (Plans 099, 121)
+
+**Admin model (Plan 099 + review fix):**
+
+- **`isAdmin` flag** — `Users.isAdmin` BOOLEAN (migration `017_user_admin.sql`),
+  read from the **DB row on every authenticated request** (never trusted from
+  the session cookie — the session stores only `{ id, tv }`; `isAdmin` rides in
+  via the deserialized user object).
+- **Bootstrap** — the **first registered user** is promoted at register time
+  (`isAdmin = count === 0` in `UserController.register`). For **upgraded**
+  deployments (users predating migration 017), the migration backfill promotes
+  the **lowest-id user**; `scripts/promote-admin.js [--demote] <email>` is the
+  recovery path (reads `DATABASE_URL` like `migrate.js`; idempotent). See
+  `docs/deployment.md` §6.
+- **Admin-only surface** — `PUT /api/settings` and
+  `POST /api/settings/upload-token` are gated by `requireAdmin()` in
+  `UserController` (403 for non-admins). Covered by `test/adminGate.test.js`.
+  Admin-only config includes the AI provider/LLM config, the upload token,
+  the registration toggle, the timezone, and both retention controls —
+  telemetry (`retentionEnabled`/`retentionDays`) and analyses
+  (`analysisRetentionDays`, below).
+- **Settings response** — `GET /api/settings` returns
+  `{ disableRegistration, tokenFromEnv }` plus `isAdmin` **only when
+  authenticated** (the login/register pages keep the anonymous two-field
+  shape); `GET /api/settings/full` adds `isAdmin` the same way.
+- **Frontend** — `SettingsPage` reads the session-derived `isAdmin` from the
+  full-settings payload. Non-admins see "Server settings are managed by the
+  administrator." and only the per-user cards (`AnalysisHistory`,
+  `VehicleManager`); admin cards (registration, upload token, AI provider,
+  timezone, retention) render for admins only.
+
+**Analysis retention (Plan 121):**
+
+- **Setting** — `Settings.analysisRetentionDays` INTEGER, nullable (migration
+  `019_analysis_retention.sql`), admin-set from the Settings page with
+  Off/90/120/180/365 choices; `null` = disabled (all analyses kept
+  indefinitely). Validated 90–365 by `validateAnalysisRetentionDays` in
+  `lib/validators.js`.
+- **App-side pruner** — `services/analysesRetention.js` runs every 6 h
+  (`startAnalysesPruner()`, started from `app.js`, unref'd + idempotent module
+  start). `Analyses` is a **plain Postgres table** (no hypertable, so no
+  TimescaleDB retention policy — the Logs policy can't reach it), so the app
+  sweeps rows older than the setting **across all users** in bounded
+  id-ASC keyset batches (BATCH_SIZE 5000). A failed pass is logged and never
+  takes the app down. Covered by `test/analysesRetention.test.js`.
+- **Keyset guarantee** — migration `020_analyses_created_id_unique.sql` adds a
+  UNIQUE index on `Analyses("createdAt", "id")`, making the
+  `exportAnalyses` keyset cursor (`createdAt < c OR (= c AND id < id_c)`)
+  deterministic at equal-createdAt batch boundaries (the pair is already unique
+  via the id PK, so no pre-existing data can violate it).
+
 ---
 
 ## 3. Frontend Internals (`apps/frontend/`)
@@ -397,23 +473,27 @@ src/
   app/
     playbackStore.ts     # zustand: cursorTime, isPlaying, speed
     queryClient.ts       # TanStack Query client
-    router.tsx           # routes: /login /register /sessions /sessions/:id
+    router.tsx           # lazy routes: /login /register / (sessions) /session/:id /settings
   components/
-    charts/  OverlayChart.tsx, SessionSummaryCard.tsx, KpiCard.tsx, GaugeTile.tsx
-    layout/  AppShell.tsx, MobileDrawer.tsx
+    ai/      AnalysisPanel.tsx (lazy), AnalysisHistory.tsx, StreamRenderer.tsx
+    charts/  OverlayChart.tsx, SessionSummaryCard.tsx, KpiCard.tsx, GaugeTile.tsx,
+             DiagnosticPanel.tsx, DiagnosticPanels.tsx
+    layout/  AppShell.tsx, MobileDrawer.tsx, brand.tsx   # shared GitHubLink/MobileLogo chrome
     map/     GpsTrackMap.tsx
     tables/  SessionTable.tsx
     telemetry/ PidTogglePanel.tsx, DecodedMetricsTable.tsx
-    ui/      Skeleton.tsx, ErrorAlert.tsx
+    ui/      Skeleton.tsx, ErrorAlert.tsx, Toggle.tsx
     vehicles/ VehicleReassignDialog.tsx
   features/
     auth/    Login.tsx, Register.tsx, AuthBranding.tsx, useAuth.ts
     dashboard/ ReplayDashboard.tsx, PlaybackControls.tsx
+              hooks/  useSessionTelemetry.ts, usePidSelection.ts   # extracted data hooks (§3.2a)
     sessions/  SessionBrowser.tsx
     settings/  SettingsPage.tsx, AiProviderCard.tsx, VehicleManager.tsx
   lib/
     api.ts    # fetch wrapper, credentials:'include'
     types.ts
+    chartColors.ts   # single source of truth: BRAND_TEAL + unit→color map (§3.6)
     pidDecode.ts   # PID auto-decode engine (pdDecode.ts)
     theme.ts   # dark/light mode detection, applyTheme, toggleTheme
     useVersion.ts  # shared /api/version fetch for the nav version badge
@@ -440,17 +520,33 @@ component focused on layout and composition rather than data wiring.
 
 ### 3.2b Code Splitting & Lazy Loading
 
-`AnalysisPanel` is the only component loaded via `React.lazy`:
+**Route-level code splitting (v2.0.0):** every route except `/login` is loaded
+via `React.lazy` in `app/router.tsx`:
 
 ```tsx
-const AnalysisPanel = React.lazy(() => import('@/components/ai/AnalysisPanel'));
+const Register = lazy(() => import('@/features/auth/Register'));
+const SessionBrowser = lazy(() => import('@/features/sessions/SessionBrowser'));
+const ReplayDashboard = lazy(() => import('@/features/dashboard/ReplayDashboard'));
+const SettingsPage = lazy(() => import('@/features/settings/SettingsPage'));
 ```
 
-Route-level imports (`Login`, `Register`, `SessionBrowser`, `ReplayDashboard`,
-`SettingsPage`) are **not** lazy-loaded — they are static imports in
-`app/router.tsx`. The Vite build uses Rolldown `codeSplitting.groups` to
-separate vendor chunks (echarts, zrender, react-markdown, rehype-highlight,
-react/react-dom) into dedicated bundles.
+`Login` and `AppShell` stay **static** — neither imports chart/map code, so the
+first paint for login/register downloads only react + router + auth UI. The
+heavy libraries land on the session route: `ReplayDashboard` (and through it
+the only components that import echarts/leaflet — the overlay chart,
+diagnostics, and GPS map) is code-split, and its chart/map chunks are fetched
+only when a session is actually opened. `Register`, `SessionBrowser` and
+`SettingsPage` are split so nothing beyond the auth UI loads for unauthenticated
+first paint. (Component-level lazy loading still applies inside the dashboard:
+`AnalysisPanel` is `React.lazy`-loaded.) The Vite build additionally uses
+Rolldown `codeSplitting.groups` to separate vendor chunks (echarts, zrender,
+react-markdown, rehype-highlight, react/react-dom) into dedicated bundles.
+
+**SPA links (v2.0.0):** in-app navigation uses `react-router` `<Link>` /
+`useNavigate` throughout — the previous full-page `<a href>` anchors (which
+forced a reload + re-download of the whole shell on every nav) were replaced
+with SPA Links. Only genuine external links (the GitHub octocat in the sidebar,
+file downloads) remain plain anchors.
 
 ### 3.3 Synchronized replay — `zustand` `playbackStore`
 - `usePlaybackStore` holds `cursorTime` (epoch-ms), `isPlaying`, `speed`.
@@ -535,6 +631,11 @@ extracts `[timestamp_ms, value]` pairs via the safe `coerceScalar()` helper.
 - **Decoded metrics table** — `DecodedMetricsTable` (collapsible) shows
   min/max/avg/last for every PID source, computed from pre-memoized series data
   (no frame re-scan on expand).
+- **Centralized chart colors** — the previously duplicated brand-accent +
+  unit→color maps (in `DiagnosticPanel`, `SessionSummaryCard`, `OverlayChart`)
+  are consolidated in `src/lib/chartColors.ts` (`BRAND_TEAL`, `SERIES_COLORS`,
+  `UNIT_COLORS`); a rebrand is now a single-file edit (§3.8 tokens + this
+  module).
 
 ### 3.7 react-leaflet GPS track (imperative marker)
 - `GpsTrackMap.tsx` mounts `<MapContainer>` **once** and never re-renders it on
@@ -553,6 +654,10 @@ extracts `[timestamp_ms, value]` pairs via the safe `coerceScalar()` helper.
   marker to the matching frame. A `null` cursor (never scrubbed) yields `null`,
   keeping the map's default first-frame centre. Covered by
   `features/dashboard/__tests__/mapView.test.ts`.
+- **Marker icons vendored** — the default Leaflet marker assets
+  (`marker-icon.png`, `marker-icon-2x.png`, `marker-shadow.png`) live in
+  `apps/frontend/public/` and are wired to Leaflet via `L.Icon.Default`
+  overrides, removing the unpkg CDN runtime dependency for map rendering.
 
 ### 3.8 Design System and Theme
 
@@ -682,6 +787,10 @@ the app has no offline/`fetch`-handler requirements yet.
   can't be fetched), and a GitHub octocat link to
   <https://github.com/moesix/torque-dash-next/> opens in a new tab
   (`rel="noopener noreferrer"`).
+- **Centralised brand chrome (`src/components/layout/brand.tsx`)** — the
+  `GitHubLink` component (octocat SVG path + external-anchor markup, previously
+  duplicated in AppShell and MobileDrawer) and the mobile-only `MobileLogo`
+  block (shared by Login/Register) live in one module.
 - Version is supplied by the shared `lib/useVersion.ts` hook, which dedupes the
   `/api/version` request with a **module-level memoized promise** — AppShell and
   MobileDrawer mount together and previously issued two requests per authed
@@ -774,10 +883,12 @@ The production topology uses three services on an internal network:
 
 - **db** — PostgreSQL with the TimescaleDB extension; migrated via
   `scripts/migrate.js`. Data persisted in a `pgdata` Docker volume.
-- **backend** — Express on `:3000`; CORS allowlist + `sameSite:none; secure`
-  cookie for cross-origin SPA auth; `/health` probe. Runs as non-root user
-  (`appuser`). Requires `DATABASE_URL` and `SESSION_KEYS` (app crashes on
-  startup if missing).
+- **backend** — Express on `:3000` (reachable only on the compose network —
+  no host port is published; the frontend nginx is the sole edge, which also
+  keeps client-IP-based rate limiting honest); CORS allowlist +
+  `sameSite:none; secure` cookie for cross-origin SPA auth; `/health` probe.
+  Runs as non-root user (`appuser`). Requires `DATABASE_URL` and
+  `SESSION_KEYS` (app crashes on startup if missing).
 - **frontend / nginx** — serves the `apps/frontend/dist` build via unprivileged
   Nginx on port `8080`; proxies `/api` to the backend; public edge.
 
@@ -795,25 +906,35 @@ See `docs/deployment.md` for the full deployment guide.
 | `POST /api/users/login` | none | login (sets cookie) |
 | `POST /api/users/change-password` | cookie | change password (requires currentPassword + newPassword; regenerates session) |
 | `POST /api/users/logout` | cookie | logout |
+| `GET /api/users/shareid` | cookie | get the user's shareId (empty until sharing is enabled) |
+| `PATCH /api/users/shareid` | cookie | toggle sharing on/off — enable generates a shareId, disable clears it |
 | `GET /api/version` | none | returns `{ version: string }` from package.json |
 | `GET /api/sessions?limit&offset` | cookie | list sessions (paginated: `{ sessions, total, limit, offset }`) |
 | `GET /api/sessions/:id` | cookie + owner | session metadata (no full logs) |
 | `GET /api/sessions/:id/telemetry?from&to&limit` | cookie + owner | paged telemetry frames |
 | `GET /api/sessions/:id/export/csv` | cookie + owner | stream all telemetry as CSV with dynamic PID column discovery |
 | `PATCH /api/sessions/rename/:id` | cookie + owner | rename session (body: `{ name }`) |
+| `PATCH /api/sessions/addlocation/:sessionId` | cookie + owner | set start/end location labels (body: `{ locations: { start, end } }`) |
 | `PATCH /api/sessions/notes/:sessionId` | cookie + owner | update session notes (body: `{ notes: string\|null }`) |
+| `PATCH /api/sessions/filter/:sessionId` | cookie + owner | downsample telemetry to every Nth row (body: `{ filterNumber }`); recomputes summary |
+| `PATCH /api/sessions/cut/:sessionId` | cookie + owner | delete telemetry rows within a time window (body: `{ from, to }` ISO dates); recomputes summary |
 | `PATCH /api/sessions/:sessionId/vehicle` | cookie + owner | reassign session to a vehicle or unassign (body: `{ vehicleId: number\|null }`) |
 | `DELETE /api/sessions/:id` | cookie + owner | delete a session |
-| `GET /api/sessions/:id/shared/:shareId` | shareId | shared view |
+| `POST /api/sessions/copy/:sessionId` | cookie + owner | duplicate a session and its telemetry under a new name (body: `{ name }`) |
+| `POST /api/sessions/join/:sessionId` | cookie + owner | merge this session and another into a new session (body: `{ joinSessionId, name }`) |
+| `GET /api/sessions/shared/:shareId` | shareId | list a user's shareable sessions (sanitized — no logs; paginated: `{ sessions, total, limit, offset }`) |
+| `GET /api/sessions/shared/:shareId/:sessionId` | shareId | get one shared session (sanitized metadata — no logs) |
 | `POST /api/sessions/:id/analyze` | cookie + owner | trigger AI analysis for a session (SSE stream) |
 | `GET /api/sessions/:id/analyses` | cookie + owner | list cached analyses for a session |
 | `GET /api/sessions/:id/analyses/:analysisId` | cookie + owner | get a single analysis (full response + reasoning) |
 | `DELETE /api/sessions/:id/analyses/:analysisId` | cookie + owner | delete a cached analysis |
 | `GET /api/analyses` | cookie | cross-vehicle analysis history (paginated: `{ analyses, total, limit, offset }`; optional `vehicleId` filter, optional `limit`/`offset`). Each analysis includes session name and vehicle. |
 | `GET /api/analyses/export` | cookie | export all analyses as a Markdown file download (optional `vehicleId` filter) |
-| `GET /api/settings` | none | public settings (disableRegistration, hasUploadApiToken, hasLlmProvider, llmMaxTokens, retentionEnabled, retentionDays, vehicle fields) |
-| `PUT /api/settings` | cookie | update settings (disableRegistration, uploadApiToken, llmProvider, llmApiKey, llmModel, llmEndpoint, llmThinkingMode, llmReasoningEffort, llmMaxTokens, retentionEnabled, retentionDays, vehicle fields); response includes `retentionPolicyApplied` |
-| `POST /api/settings/upload-token` | cookie | generate a new upload API token (shown once) |
+| `GET /api/analyses/:analysisId` | cookie | get a single analysis by id across vehicles (full response + reasoning) |
+| `GET /api/settings` | none (adds `isAdmin` when authenticated) | public settings for unauthenticated register/login pages (disableRegistration, tokenFromEnv; appends `isAdmin` when authenticated) |
+| `GET /api/settings/full` | cookie | full settings for the settings UI (disableRegistration, hasUploadApiToken, tokenFromEnv, isAdmin, LLM provider/model/endpoint, hasLlmApiKey, llmMaxTokens, llmThinkingMode, llmReasoningEffort, timezoneOffset, retentionEnabled, retentionDays, analysisRetentionDays, vehicle fields) |
+| `PUT /api/settings` | cookie + **admin** | admin-only settings update (disableRegistration, uploadApiToken, llmProvider, llmApiKey, llmModel, llmEndpoint, llmThinkingMode, llmReasoningEffort, llmMaxTokens, retentionEnabled, retentionDays, analysisRetentionDays, vehicle fields, timezoneOffset); 403 for non-admins; response includes `retentionPolicyApplied` |
+| `POST /api/settings/upload-token` | cookie + **admin** | admin-only — generate a new upload API token (shown once); 403 for non-admins |
 | `POST /api/settings/test-llm` | cookie | test LLM connection (returns streaming response) |
 | `GET /api/vehicles` | cookie | list all vehicles for authenticated user |
 | `GET /api/vehicles/:vehicleId` | cookie | get a single vehicle |
@@ -821,7 +942,7 @@ See `docs/deployment.md` for the full deployment guide.
 | `PUT /api/vehicles/:vehicleId` | cookie | update a vehicle (body: partial fields) |
 | `DELETE /api/vehicles/:vehicleId` | cookie | delete a vehicle (sessions unassigned via SET NULL) |
 | `PATCH /api/vehicles/:vehicleId/default` | cookie | set a vehicle as the user's default (unsets all others) |
-| `POST /api/upload` (`/upload` from Torque) | email-gated + **Bearer token required** (when a token is configured — the required production posture) | ingest (`401` without matching token) |
+| `GET /api/upload` (`/upload` from Torque) | email-gated + **Bearer token required** (when a token is configured — the required production posture) | ingest (`401` without matching token) |
 | `GET /health` | none | probe |
 
 > See `routes/api.js` for the authoritative route table. The SPA auth contract
@@ -839,6 +960,22 @@ with each session including `vehicleId` and `vehicleName` (resolved from the
 a "Load More" button and provides a vehicle filter dropdown; `SessionTable`
 receives only the current page.
 
-**HTTP caching headers:** `GET /api/settings` and `GET /api/sessions` set
-`Cache-Control: private, max-age=30` to reduce redundant requests on the fast
-read paths without risking stale data for more than 30 seconds.
+**HTTP caching headers:** `GET /api/settings` sets `Cache-Control: private,
+max-age=30` on **authenticated** responses (they embed the per-user `isAdmin`
+flag) and `public, max-age=30` on the anonymous two-field shape; `GET
+/api/settings/full` and `GET /api/sessions` set `private, max-age=30`. This
+reduces redundant requests on the fast read paths without risking stale data
+for more than 30 seconds.
+
+**Per-row analysis delete:** past analyses can be deleted individually from
+both the session panel (`AnalysisPanel`) and Settings → Analysis History
+(`AnalysisHistory`) via `DELETE /api/sessions/:id/analyses/:analysisId` — the
+row is dropped from the local list immediately (404 on a stale double-fire is
+treated as already-deleted).
+
+**Analyses export (keyset-streamed):** `GET /api/analyses/export` streams rows
+in `createdAt DESC, id DESC` keyset batches (no `OFFSET`) under the shared
+10/min `exportLimiter`, so large histories don't exhaust memory or get skipped
+at equal-`createdAt` batch boundaries (migration 020 makes the pair a formal
+unique constraint). The frontend downloads via a hidden anchor rather than an
+SPA route to avoid a full reload.

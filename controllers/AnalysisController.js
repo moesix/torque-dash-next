@@ -17,9 +17,12 @@ class AnalysisController {
     // there — every error reaching the catch would throw ReferenceError.
     let clientDisconnected = false;
     try {
-      // 1. Ownership check
+      // 1. Ownership check — eager-loads the assigned Vehicle profile so the AI
+      // prompt can describe the right car (plans/118); engineCc is not among the
+      // restricted attributes because the prompt's engine guardrail needs it.
       const session = await Session.findOne({
         where: { id: req.params.sessionId, userId: req.user.id },
+        include: [{ model: Vehicle, as: 'Vehicle' }],
       });
       if (!session) return res.status(404).json({ error: 'Session not found' });
 
@@ -110,6 +113,11 @@ class AnalysisController {
         }
         sample = [...firstBatch, ...randomBatch, ...lastBatch];
       }
+
+      // The sample mixes ASC (first), id-order (random), and DESC (last) batches —
+      // sort chronologically so the prompt's CSV Time column is monotonic and the
+      // model reads a real time series.
+      sample.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
 
       // 4b. Connectivity-gap detection from the full-resolution timestamps fetched
       // in parallel with the count above (detectBackfillGaps sorts internally).
@@ -303,27 +311,50 @@ class AnalysisController {
         where.sessionId = { [Op.in]: sessions.map(s => s.id) };
       }
 
-      const analyses = await Analysis.findAll({
-        where,
-        order: [['createdAt', 'DESC']],
-        attributes: ['id', 'sessionId', 'provider', 'model', 'response', 'reasoning', 'createdAt'],
-        include: [{ model: Session, as: 'Session', attributes: ['name'] }],
-      });
-
       res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
       res.setHeader('Content-Disposition', 'attachment; filename="analyses.md"');
       res.write('# AI Analysis History\n\n');
 
-      for (const a of analyses) {
-        res.write(`## ${a.Session?.name || 'Unknown Session'} — ${a.createdAt.toISOString().split('T')[0]}\n\n`);
-        res.write(`**Provider:** ${a.provider} | **Model:** ${a.model}\n\n`);
-        res.write(a.response + '\n\n');
-        if (a.reasoning) {
-          res.write('<details><summary>Reasoning</summary>\n\n');
-          res.write(a.reasoning + '\n\n');
-          res.write('</details>\n\n');
+      // Stream rows in createdAt-DESC keyset batches (id DESC tiebreak) so at
+      // most one full batch of TEXT bodies is in memory per fetch — the same
+      // cursor pattern as exportCsv. Output must stay byte-identical to the
+      // pre-streaming format (same per-row template, same ordering).
+      const BATCH = 50;
+      let cursor = null; // { createdAt, id } of the last row of the previous batch
+      for (;;) {
+        const batchWhere = { ...where };
+        if (cursor) {
+          batchWhere[Op.or] = [
+            { createdAt: { [Op.lt]: cursor.createdAt } },
+            { createdAt: cursor.createdAt, id: { [Op.lt]: cursor.id } },
+          ];
         }
-        res.write('---\n\n');
+
+        const batch = await Analysis.findAll({
+          where: batchWhere,
+          order: [['createdAt', 'DESC'], ['id', 'DESC']],
+          limit: BATCH,
+          attributes: ['id', 'sessionId', 'provider', 'model', 'response', 'reasoning', 'createdAt'],
+          include: [{ model: Session, as: 'Session', attributes: ['name'] }],
+        });
+
+        if (batch.length === 0) break;
+
+        for (const a of batch) {
+          res.write(`## ${a.Session?.name || 'Unknown Session'} — ${a.createdAt.toISOString().split('T')[0]}\n\n`);
+          res.write(`**Provider:** ${a.provider} | **Model:** ${a.model}\n\n`);
+          res.write(a.response + '\n\n');
+          if (a.reasoning) {
+            res.write('<details><summary>Reasoning</summary>\n\n');
+            res.write(a.reasoning + '\n\n');
+            res.write('</details>\n\n');
+          }
+          res.write('---\n\n');
+        }
+
+        if (batch.length < BATCH) break;
+        const last = batch[batch.length - 1];
+        cursor = { createdAt: last.createdAt, id: last.id };
       }
       res.end();
     } catch (err) {

@@ -1,0 +1,11 @@
+-- Keyset-pagination uniqueness guarantee for exportAnalyses (and any future
+-- (createdAt, id) cursor). The keyset predicate
+--   createdAt < c OR (createdAt = c AND id < id_c)
+-- silently skips rows when the batch boundary lands inside a run of
+-- equal-createdAt rows UNLESS the pair is unique. (createdAt, id) is already
+-- inherently unique — id is the table's PRIMARY KEY — so this index adds no
+-- semantic change; it only makes the uniqueness a formal constraint that lets
+-- the planner enforce/serve the keyset order (createdAt DESC, id DESC)
+-- deterministically. No existing row can violate it, so CREATE UNIQUE INDEX
+-- cannot fail on pre-existing data.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_analyses_created_id ON "Analyses"("createdAt", "id");

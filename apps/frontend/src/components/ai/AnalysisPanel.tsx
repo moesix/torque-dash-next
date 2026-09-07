@@ -3,7 +3,8 @@ import type { Ref } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
-import { analyzeSession, listAnalyses, getAnalysis, getFullSettings } from '@/lib/api';
+import { analyzeSession, listAnalyses, deleteAnalysis, getAnalysis, getFullSettings, ApiError } from '@/lib/api';
+import { Link } from 'react-router';
 import StreamRenderer from './StreamRenderer';
 import type { Analysis, AnalysisPreview, Settings } from '@/lib/types';
 import { stripMarkdown } from '@/lib/utils';
@@ -33,6 +34,10 @@ export default function AnalysisPanel({ sessionId, ref, printMode = false }: Pro
     const [copiedId, setCopiedId] = useState<number | null>(null);
     const [copiedTextId, setCopiedTextId] = useState<number | null>(null);
     const [copiedStream, setCopiedStream] = useState(false);
+    const [deleteErrorId, setDeleteErrorId] = useState<number | null>(null);
+    // Rows with a delete in flight. A Set (not a single id slot) so row A's
+    // completion can't re-enable row B's button while B is still deleting.
+    const [deletingIds, setDeletingIds] = useState<Set<number>>(new Set());
     const latestResponseRef = useRef('');
     const panelRef = useRef<HTMLDivElement>(null);
 
@@ -90,6 +95,50 @@ export default function AnalysisPanel({ sessionId, ref, printMode = false }: Pro
       listAnalyses(sessionId).then((rows) => setPastAnalyses(rows ?? [])).catch(() => {});
     }
 
+    async function handleDeleteAnalysis(preview: AnalysisPreview) {
+      // A delete is already in flight for this row — ignore the double-click
+      // instead of firing a second DELETE that would 404 on the now-missing row.
+      if (deletingIds.has(preview.id)) return;
+      if (!confirm('Delete this analysis? This cannot be undone. Export or copy it first if you need to keep it.')) {
+        return;
+      }
+      setDeletingIds((ids) => new Set(ids).add(preview.id));
+      setDeleteErrorId(null);
+      try {
+        await deleteAnalysis(sessionId, preview.id);
+        setPastAnalyses((rows) => rows.filter((x) => x.id !== preview.id));
+        setExpandedMap((prev) => {
+          if (!prev.has(preview.id)) return prev;
+          const next = new Map(prev);
+          next.delete(preview.id);
+          return next;
+        });
+        if (loadingId === preview.id) setLoadingId(null);
+      } catch (err) {
+        // A 404 means the row is ALREADY gone (e.g. the double-clicked second
+        // DELETE, or another tab deleted it) — the desired end state is met,
+        // so treat it as success rather than showing a spurious error.
+        if (err instanceof ApiError && err.status === 404) {
+          setPastAnalyses((rows) => rows.filter((x) => x.id !== preview.id));
+          setExpandedMap((prev) => {
+            if (!prev.has(preview.id)) return prev;
+            const next = new Map(prev);
+            next.delete(preview.id);
+            return next;
+          });
+          if (loadingId === preview.id) setLoadingId(null);
+        } else {
+          setDeleteErrorId(preview.id);
+        }
+      } finally {
+        setDeletingIds((ids) => {
+          const next = new Set(ids);
+          next.delete(preview.id);
+          return next;
+        });
+      }
+    }
+
     async function copyAsPlainText(text: string, id?: number) {
       try {
         await navigator.clipboard.writeText(stripMarkdown(text));
@@ -145,9 +194,9 @@ export default function AnalysisPanel({ sessionId, ref, printMode = false }: Pro
           <h3 className="text-lg font-semibold leading-relaxed">AI Analysis</h3>
           <p className="mt-2 text-sm leading-relaxed text-gray-500 dark:text-[var(--text-muted)]">
             Configure an AI provider in{' '}
-            <a href="/settings" className="text-indigo-600 hover:underline dark:text-indigo-400">
+            <Link to="/settings" className="text-indigo-600 hover:underline dark:text-indigo-400">
               Settings
-            </a>{' '}
+            </Link>{' '}
             to enable session analysis.
           </p>
         </div>
@@ -202,14 +251,36 @@ export default function AnalysisPanel({ sessionId, ref, printMode = false }: Pro
                     className="rounded border border-[var(--border-default)] p-3 dark:border-[var(--border-strong)]"
                   >
                     <summary
-                      className="cursor-pointer text-sm text-gray-600 dark:text-gray-400"
+                      className="flex cursor-pointer items-center justify-between gap-2 text-sm text-gray-600 dark:text-gray-400"
                       onClick={(e) => {
                         e.preventDefault();
                         toggleExpand(a);
                       }}
                     >
-                      {isLoading ? 'Loading...' : `${a.provider}/${a.model} — ${new Date(a.createdAt).toLocaleString()}`}
+                      <span className="min-w-0 truncate">
+                        {isLoading ? 'Loading...' : `${a.provider}/${a.model} — ${new Date(a.createdAt).toLocaleString()}`}
+                      </span>
+                      <button
+                        type="button"
+                        aria-label="Delete analysis"
+                        disabled={deletingIds.has(a.id)}
+                        aria-busy={deletingIds.has(a.id) || undefined}
+                        onClick={(e) => {
+                          // Stop the row's expand toggle (summary click) from firing.
+                          e.preventDefault();
+                          e.stopPropagation();
+                          handleDeleteAnalysis(a);
+                        }}
+                        className="shrink-0 text-xs text-gray-500 hover:text-rose-600 dark:text-gray-400 dark:hover:text-rose-400 disabled:opacity-50 disabled:cursor-wait"
+                      >
+                        {deletingIds.has(a.id) ? 'Deleting…' : 'Delete'}
+                      </button>
                     </summary>
+                    {deleteErrorId === a.id && (
+                      <p className="mt-1 text-xs text-rose-600 dark:text-rose-400" role="alert">
+                        Failed to delete analysis.
+                      </p>
+                    )}
                     {full && (
                       <>
                         <div className="flex justify-end mt-1 mb-1">

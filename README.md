@@ -25,8 +25,9 @@ A self-hosted dashboard for [Torque Pro](https://torque-bhp.com/) vehicle teleme
 | **PID decode engine** | Auto-discovers every OBD-II parameter from Torque's `values` JSONB — no schema changes when you add new PIDs. |
 | **Session management** | Auto-named trips (`Trip DDMMYYYY HH:MM AM/PM`), inline rename, shareable links, freeform notes with auto-save. |
 | **Multi-vehicle support** | Define named vehicle profiles (make, model, year, engine size), assign sessions to vehicles, filter session list by vehicle. |
-| **Cross-vehicle analysis history** | Browse and export all AI analyses across sessions and vehicles in one view — paginated, filterable, exportable as Markdown. |
-| **Configurable data retention** | Opt-in TimescaleDB retention policy auto-deletes telemetry older than 90/120/180/365 days — off by default (all data kept indefinitely), toggled from the Settings page. |
+| **Cross-vehicle analysis history** | Browse and export all AI analyses across sessions and vehicles in one view — paginated, filterable, exportable as Markdown, with **per-row delete** from the session panel or Settings → Analysis History. |
+| **Configurable data retention** | Opt-in TimescaleDB retention policy auto-deletes telemetry older than 90/120/180/365 days — off by default (all data kept indefinitely), toggled from the Settings page by the admin. A separate **analysis retention** control (Off/90/120/180/365) prunes cached AI-analysis rows on a 6-hour schedule. |
+| **Admin-controlled server settings** | The first registered user is the site admin: registration toggle, upload-token rotation, LLM provider config, timezone, and both retention policies are admin-only; other users keep their own sessions, vehicles, and analysis history. |
 | **API-key upload auth** | Token authentication is **required** for Torque Pro uploads (`UPLOAD_API_TOKEN` — the 2026 security baseline); requests presenting a matching token also skip the per-IP rate limiter so reconnect bursts are never throttled. |
 | **React Router v8** | Frontend routing on `react-router` 8.3.0 (exact pin, replacing `react-router-dom`), resolving the remaining react-router Dependabot advisories including the v8-CSRF advisory fixed only in 8.3.0. |
 
@@ -180,9 +181,8 @@ After creating all user accounts, disable public registration via the Settings U
 | `POSTGRES_PASSWORD` | **REQUIRED** | Database password for Docker deployments. Generate with `openssl rand -base64 24`. |
 | `SESSION_KEYS` | **REQUIRED** | Comma-separated express-session secrets. App crashes on startup if missing. |
 | `PORT` | `3000` | Backend HTTP port. |
-| `NODE_ENV` | _(unset)_ | Set to `production` to skip `sequelize.sync()` (use migrations instead). |
-| `COOKIE_SECURE` | `false` | `true` to set `Secure` on session cookies (requires HTTPS). |
-| `COOKIE_SAMESITE` | `lax` | `SameSite` policy for session cookies. |
+| `NODE_ENV` | _(unset)_ | Optional. `production` skips the app-internal `sequelize.sync()` in `app.js`. The Docker image CMD still runs an idempotent `sequelize.sync()` bootstrap before `scripts/migrate.js` on every boot, regardless of NODE_ENV; migrations remain the source of truth for TimescaleDB DDL. |
+| `COOKIE_SECURE` | `false` | `true` to set `Secure` on session cookies (requires HTTPS). `SameSite` is derived from it in `app.js` (`none` when true, else `lax`) — there is no separate `COOKIE_SAMESITE` variable. |
 | `CORS_ORIGINS` | _(empty)_ | Comma-separated allowed origins for cross-origin API access. Also serves as the CSRF trust list. |
 | `PUBLIC_ORIGIN` | _(unset)_ | Overrides the expected CSRF origin. Set when nginx terminates HTTPS but forwards HTTP to the backend. |
 | `UPLOAD_API_TOKEN` | **REQUIRED for production** | Uploads require `Authorization: Bearer <token>`; without a matching header they return 401. Set here — the env value wins and locks the Settings UI — or generate from the Settings page after first login. |
@@ -194,6 +194,8 @@ After creating all user accounts, disable public registration via the Settings U
 | `WRITE_RATE_LIMIT_WINDOW_MS` | `60000` | Write rate-limit window in milliseconds. |
 | `READ_RATE_LIMIT_MAX` | `600` | Max requests to all other `/api` routes per window per IP. |
 | `READ_RATE_LIMIT_WINDOW_MS` | `60000` | Global `/api` rate-limit window in milliseconds. |
+| `AI_RATE_LIMIT_MAX` | `10` | Max AI analysis starts per window per IP (each hit calls an external LLM API). |
+| `AI_RATE_LIMIT_WINDOW_MS` | `60000` | AI analysis rate-limit window in milliseconds. |
 | `DISABLE_REGISTRATION` | _(unset)_ | If `true`, public sign-up is disabled. |
 | `LLM_ENCRYPTION_KEY` | _(unset)_ | 64-char hex key for AES-256-GCM encryption of LLM API keys at rest. Generate with `openssl rand -hex 32`. Required for AI analysis feature. |
 
@@ -205,9 +207,13 @@ For detailed deployment instructions, troubleshooting, and reverse proxy setup, 
 
 **Upload authentication:** Uploads require `Authorization: Bearer <token>` with your configured `UPLOAD_API_TOKEN` — token authentication is mandatory (the 2026 baseline), and email alone is never sufficient once a token exists. Email-only ingestion happens only when no token is configured anywhere (env or Settings UI) — a discouraged bootstrap mode that is insecure for production and should be closed off before exposing the server. If upgrading, add your token in Torque Pro → *Settings → Advanced → HTTP Auth Token*. Requests presenting a matching token **bypass the upload rate limiter** — the known uploader's reconnect bursts are never `429`'d, and the exemption is keyed on the secret token, not a spoofable query param.
 
-**Password changes:** Users can change their password via `POST /api/users/change-password`. This validates the current password, enforces a minimum length of 8 characters, and invalidates all other sessions. Bcrypt salt factor is 10.
+**Administrator model:** The **first registered user is the site admin** (`isAdmin`); on upgraded deployments the lowest-id account is promoted automatically. Only the admin may change server settings — registration toggle, upload-token rotation, LLM provider config, timezone, and data-retention policies (`PUT /api/settings`, `POST /api/settings/upload-token` return `403` for everyone else). Non-admin users still manage their own sessions, vehicles, and analysis history. See the [deployment guide](docs/deployment.md) for the `scripts/promote-admin.js` recovery path.
 
-**Registration control:** After creating accounts, disable public sign-up via the Settings UI toggle or `DISABLE_REGISTRATION=true`.
+**Password changes:** Users can change their password via `POST /api/users/change-password`. This validates the current password, enforces a minimum length of 8 characters, and invalidates all other sessions by bumping the user's `tokenVersion`. Bcrypt salt factor is 10.
+
+**Registration control:** After creating accounts, the admin can disable public sign-up via the Settings UI toggle or set `DISABLE_REGISTRATION=true` in `.env`.
+
+**BYOK LLM keys need TLS:** Set `COOKIE_SECURE=true` (or terminate TLS at the edge before the app) before configuring BYOK LLM API keys — otherwise your provider keys are submitted over plain HTTP. Custom LLM endpoints are SSRF-checked server-side (`lib/ssrfGuard.js`).
 
 ## Docs
 

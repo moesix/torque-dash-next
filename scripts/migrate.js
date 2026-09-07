@@ -45,13 +45,12 @@ function stripComments(sql) {
     return sql;
 }
 
-// Load every *.sql file in the migration directory, in lexicographic order so
-// e.g. `log_hypertable.sql` (TimescaleDB setup) runs before `settings.sql`.
+// Load every *.sql file under the migration directory tree, in lexicographic
+// order so e.g. `log_hypertable.sql` (TimescaleDB setup) runs before
+// `settings.sql`, and top-level files run before `migrations/*.sql` (paths are
+// relative to SQL_DIR, so `migrations/...` sorts after every `0NN_...` file).
 function loadStatements() {
-    const files = fs
-        .readdirSync(SQL_DIR)
-        .filter((f) => f.endsWith('.sql'))
-        .sort();
+    const files = listMigrationFiles();
     const all = [];
     for (const file of files) {
         const sql = fs.readFileSync(path.join(SQL_DIR, file), 'utf8');
@@ -188,14 +187,36 @@ if (require.main === module) {
 }
 
 /**
- * Return the sorted list of migration SQL filenames (e.g. '001_log_hypertable.sql').
+ * Return the sorted list of migration SQL file paths, relative to SQL_DIR
+ * (e.g. '001_log_hypertable.sql', 'migrations/002_backfill_pid_columns.sql').
+ * Walks SQL_DIR recursively so nested migration directories are discovered.
+ *
+ * Keys are RELATIVE paths on purpose: a top-level file's relative path equals
+ * its bare basename, so existing `_migrations.filename` rows keep matching
+ * exactly (no re-run, no renumber), while a nested file gets a distinct
+ * 'migrations/...' key that can never collide with a top-level basename.
  * Used by tests and diagnostics.
  */
 function listMigrationFiles() {
-    return fs
-        .readdirSync(SQL_DIR)
-        .filter((f) => f.endsWith('.sql'))
+    return collectSqlFiles(SQL_DIR)
+        .map((p) => path.relative(SQL_DIR, p))
         .sort();
+}
+
+/**
+ * Recursively collect the absolute path of every *.sql file under `dir`.
+ */
+function collectSqlFiles(dir) {
+    const out = [];
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+            out.push(...collectSqlFiles(full));
+        } else if (entry.name.endsWith('.sql')) {
+            out.push(full);
+        }
+    }
+    return out;
 }
 
 module.exports = { listMigrationFiles, isBenignError };

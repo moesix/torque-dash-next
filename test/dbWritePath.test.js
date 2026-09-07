@@ -259,3 +259,91 @@ describe('SessionController exportCsv — drain backpressure', () => {
     }
   });
 });
+
+// ── 4. Regression: HEAD must short-circuit before any DB work ──────────
+// The client fires HEAD /api/sessions/:id/export/csv as a reachability/auth
+// pre-check before the real download; Express dispatches HEAD to the GET
+// handler. exportCsv must answer 200 right after the ownership check WITHOUT
+// running PID discovery or the paginated Log scan — previously HEAD ran the
+// full export with the body discarded, doubling every download's server work
+// and spending an extra exportLimiter credit per click.
+describe('SessionController exportCsv — HEAD short-circuit', () => {
+  test('HEAD returns 200 and never calls the paginated query', async () => {
+    let logFindAllCalls = 0;
+    let sequelizeQueryCalls = 0;
+
+    const mockModels = {
+      Session: {
+        findOne: async () => ({ id: 's-head-1', name: 'Head Test' }),
+      },
+      Log: {
+        findAll: async () => { logFindAllCalls++; return []; },
+        count: async () => 0,
+      },
+      User: { findOne: async () => ({ id: 1 }) },
+      Vehicle: { findOne: async () => null },
+      sequelize: {
+        query: async () => { sequelizeQueryCalls++; return [[]]; },
+        transaction: async (fn) => fn({}),
+        fn: () => {},
+        col: () => {},
+      },
+      Sequelize: { Op: { gt: Symbol('gt'), or: Symbol('or') } },
+    };
+
+    const modelsPath = require.resolve('../models');
+    const originalCache = require.cache[modelsPath];
+    require.cache[modelsPath] = {
+      id: modelsPath,
+      filename: modelsPath,
+      loaded: true,
+      exports: mockModels,
+    };
+
+    const sessionControllerPath = require.resolve('../controllers/SessionController');
+    const originalSCCache = require.cache[sessionControllerPath];
+    delete require.cache[sessionControllerPath];
+
+    try {
+      const SessionController = require('../controllers/SessionController');
+
+      let ended = false;
+      const res = {
+        headersSent: false,
+        statusCode: 200,
+        status(code) { this.statusCode = code; return this; },
+        setHeader() {},
+        set() {},
+        write() { throw new Error('HEAD must not write a body'); },
+        json() { throw new Error('HEAD must not return JSON'); },
+        end() { ended = true; },
+      };
+
+      const req = {
+        method: 'HEAD',
+        user: { id: 1 },
+        params: { sessionId: 's-head-1' },
+      };
+
+      await SessionController.exportCsv(req, res);
+
+      assert.ok(ended, 'HEAD short-circuit should end the response');
+      assert.strictEqual(res.statusCode, 200, 'HEAD should answer 200');
+      assert.strictEqual(logFindAllCalls, 0,
+        'Log.findAll (paginated scan) must NOT run for HEAD');
+      assert.strictEqual(sequelizeQueryCalls, 0,
+        'PID discovery SQL must NOT run for HEAD');
+    } finally {
+      if (originalCache) {
+        require.cache[modelsPath] = originalCache;
+      } else {
+        delete require.cache[modelsPath];
+      }
+      if (originalSCCache) {
+        require.cache[sessionControllerPath] = originalSCCache;
+      } else {
+        delete require.cache[sessionControllerPath];
+      }
+    }
+  });
+});

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { getSettings, getFullSettings, updateSettings, generateUploadToken, getVersion } from '@/lib/api';
+import { getFullSettings, updateSettings, generateUploadToken } from '@/lib/api';
+import { useVersion } from '@/lib/useVersion';
 import type { Settings } from '@/lib/types';
 import Toggle from '@/components/ui/Toggle';
 import AiProviderCard from './AiProviderCard';
@@ -12,6 +13,12 @@ export default function SettingsPage() {
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
 
+  // Admin (first registered user, plan 099) status — read from the
+  // session-derived isAdmin field of the full-settings response. null = still
+  // loading, so neither the admin cards nor the non-admin notice flashes
+  // before the fetch resolves.
+  const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
+
   // Upload API token state
   const [hasUploadApiToken, setHasUploadApiToken] = useState(false);
   const [tokenFromEnv, setTokenFromEnv] = useState(false);
@@ -23,7 +30,7 @@ export default function SettingsPage() {
   // Data retention card-local error state (rendered inside the retention card)
   const [retentionError, setRetentionError] = useState<string | null>(null);
 
-  const [version, setVersion] = useState<string>('');
+  const { version } = useVersion();
 
   const [llmSettings, setLlmSettings] = useState<Settings>({
     disableRegistration: false,
@@ -43,11 +50,8 @@ export default function SettingsPage() {
     timezoneOffset: 0,
     retentionEnabled: false,
     retentionDays: 365,
+    analysisRetentionDays: null,
   });
-
-  useEffect(() => {
-    getVersion().then((v) => setVersion(v.version)).catch(() => {});
-  }, []);
 
   useEffect(() => {
     getFullSettings()
@@ -57,6 +61,7 @@ export default function SettingsPage() {
         setHasUploadApiToken(s.hasUploadApiToken);
         setTokenFromEnv(s.tokenFromEnv);
         setLlmSettings(s);
+        setIsAdmin(Boolean(s.isAdmin));
       })
       .catch(() => setError('Failed to load settings.'));
   }, []);
@@ -129,6 +134,18 @@ export default function SettingsPage() {
         </div>
         <p className="mt-1 text-sm leading-relaxed dark:text-[var(--text-secondary)]">Global site configuration.</p>
       </div>
+
+      {isAdmin === false ? (
+        <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
+          <p className="text-sm leading-relaxed font-medium">Account</p>
+          <p className="mt-1 text-sm leading-relaxed text-gray-500 dark:text-[var(--text-muted)]">
+            Server settings are managed by the administrator.
+          </p>
+        </div>
+      ) : null}
+
+      {isAdmin ? (
+      <>
       <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
         <div className="flex items-center justify-between">
           <div>
@@ -236,11 +253,17 @@ export default function SettingsPage() {
           ) : null}
         </div>
       </div>
+      </>
+      ) : null}
 
-      <AiProviderCard settings={llmSettings} onUpdate={setLlmSettings} />
+      {isAdmin ? (
+        <AiProviderCard settings={llmSettings} onUpdate={setLlmSettings} />
+      ) : null}
       <AnalysisHistory />
       <VehicleManager />
 
+      {isAdmin ? (
+      <>
       <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
         <div className="space-y-4">
           <div>
@@ -357,6 +380,63 @@ export default function SettingsPage() {
           ) : null}
         </div>
       </div>
+
+      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
+        <div className="space-y-4">
+          <div>
+            <p className="text-sm leading-relaxed font-medium">Analysis Retention</p>
+            <p className="mt-1 text-sm leading-relaxed text-gray-500 dark:text-[var(--text-muted)]">
+              Automatically delete cached AI analysis rows older than the
+              specified number of days. Analyses live in a plain table (no
+              TimescaleDB policy), so the app prunes them on a schedule. When
+              off, analyses are retained indefinitely.
+            </p>
+          </div>
+
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+            <label htmlFor="analysis-retention-days" className="text-sm text-gray-700 dark:text-[var(--text-secondary)]">
+              Prune analyses older than:
+            </label>
+            <select
+              id="analysis-retention-days"
+              value={
+                [90, 120, 180, 365].includes(llmSettings.analysisRetentionDays ?? -1)
+                  ? (llmSettings.analysisRetentionDays ?? 90)
+                  : ''
+              }
+              onChange={(e) => {
+                const value = e.target.value;
+                const days = value === '' ? null : Number(value);
+                const next = { ...llmSettings, analysisRetentionDays: days };
+                setLlmSettings(next);
+                setRetentionError(null);
+                updateSettings({ analysisRetentionDays: days }).catch(() => {
+                  setRetentionError('Failed to save analysis retention days.');
+                  getFullSettings().then((s) => {
+                    if (s) setLlmSettings(s);
+                  });
+                });
+              }}
+              className="rounded border bg-white px-3 py-1.5 text-sm dark:border-[var(--border-default)] dark:bg-[var(--bg-surface)] dark:text-[var(--text-primary)]"
+            >
+              <option value="">Off</option>
+              <option value={90}>90 days</option>
+              <option value={120}>120 days</option>
+              <option value={180}>180 days</option>
+              <option value={365}>365 days</option>
+            </select>
+            <span className="text-sm text-gray-500 dark:text-[var(--text-muted)]">
+              (current: {llmSettings.analysisRetentionDays ? `${llmSettings.analysisRetentionDays} days` : 'Off'})
+            </span>
+          </div>
+
+          {retentionError ? (
+            <p className="mt-2 text-sm leading-relaxed text-rose-600 dark:text-rose-400">{retentionError}</p>
+          ) : null}
+        </div>
+      </div>
+      </>
+      ) : null}
     </div>
   );
 }

@@ -3,6 +3,7 @@ import type {
   TelemetryFrame,
   RawTelemetryRow,
   Settings,
+  PublicSettings,
   GenerateUploadTokenResponse,
   Analysis,
   AnalysisPreview,
@@ -206,8 +207,11 @@ export async function getTelemetry(
   return { frames: items.map(normalizeRow), truncated };
 }
 
-export async function getSettings(): Promise<Settings | undefined> {
-  return request<Settings>('/api/settings');
+/** Public settings — the unauthenticated /api/settings endpoint only returns
+ *  { disableRegistration, tokenFromEnv }. Callers needing the full shape MUST
+ *  use getFullSettings() instead. */
+export async function getSettings(): Promise<PublicSettings | undefined> {
+  return request<PublicSettings>('/api/settings');
 }
 
 /** Authenticated full settings (LLM provider, API-key-presence flag, vehicle,
@@ -225,6 +229,7 @@ export async function updateSettings(
     timezoneOffset?: number;
     retentionEnabled?: boolean;
     retentionDays?: number;
+    analysisRetentionDays?: number | null;
   },
 ): Promise<Settings | undefined> {
   return request<Settings>('/api/settings', {
@@ -307,7 +312,7 @@ export async function listAnalyses(sessionId: string): Promise<AnalysisPreview[]
   return request<AnalysisPreview[]>(`/api/sessions/${sessionId}/analyses`);
 }
 
-/** Delete a cached analysis. */
+/** Delete a cached analysis (ownership-checked server-side via the session). */
 export async function deleteAnalysis(sessionId: string, analysisId: number): Promise<void> {
   await request(`/api/sessions/${sessionId}/analyses/${analysisId}`, {
     method: 'DELETE',
@@ -339,10 +344,22 @@ export async function getAnalysis(id: number): Promise<Analysis | undefined> {
   return request<Analysis>(`/api/analyses/${id}`);
 }
 
-/** Export analyses as a markdown file download. */
+/** Export analyses as a markdown file download.
+ *  Triggers a native browser download via a hidden anchor (mirrors
+ *  {@link exportSessionCsv}) — the backend streams the markdown with
+ *  Content-Disposition: attachment. Deliberately no full-page navigation:
+ *  window.location.href would reload the whole SPA to fetch the file.
+ *  No HEAD pre-check — unlike exportSessionCsv (which keeps a HEAD pre-check),
+ *  analyses export relies on the anchor download alone. */
 export async function exportAnalyses(vehicleId?: number): Promise<void> {
-  const params = vehicleId ? `?vehicleId=${vehicleId}` : '';
-  window.location.href = `/api/analyses/export${params}`;
+  const query = vehicleId ? `?vehicleId=${vehicleId}` : '';
+  const a = document.createElement('a');
+  a.href = `/api/analyses/export${query}`;
+  a.download = 'analyses.md';
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
 }
 
 // ── CSV Export ─────────────────────────────────────────────────────────
@@ -387,11 +404,6 @@ export async function exportSessionCsv(sessionId: string): Promise<void> {
 /** List all vehicles for the current user. */
 export async function getVehicles(): Promise<Vehicle[] | undefined> {
   return request<Vehicle[]>('/api/vehicles');
-}
-
-/** Get a single vehicle. */
-export async function getVehicle(id: number): Promise<Vehicle | undefined> {
-  return request<Vehicle>(`/api/vehicles/${id}`);
 }
 
 /** Create a new vehicle. */

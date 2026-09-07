@@ -34,7 +34,6 @@ const session = require('express-session');
 const PgSession = require('connect-pg-simple')(session);
 const passport = require('passport');
 const csrfGuard = require('./middleware/csrfGuard');
-const User = require('./models').User;
 const runtime = require('./config/runtime');
 const models = require('./models');
 require('./config/passport')(passport);
@@ -96,6 +95,12 @@ async function bootstrap() {
         }
         // Load upload API token from env or DB into the runtime holder
         await runtime.initUploadApiToken(models);
+        // Scheduled app-side Analyses prune job (plan 121, option A): idempotent
+        // module-level started flag + unref'd 6h interval, so this call never
+        // delays listen, double-starts, or holds the process open. test suites
+        // never import app.js (they boot the real router on an ephemeral port),
+        // so no test-env seam is needed here.
+        require('./services/analysesRetention').startAnalysesPruner();
         // Start server
         app.listen(config.port, () => console.log(`Listening on port ${config.port}`));
     } catch (err) {

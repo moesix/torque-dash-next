@@ -464,3 +464,210 @@ describe('shared endpoints — unknown shareId', () => {
     }
   });
 });
+
+// ── 6. updateSettings validates llmProvider/llmModel before persisting ──────
+
+describe('PUT /api/settings — updateSettings llmProvider/llmModel validation (admin write path)', () => {
+  const adminReq = (body) => ({ user: { id: 1, isAdmin: true }, body });
+
+  function captureUpsert() {
+    const captured = [];
+    const originalUpsert = mockModels.Settings.upsert;
+    mockModels.Settings.upsert = async (data) => { captured.push(data); };
+    return { captured, restore: () => { mockModels.Settings.upsert = originalUpsert; } };
+  }
+
+  it('rejects an unknown llmProvider with 400 and does NOT persist', async () => {
+    const UserController = require('../controllers/UserController');
+    const { captured, restore } = captureUpsert();
+    try {
+      const { res, calls } = makeStubRes();
+      await UserController.updateSettings(adminReq({ llmProvider: 'not-a-provider' }), res);
+
+      assert.strictEqual(calls.statusCode, 400);
+      assert.ok(calls.body.error.includes('llmProvider'),
+        `error should name llmProvider: ${JSON.stringify(calls.body)}`);
+      assert.strictEqual(captured.length, 0, 'invalid provider must not reach Settings.upsert');
+    } finally {
+      restore();
+    }
+  });
+
+  it('accepts an allowlisted llmProvider and persists it', async () => {
+    const UserController = require('../controllers/UserController');
+    const { captured, restore } = captureUpsert();
+    try {
+      const { res, calls } = makeStubRes();
+      await UserController.updateSettings(adminReq({ llmProvider: 'deepseek' }), res);
+
+      // 200 path resolves via res.json() (no explicit status) — assert the
+      // write reached the DB and a JSON body was produced.
+      assert.ok(calls.body, 'expected a JSON settings body on success');
+      assert.strictEqual(captured.length, 1);
+      assert.strictEqual(captured[0].llmProvider, 'deepseek');
+    } finally {
+      restore();
+    }
+  });
+
+  it('accepts llmProvider null (clearing the provider) and persists it', async () => {
+    const UserController = require('../controllers/UserController');
+    const { captured, restore } = captureUpsert();
+    try {
+      const { res, calls } = makeStubRes();
+      await UserController.updateSettings(adminReq({ llmProvider: null }), res);
+
+      assert.ok(calls.body, 'expected a JSON settings body on success');
+      assert.strictEqual(captured[0].llmProvider, null);
+    } finally {
+      restore();
+    }
+  });
+
+  it('rejects an llmModel longer than 200 chars with 400 and does NOT persist', async () => {
+    const UserController = require('../controllers/UserController');
+    const { captured, restore } = captureUpsert();
+    try {
+      const { res, calls } = makeStubRes();
+      await UserController.updateSettings(adminReq({ llmModel: 'm'.repeat(201) }), res);
+
+      assert.strictEqual(calls.statusCode, 400);
+      assert.ok(calls.body.error.includes('llmModel'),
+        `error should name llmModel: ${JSON.stringify(calls.body)}`);
+      assert.strictEqual(captured.length, 0, 'oversized model must not reach Settings.upsert');
+    } finally {
+      restore();
+    }
+  });
+
+  it('rejects a non-string llmModel with 400 and does NOT persist', async () => {
+    const UserController = require('../controllers/UserController');
+    const { captured, restore } = captureUpsert();
+    try {
+      const { res, calls } = makeStubRes();
+      await UserController.updateSettings(adminReq({ llmModel: 123 }), res);
+
+      assert.strictEqual(calls.statusCode, 400);
+      assert.strictEqual(captured.length, 0);
+    } finally {
+      restore();
+    }
+  });
+
+  it('accepts a 200-char llmModel and persists it (boundary)', async () => {
+    const UserController = require('../controllers/UserController');
+    const { captured, restore } = captureUpsert();
+    try {
+      const { res, calls } = makeStubRes();
+      await UserController.updateSettings(adminReq({ llmModel: 'm'.repeat(200) }), res);
+
+      assert.ok(calls.body, 'expected a JSON settings body on success');
+      assert.strictEqual(captured[0].llmModel.length, 200);
+    } finally {
+      restore();
+    }
+  });
+
+  it('admin gate fires before provider validation (403 for non-admin, not 400)', async () => {
+    const UserController = require('../controllers/UserController');
+    const { captured, restore } = captureUpsert();
+    try {
+      const req = { user: { id: 1, isAdmin: false }, body: { llmProvider: 'not-a-provider' } };
+      const { res, calls } = makeStubRes();
+      await UserController.updateSettings(req, res);
+
+      assert.strictEqual(calls.statusCode, 403);
+      assert.strictEqual(captured.length, 0);
+    } finally {
+      restore();
+    }
+  });
+});
+
+// ── 7. updateSettings validates analysisRetentionDays (admin write path) ────
+
+describe('PUT /api/settings — updateSettings analysisRetentionDays validation (admin write path)', () => {
+  const adminReq = (body) => ({ user: { id: 1, isAdmin: true }, body });
+
+  function captureUpsert() {
+    const captured = [];
+    const originalUpsert = mockModels.Settings.upsert;
+    mockModels.Settings.upsert = async (data) => { captured.push(data); };
+    return { captured, restore: () => { mockModels.Settings.upsert = originalUpsert; } };
+  }
+
+  it('persists a valid analysisRetentionDays (180)', async () => {
+    const UserController = require('../controllers/UserController');
+    const { captured, restore } = captureUpsert();
+    try {
+      const { res, calls } = makeStubRes();
+      await UserController.updateSettings(adminReq({ analysisRetentionDays: 180 }), res);
+
+      assert.ok(calls.body, 'expected a JSON settings body on success');
+      assert.strictEqual(captured.length, 1);
+      assert.strictEqual(captured[0].analysisRetentionDays, 180);
+    } finally {
+      restore();
+    }
+  });
+
+  it('rejects an out-of-range analysisRetentionDays (7) with 400 and does NOT persist', async () => {
+    const UserController = require('../controllers/UserController');
+    const { captured, restore } = captureUpsert();
+    try {
+      const { res, calls } = makeStubRes();
+      await UserController.updateSettings(adminReq({ analysisRetentionDays: 7 }), res);
+
+      assert.strictEqual(calls.statusCode, 400);
+      assert.ok(calls.body.error.includes('analysisRetentionDays'),
+        `error should name analysisRetentionDays: ${JSON.stringify(calls.body)}`);
+      assert.strictEqual(captured.length, 0, 'invalid days must not reach Settings.upsert');
+    } finally {
+      restore();
+    }
+  });
+
+  it('rejects a non-integer analysisRetentionDays with 400', async () => {
+    const UserController = require('../controllers/UserController');
+    const { captured, restore } = captureUpsert();
+    try {
+      const { res, calls } = makeStubRes();
+      await UserController.updateSettings(adminReq({ analysisRetentionDays: 'abc' }), res);
+
+      assert.strictEqual(calls.statusCode, 400);
+      assert.strictEqual(captured.length, 0);
+    } finally {
+      restore();
+    }
+  });
+
+  it('accepts null (clearing/disabling the prune job) and persists null', async () => {
+    const UserController = require('../controllers/UserController');
+    const { captured, restore } = captureUpsert();
+    try {
+      const { res, calls } = makeStubRes();
+      await UserController.updateSettings(adminReq({ analysisRetentionDays: null }), res);
+
+      assert.ok(calls.body, 'expected a JSON settings body on success');
+      assert.strictEqual(captured.length, 1);
+      assert.strictEqual(captured[0].analysisRetentionDays, null);
+    } finally {
+      restore();
+    }
+  });
+
+  it('rejects analysisRetentionDays above 365', async () => {
+    const UserController = require('../controllers/UserController');
+    const { captured, restore } = captureUpsert();
+    try {
+      const { res, calls } = makeStubRes();
+      await UserController.updateSettings(adminReq({ analysisRetentionDays: 366 }), res);
+
+      assert.strictEqual(calls.statusCode, 400);
+      assert.ok(calls.body.error.includes('between 90 and 365'));
+      assert.strictEqual(captured.length, 0);
+    } finally {
+      restore();
+    }
+  });
+});

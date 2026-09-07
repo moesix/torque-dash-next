@@ -6,6 +6,7 @@ process.env.SESSION_KEYS = process.env.SESSION_KEYS || 'abc123';
 
 const { test, describe } = require('node:test');
 const assert = require('node:assert');
+const { Op } = require('sequelize');
 
 // ── Pre-populate require.cache for ../models ────────────────────────
 // AnalysisController requires ../models at the top level.  models/index.js
@@ -314,6 +315,157 @@ describe('exportAnalyses', () => {
     assert.ok(content.includes('# AI Analysis History'));
     assert.ok(!content.includes('## '));
   });
+
+  test('empty history writes exactly the header line', async () => {
+    mockModels.Analysis.findAll = async () => [];
+
+    const req = makeStubReq({ query: {} });
+    const { res, calls } = makeStubRes();
+
+    await AnalysisController.exportAnalyses(req, res);
+
+    // Byte parity: with no analyses the body is exactly the header line.
+    assert.strictEqual(calls.written.join(''), '# AI Analysis History\n\n');
+    assert.ok(calls.ended);
+  });
+
+  test('streams in keyset batches (50/50/20) without losing rows or order', async () => {
+    // 120-row history, oldest first (index 0 = oldest). The controller reads
+    // createdAt DESC, so batches come back newest-first: 50/50/20.
+    const rows = Array.from({ length: 120 }, (_, i) => ({
+      id: i + 1,
+      sessionId: 7,
+      provider: 'openai',
+      model: 'gpt-4',
+      response: `Response ${i + 1}`,
+      reasoning: i % 40 === 0 ? `Reasoning ${i + 1}` : null,
+      createdAt: new Date(Date.UTC(2026, 0, 1 + i)),
+      Session: { name: `Drive ${i + 1}` },
+    }));
+    // Newest row (last in the age-ordered array) gets deterministic content so
+    // the first rendered block can be asserted byte-for-byte.
+    rows[119].provider = 'anthropic';
+    rows[119].model = 'claude-3';
+    rows[119].response = 'All systems nominal.';
+    rows[119].reasoning = 'Checked logs carefully.';
+    rows[119].Session.name = 'Morning Drive';
+
+    const findAllCalls = [];
+    const queue = [
+      rows.slice(70).reverse(),      // 50 newest
+      rows.slice(20, 70).reverse(),  // 50 middle
+      rows.slice(0, 20).reverse(),   // 20 oldest
+    ];
+    mockModels.Analysis.findAll = async (opts) => {
+      findAllCalls.push(opts);
+      return queue.shift() || [];
+    };
+
+    const req = makeStubReq({ query: {} });
+    const { res, calls } = makeStubRes();
+
+    await AnalysisController.exportAnalyses(req, res);
+
+    const content = calls.written.join('');
+    const headingDates = content
+      .split('\n')
+      .filter((line) => line.startsWith('## '))
+      .map((line) => line.split(' — ')[1]);
+
+    // Every one of the 120 rows present, in createdAt-DESC order, no dupes.
+    const expectedDates = rows
+      .slice()
+      .reverse()
+      .map((r) => r.createdAt.toISOString().split('T')[0]);
+    assert.strictEqual(headingDates.length, 120);
+    assert.deepStrictEqual(headingDates, expectedDates);
+
+    // Batched: >=3 findAll calls, each bounded, each carrying ownership scope;
+    // keyset (createdAt, id) marches DOWN from the last row of the prior batch.
+    assert.ok(findAllCalls.length >= 3, `expected >=3 batched calls, got ${findAllCalls.length}`);
+    for (const call of findAllCalls) {
+      assert.strictEqual(call.limit, 50);
+      assert.strictEqual(call.where.userId, 1);
+      assert.strictEqual(call.order.length, 2);
+    }
+    assert.ok(!findAllCalls[0].where[Op.or], 'first batch must not carry a keyset');
+    assert.deepStrictEqual(
+      findAllCalls[1].where[Op.or][0],
+      { createdAt: { [Op.lt]: rows[70].createdAt } },
+    );
+    assert.strictEqual(findAllCalls[1].where[Op.or][1].createdAt, rows[70].createdAt);
+    assert.strictEqual(findAllCalls[1].where[Op.or][1].id[Op.lt], rows[70].id);
+    assert.deepStrictEqual(
+      findAllCalls[2].where[Op.or][0],
+      { createdAt: { [Op.lt]: rows[20].createdAt } },
+    );
+    assert.strictEqual(findAllCalls[2].where[Op.or][1].id[Op.lt], rows[20].id);
+
+    // Byte parity: header + first row match today's exact markdown template.
+    const firstRow = rows[119];
+    const expectedBlock =
+      `## ${firstRow.Session.name} — ${firstRow.createdAt.toISOString().split('T')[0]}\n\n` +
+      '**Provider:** anthropic | **Model:** claude-3\n\n' +
+      'All systems nominal.\n\n' +
+      '<details><summary>Reasoning</summary>\n\n' +
+      'Checked logs carefully.\n\n' +
+      '</details>\n\n' +
+      '---\n\n';
+    assert.ok(content.startsWith('# AI Analysis History\n\n' + expectedBlock));
+
+    // Restore default mock.
+    mockModels.Analysis.findAll = async () => [];
+  });
+
+  test('keeps the vehicleId session filter on every keyset batch', async () => {
+    mockModels.Session.findAll = async () => [{ id: 10 }, { id: 20 }];
+    // A full first page (== BATCH) forces a second, keyset-carrying call.
+    const firstPage = Array.from({ length: 50 }, (_, i) => ({
+      id: i + 1,
+      sessionId: 10,
+      provider: 'openai',
+      model: 'gpt-4',
+      response: `Response ${i + 1}`,
+      reasoning: null,
+      createdAt: new Date(Date.UTC(2026, 0, 1 + i)),
+      Session: { name: 'Drive' },
+    }));
+    const findAllCalls = [];
+    let firstCall = true;
+    mockModels.Analysis.findAll = async (opts) => {
+      findAllCalls.push(opts);
+      if (firstCall) {
+        firstCall = false;
+        return firstPage;
+      }
+      return [];
+    };
+
+    const req = makeStubReq({ query: { vehicleId: '5' } });
+    const { res, calls } = makeStubRes();
+
+    await AnalysisController.exportAnalyses(req, res);
+
+    assert.strictEqual(findAllCalls.length, 2);
+    for (const call of findAllCalls) {
+      assert.strictEqual(call.where.userId, 1);
+      assert.deepStrictEqual(call.where.sessionId, { [Op.in]: [10, 20] });
+    }
+    // The vehicle scope rides along with the keyset on the follow-up batch.
+    assert.deepStrictEqual(
+      findAllCalls[1].where[Op.or][0],
+      { createdAt: { [Op.lt]: firstPage[49].createdAt } },
+    );
+    assert.strictEqual(findAllCalls[1].where[Op.or][1].id[Op.lt], firstPage[49].id);
+
+    const content = calls.written.join('');
+    assert.ok(content.includes('# AI Analysis History'));
+    assert.strictEqual(content.split('## ').length - 1, 50);
+
+    // Restore default mocks.
+    mockModels.Analysis.findAll = async () => [];
+    mockModels.Session.findAll = async () => [];
+  });
 });
 
 describe('listAnalyses (preview mode)', () => {
@@ -389,6 +541,14 @@ function withServer(handler) {
 async function getJson(base, path) {
   const res = await fetch(`${base}${path}`);
   return { status: res.status, body: await res.json() };
+}
+
+// Fetch the middleware/handler functions Express attached to a registered
+// route, in registration order (null when the route is not registered).
+function getRouteHandlers(router, path) {
+  const layer = router.stack.find((l) => l.route && l.route.path === path);
+  if (!layer) return null;
+  return layer.route.stack.map((l) => l.handle);
 }
 
 describe('GET /api/analyses/:id route registration', { skip: apiRouter ? false : 'routes/api.js could not load (env vars missing in local dev)' }, () => {
@@ -472,5 +632,18 @@ describe('GET /api/analyses/:id route registration', { skip: apiRouter ? false :
       assert.ok(text.includes('Morning Drive'));
       assert.ok(text.includes('All good.'));
     });
+  });
+
+  test('GET /api/analyses/export is registered with the export limiter (mirrors session CSV)', async () => {
+    const csvHandlers = getRouteHandlers(apiRouter, '/sessions/:sessionId/export/csv');
+    const exportHandlers = getRouteHandlers(apiRouter, '/analyses/export');
+    assert.ok(csvHandlers, 'session CSV export route must be registered');
+    assert.ok(exportHandlers, '/api/analyses/export route must be registered');
+
+    // exportLimiter is the SAME middleware instance the session CSV export
+    // uses, placed FIRST (before authenticate) exactly like routes/api.js:108.
+    assert.strictEqual(exportHandlers[0], csvHandlers[0], 'exportLimiter must be the first middleware');
+    assert.strictEqual(exportHandlers[1], csvHandlers[1], 'authenticate must follow the limiter');
+    assert.strictEqual(exportHandlers[2], AnalysisController.exportAnalyses);
   });
 });

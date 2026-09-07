@@ -150,3 +150,137 @@ describe('SessionController (with mocked models)', () => {
     assert.deepStrictEqual(calls.body, { error: 'Session not found' });
   });
 });
+
+// ── reassignVehicle — ownership + IDOR guard ────────────────────────
+// PATCH /api/sessions/:sessionId/vehicle. The vehicle must belong to the
+// caller AND the session must belong to the caller; both checks happen before
+// any write, so one user can never reassign another user's session to one of
+// their vehicles (or clear a foreign session's vehicle).
+
+describe('SessionController reassignVehicle (ownership guard)', () => {
+  const DEFAULT_VEHICLE_FIND_ONE = async () => null;
+  const DEFAULT_SESSION_FIND_ONE = async () => null;
+  const VEHICLE_FOREIGN_MSG = 'Vehicle not found.';
+  const SESSION_FOREIGN_MSG = 'Session not found';
+
+  function installMocks({ vehicle = null, session = null } = {}) {
+    const calls = { vehicleFindOne: [], sessionFindOne: [], sessionUpdates: [] };
+    mockModels.Vehicle.findOne = async (opts) => { calls.vehicleFindOne.push(opts); return vehicle; };
+    mockModels.Session.findOne = async (opts) => { calls.sessionFindOne.push(opts); return session; };
+    return calls;
+  }
+
+  function restoreMocks() {
+    mockModels.Vehicle.findOne = DEFAULT_VEHICLE_FIND_ONE;
+    mockModels.Session.findOne = DEFAULT_SESSION_FIND_ONE;
+  }
+
+  // A minimal Sequelize-like session instance: update() patches the in-memory
+  // vehicleId and records the call, so res.json sees the post-update value.
+  function makeOwnedSession(id = 's1', vehicleId = null) {
+    const sess = { id, vehicleId };
+    sess.update = async (patch) => {
+      sess.vehicleId = patch.vehicleId;
+      return sess;
+    };
+    return sess;
+  }
+
+  test('rejects vehicleId "abc", 0 and -1 with 400 before any DB access', async () => {
+    try {
+      for (const bad of ['abc', 0, -1]) {
+        const calls = installMocks();
+        const req = makeStubReq({ body: { vehicleId: bad } });
+        const { res, calls: out } = makeStubRes();
+        await SessionController.reassignVehicle(req, res);
+        assert.strictEqual(out.statusCode, 400, `vehicleId=${JSON.stringify(bad)}`);
+        assert.deepStrictEqual(out.body, { error: 'vehicleId must be a positive integer or null.' });
+        assert.strictEqual(calls.vehicleFindOne.length, 0, 'no vehicle lookup for an invalid id');
+        assert.strictEqual(calls.sessionFindOne.length, 0, 'no session lookup for an invalid id');
+      }
+    } finally {
+      restoreMocks();
+    }
+  });
+
+  test('a foreign vehicle (not owned by the caller) returns 404 and never touches the session', async () => {
+    try {
+      // User 1 tries to assign someone else's vehicle (id 99) to their session.
+      const calls = installMocks({ vehicle: null });
+      const req = makeStubReq({ body: { vehicleId: 99 } });
+      const { res, calls: out } = makeStubRes();
+      await SessionController.reassignVehicle(req, res);
+
+      assert.strictEqual(out.statusCode, 404);
+      assert.deepStrictEqual(out.body, { error: VEHICLE_FOREIGN_MSG });
+      // The vehicle lookup is ownership-scoped — this is the IDOR guard.
+      assert.deepStrictEqual(calls.vehicleFindOne[0], { where: { id: 99, userId: 1 } });
+      assert.strictEqual(calls.sessionFindOne.length, 0, 'session must not be loaded when the vehicle is foreign');
+    } finally {
+      restoreMocks();
+    }
+  });
+
+  test('valid owned vehicle updates the owned session and responds { ok: true, vehicleId }', async () => {
+    try {
+      const updateResults = [];
+      const session = makeOwnedSession('s1');
+      session.update = async (patch) => {
+        updateResults.push(patch);
+        session.vehicleId = patch.vehicleId;
+        return session;
+      };
+      const calls = installMocks({ vehicle: { id: 5 }, session });
+      const req = makeStubReq({ body: { vehicleId: 5 } });
+      const { res, calls: out } = makeStubRes();
+      await SessionController.reassignVehicle(req, res);
+
+      assert.deepStrictEqual(calls.vehicleFindOne[0], { where: { id: 5, userId: 1 } });
+      assert.deepStrictEqual(calls.sessionFindOne[0], { where: { id: 's1', userId: 1 } }, 'session lookup must be ownership-scoped');
+      assert.deepStrictEqual(updateResults, [{ vehicleId: 5 }], 'update must carry the numeric vehicleId');
+      assert.deepStrictEqual(out.body, { ok: true, vehicleId: 5 });
+    } finally {
+      restoreMocks();
+    }
+  });
+
+  test('vehicleId null (unassign) clears the vehicle without a vehicle lookup', async () => {
+    try {
+      const updateResults = [];
+      const session = makeOwnedSession('s1', 5);
+      session.update = async (patch) => {
+        updateResults.push(patch);
+        session.vehicleId = patch.vehicleId;
+        return session;
+      };
+      const calls = installMocks({ vehicle: { id: 5 }, session });
+      const req = makeStubReq({ body: { vehicleId: null } });
+      const { res, calls: out } = makeStubRes();
+      await SessionController.reassignVehicle(req, res);
+
+      assert.strictEqual(calls.vehicleFindOne.length, 0, 'unassign needs no vehicle ownership check');
+      assert.deepStrictEqual(updateResults, [{ vehicleId: null }]);
+      assert.deepStrictEqual(out.body, { ok: true, vehicleId: null });
+    } finally {
+      restoreMocks();
+    }
+  });
+
+  test('a foreign session returns 404 and never updates (no cross-owner write)', async () => {
+    try {
+      // Vehicle is owned, but the session belongs to another user: Session.findOne
+      // (scoped by userId) returns nothing → 404 and no update call.
+      const calls = installMocks({ vehicle: { id: 5 }, session: null });
+      const req = makeStubReq({ params: { sessionId: 'foreign-session' }, body: { vehicleId: 5 } });
+      const { res, calls: out } = makeStubRes();
+      await SessionController.reassignVehicle(req, res);
+
+      assert.strictEqual(out.statusCode, 404);
+      assert.deepStrictEqual(out.body, { error: SESSION_FOREIGN_MSG });
+      assert.deepStrictEqual(calls.sessionFindOne[0], { where: { id: 'foreign-session', userId: 1 } });
+      assert.strictEqual(calls.sessionUpdates.length, 0);
+    } finally {
+      restoreMocks();
+    }
+  });
+});
