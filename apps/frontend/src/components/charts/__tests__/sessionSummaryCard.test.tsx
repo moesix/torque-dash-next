@@ -50,14 +50,15 @@ function gaugeValue(accessibleName: string): number {
   return Number(parsed[1]);
 }
 
-/** A frame whose only usable telemetry is vehicle speed; RPM/coolant stay null
- *  so the Speed gauge is the sole observable signal at any cursor. */
+/** A frame for cursor-tie assertions on the Speed gauge: the values bag also
+ *  feeds the other gauges (kc: 0 → RPM reads 0; k5: 80 → a real 80°C coolant
+ *  reading), but the tests below never assert on RPM or Coolant. */
 function speedFrame(timestamp: string, speed: number): TelemetryFrame {
   return {
     timestamp,
     lon: null,
     lat: null,
-    values: { kc: 0, k5: 80 }, // rpm/coolant sources exist but hold no real reading
+    values: { kc: 0, k5: 80 }, // kc: 0 → RPM gauge reads 0; k5: 80 gives Coolant a real reading — tests only assert Speed
     engineRpm: null,
     vehicleSpeed: speed,
   };

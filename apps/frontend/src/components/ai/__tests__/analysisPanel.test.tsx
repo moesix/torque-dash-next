@@ -6,8 +6,8 @@
  * second 404'd on the now-missing row and surfaced a spurious error.
  *
  * Contract under test, as implemented in AnalysisPanel.tsx:
- *   - handleDeleteAnalysis early-returns while deletingId === preview.id, so a
- *     second click on the same row cannot fire a duplicate DELETE.        (L99)
+ *   - handleDeleteAnalysis early-returns while deletingIds.has(preview.id), so a
+ *     second click on the same row cannot fire a duplicate DELETE.
  *   - the row's Delete button is disabled + aria-busy while that row is being
  *     deleted, and reads "Deleting…".
  *   - a 404 ApiError is treated as already-deleted SUCCESS (row dropped

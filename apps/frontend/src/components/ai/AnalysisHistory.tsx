@@ -18,7 +18,9 @@ export default function AnalysisHistory() {
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [expandedMap, setExpandedMap] = useState<Map<number, Analysis>>(new Map());
   const [loadingId, setLoadingId] = useState<number | null>(null);
-  const [deletingId, setDeletingId] = useState<number | null>(null);
+  // Rows with a delete in flight. A Set (not a single id slot) so row A's
+  // completion can't re-enable row B's button while B is still deleting.
+  const [deletingIds, setDeletingIds] = useState<Set<number>>(new Set());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -72,7 +74,7 @@ export default function AnalysisHistory() {
   async function handleDeleteAnalysis(preview: AnalysisPreview) {
     // A delete is already in flight for this row — ignore the double-click
     // instead of firing a second DELETE that would 404 on the now-missing row.
-    if (deletingId === preview.id) return;
+    if (deletingIds.has(preview.id)) return;
     // Cross-session rows carry the owning sessionId on the preview (the
     // listAllAnalyses endpoint selects it); the delete endpoint re-checks
     // ownership server-side regardless.
@@ -84,7 +86,7 @@ export default function AnalysisHistory() {
     if (!confirm('Delete this analysis? This cannot be undone. Export or copy it first if you need to keep it.')) {
       return;
     }
-    setDeletingId(preview.id);
+    setDeletingIds((ids) => new Set(ids).add(preview.id));
     setError(null);
     try {
       await deleteAnalysis(String(sessionId), preview.id);
@@ -109,7 +111,11 @@ export default function AnalysisHistory() {
         setError('Failed to delete analysis.');
       }
     } finally {
-      setDeletingId(null);
+      setDeletingIds((ids) => {
+        const next = new Set(ids);
+        next.delete(preview.id);
+        return next;
+      });
     }
   }
 
@@ -203,8 +209,8 @@ export default function AnalysisHistory() {
                     <button
                       type="button"
                       aria-label="Delete analysis"
-                      disabled={deletingId === a.id}
-                      aria-busy={deletingId === a.id || undefined}
+                      disabled={deletingIds.has(a.id)}
+                      aria-busy={deletingIds.has(a.id) || undefined}
                       onClick={(e) => {
                         // Stop the card's expand toggle (header click) from firing.
                         e.stopPropagation();
@@ -217,7 +223,7 @@ export default function AnalysisHistory() {
                       }}
                       className="text-xs text-gray-500 hover:text-rose-600 dark:text-gray-400 dark:hover:text-rose-400 disabled:opacity-50 disabled:cursor-wait mr-3"
                     >
-                      {deletingId === a.id ? 'Deleting…' : 'Delete'}
+                      {deletingIds.has(a.id) ? 'Deleting…' : 'Delete'}
                     </button>
                     <span className="text-xs text-gray-400">
                       {isLoading ? '...' : full ? '−' : '+'}

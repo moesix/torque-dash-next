@@ -35,7 +35,9 @@ export default function AnalysisPanel({ sessionId, ref, printMode = false }: Pro
     const [copiedTextId, setCopiedTextId] = useState<number | null>(null);
     const [copiedStream, setCopiedStream] = useState(false);
     const [deleteErrorId, setDeleteErrorId] = useState<number | null>(null);
-    const [deletingId, setDeletingId] = useState<number | null>(null);
+    // Rows with a delete in flight. A Set (not a single id slot) so row A's
+    // completion can't re-enable row B's button while B is still deleting.
+    const [deletingIds, setDeletingIds] = useState<Set<number>>(new Set());
     const latestResponseRef = useRef('');
     const panelRef = useRef<HTMLDivElement>(null);
 
@@ -96,11 +98,11 @@ export default function AnalysisPanel({ sessionId, ref, printMode = false }: Pro
     async function handleDeleteAnalysis(preview: AnalysisPreview) {
       // A delete is already in flight for this row — ignore the double-click
       // instead of firing a second DELETE that would 404 on the now-missing row.
-      if (deletingId === preview.id) return;
+      if (deletingIds.has(preview.id)) return;
       if (!confirm('Delete this analysis? This cannot be undone. Export or copy it first if you need to keep it.')) {
         return;
       }
-      setDeletingId(preview.id);
+      setDeletingIds((ids) => new Set(ids).add(preview.id));
       setDeleteErrorId(null);
       try {
         await deleteAnalysis(sessionId, preview.id);
@@ -129,7 +131,11 @@ export default function AnalysisPanel({ sessionId, ref, printMode = false }: Pro
           setDeleteErrorId(preview.id);
         }
       } finally {
-        setDeletingId(null);
+        setDeletingIds((ids) => {
+          const next = new Set(ids);
+          next.delete(preview.id);
+          return next;
+        });
       }
     }
 
@@ -257,8 +263,8 @@ export default function AnalysisPanel({ sessionId, ref, printMode = false }: Pro
                       <button
                         type="button"
                         aria-label="Delete analysis"
-                        disabled={deletingId === a.id}
-                        aria-busy={deletingId === a.id || undefined}
+                        disabled={deletingIds.has(a.id)}
+                        aria-busy={deletingIds.has(a.id) || undefined}
                         onClick={(e) => {
                           // Stop the row's expand toggle (summary click) from firing.
                           e.preventDefault();
@@ -267,7 +273,7 @@ export default function AnalysisPanel({ sessionId, ref, printMode = false }: Pro
                         }}
                         className="shrink-0 text-xs text-gray-500 hover:text-rose-600 dark:text-gray-400 dark:hover:text-rose-400 disabled:opacity-50 disabled:cursor-wait"
                       >
-                        {deletingId === a.id ? 'Deleting…' : 'Delete'}
+                        {deletingIds.has(a.id) ? 'Deleting…' : 'Delete'}
                       </button>
                     </summary>
                     {deleteErrorId === a.id && (

@@ -349,7 +349,8 @@ export async function getAnalysis(id: number): Promise<Analysis | undefined> {
  *  {@link exportSessionCsv}) — the backend streams the markdown with
  *  Content-Disposition: attachment. Deliberately no full-page navigation:
  *  window.location.href would reload the whole SPA to fetch the file.
- *  No HEAD pre-check (matches exportSessionCsv's current form). */
+ *  No HEAD pre-check — unlike exportSessionCsv (which keeps a HEAD pre-check),
+ *  analyses export relies on the anchor download alone. */
 export async function exportAnalyses(vehicleId?: number): Promise<void> {
   const query = vehicleId ? `?vehicleId=${vehicleId}` : '';
   const a = document.createElement('a');
