@@ -42,6 +42,8 @@ const mockModels = {
       timezoneOffset: 480,
       retentionEnabled: false,
       retentionDays: 365,
+      tileProvider: 'osm',
+      cartoApiKey: null,
     }),
     invalidateCache: () => {},
     upsert: async () => {},
@@ -151,6 +153,57 @@ describe('GET /api/settings/full — authenticated full settings', () => {
     assert.ok(keys.includes('timezoneOffset'));
     assert.ok(keys.includes('retentionEnabled'));
     assert.ok(keys.includes('retentionDays'));
+    // Map basemap (migration 021): the provider is always surfaced; the CARTO
+    // key is NOT — the mocked row has tileProvider 'osm'.
+    assert.ok(keys.includes('tileProvider'));
+    assert.strictEqual(calls.body.tileProvider, 'osm');
+    assert.strictEqual(
+      Object.prototype.hasOwnProperty.call(calls.body, 'cartoApiKey'),
+      false,
+      'cartoApiKey must be omitted while OSM is the active provider'
+    );
+  });
+
+  it('surfaces the stored cartoApiKey ONLY when carto is the active provider', async () => {
+    const UserController = require('../controllers/UserController');
+    const originalGetSingleton = mockModels.Settings.getSingleton;
+    mockModels.Settings.getSingleton = async () => ({
+      disableRegistration: false,
+      uploadApiToken: null,
+      tileProvider: 'carto',
+      cartoApiKey: 'carto_live_key',
+    });
+
+    try {
+      const { res, calls } = makeStubRes();
+
+      await UserController.getSettingsFull({}, res);
+
+      assert.strictEqual(calls.body.tileProvider, 'carto');
+      assert.strictEqual(calls.body.cartoApiKey, 'carto_live_key');
+    } finally {
+      mockModels.Settings.getSingleton = originalGetSingleton;
+    }
+  });
+
+  it('keeps carto selected with an empty key (frontend declines to render)', async () => {
+    const UserController = require('../controllers/UserController');
+    const originalGetSingleton = mockModels.Settings.getSingleton;
+    mockModels.Settings.getSingleton = async () => ({
+      tileProvider: 'carto',
+      cartoApiKey: '',
+    });
+
+    try {
+      const { res, calls } = makeStubRes();
+
+      await UserController.getSettingsFull({}, res);
+
+      assert.strictEqual(calls.body.tileProvider, 'carto');
+      assert.strictEqual(calls.body.cartoApiKey, '');
+    } finally {
+      mockModels.Settings.getSingleton = originalGetSingleton;
+    }
   });
 
   it('sets private Cache-Control', async () => {
@@ -665,6 +718,177 @@ describe('PUT /api/settings — updateSettings analysisRetentionDays validation 
 
       assert.strictEqual(calls.statusCode, 400);
       assert.ok(calls.body.error.includes('between 90 and 365'));
+      assert.strictEqual(captured.length, 0);
+    } finally {
+      restore();
+    }
+  });
+});
+
+// ── 8. updateSettings validates map tile settings (admin write path) ────────
+
+// Migration 021: 'osm' is the default keyless basemap provider; 'carto' is the
+// opt-in upgrade requiring the admin's CARTO API key.
+describe('PUT /api/settings — updateSettings tileProvider/cartoApiKey validation (admin write path)', () => {
+  const adminReq = (body) => ({ user: { id: 1, isAdmin: true }, body });
+
+  function captureUpsert() {
+    const captured = [];
+    const originalUpsert = mockModels.Settings.upsert;
+    mockModels.Settings.upsert = async (data) => { captured.push(data); };
+    return { captured, restore: () => { mockModels.Settings.upsert = originalUpsert; } };
+  }
+
+  it('persists a valid tileProvider ("osm")', async () => {
+    const UserController = require('../controllers/UserController');
+    const { captured, restore } = captureUpsert();
+    try {
+      const { res, calls } = makeStubRes();
+      await UserController.updateSettings(adminReq({ tileProvider: 'osm' }), res);
+
+      assert.ok(calls.body, 'expected a JSON settings body on success');
+      assert.strictEqual(captured.length, 1);
+      assert.strictEqual(captured[0].tileProvider, 'osm');
+    } finally {
+      restore();
+    }
+  });
+
+  it('persists the opt-in "carto" provider', async () => {
+    const UserController = require('../controllers/UserController');
+    const { captured, restore } = captureUpsert();
+    try {
+      const { res, calls } = makeStubRes();
+      await UserController.updateSettings(adminReq({ tileProvider: 'carto', cartoApiKey: 'k1' }), res);
+
+      assert.ok(calls.body, 'expected a JSON settings body on success');
+      assert.strictEqual(captured[0].tileProvider, 'carto');
+      assert.strictEqual(captured[0].cartoApiKey, 'k1');
+    } finally {
+      restore();
+    }
+  });
+
+  it('rejects an unknown tileProvider with 400 and does NOT persist', async () => {
+    const UserController = require('../controllers/UserController');
+    const { captured, restore } = captureUpsert();
+    try {
+      const { res, calls } = makeStubRes();
+      await UserController.updateSettings(adminReq({ tileProvider: 'carto-dark' }), res);
+
+      assert.strictEqual(calls.statusCode, 400);
+      assert.ok(calls.body.error.includes('tileProvider'),
+        `error should name tileProvider: ${JSON.stringify(calls.body)}`);
+      assert.strictEqual(captured.length, 0, 'invalid provider must not reach Settings.upsert');
+    } finally {
+      restore();
+    }
+  });
+
+  it('rejects a cartoApiKey longer than 255 chars with 400 and does NOT persist', async () => {
+    const UserController = require('../controllers/UserController');
+    const { captured, restore } = captureUpsert();
+    try {
+      const { res, calls } = makeStubRes();
+      await UserController.updateSettings(adminReq({ cartoApiKey: 'k'.repeat(256) }), res);
+
+      assert.strictEqual(calls.statusCode, 400);
+      assert.ok(calls.body.error.includes('cartoApiKey'),
+        `error should name cartoApiKey: ${JSON.stringify(calls.body)}`);
+      assert.strictEqual(captured.length, 0, 'oversized key must not reach Settings.upsert');
+    } finally {
+      restore();
+    }
+  });
+
+  it('normalizes a whitespace-only cartoApiKey to the empty string', async () => {
+    const UserController = require('../controllers/UserController');
+    const { captured, restore } = captureUpsert();
+    try {
+      const { res, calls } = makeStubRes();
+      await UserController.updateSettings(adminReq({ cartoApiKey: '   ' }), res);
+
+      assert.ok(calls.body, 'expected a JSON settings body on success');
+      assert.strictEqual(captured[0].cartoApiKey, '');
+    } finally {
+      restore();
+    }
+  });
+
+  it('stores the trimmed cartoApiKey (not the raw padded input)', async () => {
+    const UserController = require('../controllers/UserController');
+    const { captured, restore } = captureUpsert();
+    try {
+      const { res, calls } = makeStubRes();
+      await UserController.updateSettings(adminReq({ cartoApiKey: ' key ' }), res);
+
+      assert.ok(calls.body, 'expected a JSON settings body on success');
+      assert.strictEqual(captured[0].cartoApiKey, 'key');
+    } finally {
+      restore();
+    }
+  });
+
+  it('accepts an explicit empty cartoApiKey (frontend declines to render CARTO without a key)', async () => {
+    const UserController = require('../controllers/UserController');
+    const { captured, restore } = captureUpsert();
+    try {
+      const { res, calls } = makeStubRes();
+      await UserController.updateSettings(adminReq({ tileProvider: 'carto', cartoApiKey: '' }), res);
+
+      assert.ok(calls.body, 'expected a JSON settings body on success');
+      assert.strictEqual(captured[0].tileProvider, 'carto');
+      assert.strictEqual(captured[0].cartoApiKey, '');
+    } finally {
+      restore();
+    }
+  });
+
+  it('rejects a null cartoApiKey with 400 (clearing is the empty string, not null)', async () => {
+    const UserController = require('../controllers/UserController');
+    const { captured, restore } = captureUpsert();
+    try {
+      const { res, calls } = makeStubRes();
+      await UserController.updateSettings(adminReq({ cartoApiKey: null }), res);
+
+      assert.strictEqual(calls.statusCode, 400);
+      assert.strictEqual(captured.length, 0);
+    } finally {
+      restore();
+    }
+  });
+
+  it('touches neither map field when absent (partial PUTs keep the exact prior shape)', async () => {
+    const UserController = require('../controllers/UserController');
+    const { captured, restore } = captureUpsert();
+    try {
+      const { res, calls } = makeStubRes();
+      await UserController.updateSettings(adminReq({ timezoneOffset: -60 }), res);
+
+      assert.ok(calls.body, 'expected a JSON settings body on success');
+      assert.strictEqual(captured.length, 1);
+      assert.strictEqual(
+        Object.prototype.hasOwnProperty.call(captured[0], 'tileProvider'),
+        false
+      );
+      assert.strictEqual(
+        Object.prototype.hasOwnProperty.call(captured[0], 'cartoApiKey'),
+        false
+      );
+    } finally {
+      restore();
+    }
+  });
+
+  it('admin gate fires before map-field validation (403 for non-admin, not 400)', async () => {
+    const UserController = require('../controllers/UserController');
+    const { captured, restore } = captureUpsert();
+    try {
+      const req = { user: { id: 1, isAdmin: false }, body: { tileProvider: 'not-a-provider' } };
+      const { res, calls } = makeStubRes();
+      await UserController.updateSettings(req, res);
+
+      assert.strictEqual(calls.statusCode, 403);
       assert.strictEqual(captured.length, 0);
     } finally {
       restore();

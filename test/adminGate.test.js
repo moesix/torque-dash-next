@@ -47,6 +47,8 @@ function makeSettingsRow() {
         timezoneOffset: 0,
         retentionEnabled: false,
         retentionDays: 365,
+        tileProvider: 'osm',
+        cartoApiKey: null,
     };
     // generateUploadToken mutates the singleton instance then calls save() on
     // it — mirror the real Sequelize instance surface.
@@ -272,6 +274,33 @@ describe('PUT /api/settings — admin-only gate', { skip: apiRouter ? false : 'r
         assert.strictEqual(body.timezoneOffset, 300);
         assert.strictEqual(upsertCalls.length, 1);
         assert.deepStrictEqual(upsertCalls[0], { id: 1, timezoneOffset: 300 });
+    });
+
+    test('non-admin PUT with map tile settings returns 403 and never stores the CARTO API key', async () => {
+        const { status, body } = await withServer(NON_ADMIN, (base) =>
+            sendJson(base, '/api/settings', 'PUT', {
+                tileProvider: 'carto',
+                cartoApiKey: 'leak-me',
+            })
+        );
+
+        assert.strictEqual(status, 403);
+        assert.deepStrictEqual(body, { error: 'Admin access required.' });
+        assert.strictEqual(upsertCalls.length, 0, 'tile settings must not be written for a non-admin');
+        assert.strictEqual(settingsRow.tileProvider, 'osm');
+        assert.strictEqual(settingsRow.cartoApiKey, null);
+    });
+
+    test('admin PUT switches to CARTO and the stored key comes back in the same admin-only response', async () => {
+        const { status, body } = await withServer(ADMIN, (base) =>
+            sendJson(base, '/api/settings', 'PUT', { tileProvider: 'carto', cartoApiKey: 'carto_key_1' })
+        );
+
+        assert.strictEqual(status, 200);
+        assert.strictEqual(body.tileProvider, 'carto');
+        assert.strictEqual(body.cartoApiKey, 'carto_key_1');
+        assert.strictEqual(settingsRow.tileProvider, 'carto');
+        assert.strictEqual(settingsRow.cartoApiKey, 'carto_key_1');
     });
 });
 

@@ -6,6 +6,7 @@ import Toggle from '@/components/ui/Toggle';
 import Button from '@/components/ui/Button';
 import Badge from '@/components/ui/Badge';
 import AiProviderCard from './AiProviderCard';
+import MapBasemapCard from './MapBasemapCard';
 import VehicleManager from './VehicleManager';
 import AnalysisHistory from '@/components/ai/AnalysisHistory';
 
@@ -53,6 +54,7 @@ export default function SettingsPage() {
     retentionEnabled: false,
     retentionDays: 365,
     analysisRetentionDays: null,
+    tileProvider: 'osm',
   });
 
   useEffect(() => {
@@ -242,6 +244,10 @@ export default function SettingsPage() {
         </div>
       </div>
       </>
+      ) : null}
+
+      {isAdmin ? (
+        <MapBasemapCard settings={llmSettings} onUpdate={setLlmSettings} />
       ) : null}
 
       {isAdmin ? (

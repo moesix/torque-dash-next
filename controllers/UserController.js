@@ -6,7 +6,7 @@ const { nanoid } = require('nanoid');
 const crypto = require('crypto');
 const runtime = require('../config/runtime');
 const { userByIdCache } = require('../config/passport');
-const { validateLlmThinkingMode, validateLlmMaxTokens, validateRetentionEnabled, validateRetentionDays, validateAnalysisRetentionDays, validateProvider } = require('../lib/validators');
+const { validateLlmThinkingMode, validateLlmMaxTokens, validateRetentionEnabled, validateRetentionDays, validateAnalysisRetentionDays, validateProvider, validateTileProvider, validateCartoApiKey } = require('../lib/validators');
 
 // Admin = first registered user (bootstrap at register time, plan 099). Any
 // admin-only mutation must call this first and return 403 when it fails.
@@ -319,6 +319,24 @@ class UserController {
               updateData.analysisRetentionDays = req.body.analysisRetentionDays;
             }
 
+            // Map basemap fields (migration 021): admin opt-in CARTO upgrade
+            // over the default keyless OSM provider. Both behind the same
+            // admin gate as every other PUT field — non-admins never reach
+            // this code (403 above), so the CARTO API key is admin-only input.
+            if (req.body.tileProvider !== undefined) {
+              const r = validateTileProvider(req.body.tileProvider);
+              if (!r.ok) return res.status(400).json({ error: r.error });
+              updateData.tileProvider = r.value;
+            }
+            if (req.body.cartoApiKey !== undefined) {
+              const r = validateCartoApiKey(req.body.cartoApiKey);
+              if (!r.ok) return res.status(400).json({ error: r.error });
+              // Setting the provider back to 'osm' is how the admin clears a
+              // leaked key — an explicit empty string normalizes to '' via
+              // trim, and 'osm' rows never expose the key anyway.
+              updateData.cartoApiKey = r.value;
+            }
+
             // API key requires encryption
             if (llmApiKey !== undefined) {
               if (llmApiKey === null) {
@@ -489,6 +507,15 @@ function settingsView(settings, extras = {}) {
         retentionEnabled: settings.retentionEnabled ?? false,
         retentionDays: settings.retentionDays ?? 365,
         analysisRetentionDays: settings.analysisRetentionDays ?? null,
+        // Map basemap (migration 021): tileProvider is ALWAYS present in the
+        // full/public-served-to-authenticated shape (default 'osm'); the CARTO
+        // API key is exposed ONLY while 'carto' is the active provider —
+        // browsers embed it in tile URLs — and is omitted entirely when OSM is
+        // active (never leak the key when nothing needs it).
+        tileProvider: settings.tileProvider === 'carto' ? 'carto' : 'osm',
+        ...(settings.tileProvider === 'carto'
+            ? { cartoApiKey: settings.cartoApiKey ?? '' }
+            : {}),
         ...extras,
     };
 }
