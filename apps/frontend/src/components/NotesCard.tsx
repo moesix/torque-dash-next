@@ -37,10 +37,10 @@ export default function NotesCard({ sessionId, initialNotes }: Props) {
                 onChange={(e) => setNotes(e.target.value)}
                 onBlur={handleBlur}
                 placeholder="Add notes about this session..."
-                className="w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm shadow-xs focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500 dark:border-[var(--border-default)] dark:bg-[var(--bg-surface)] dark:text-[var(--text-primary)] dark:focus:border-teal-400"
+                className="w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm shadow-xs focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent dark:border-[var(--border-default)] dark:bg-[var(--bg-surface)] dark:text-[var(--text-primary)]"
             />
             {saving && (
-                <span className="text-xs text-gray-400 dark:text-[var(--text-muted)]">Saving...</span>
+                <span className="text-xs text-fg-muted">Saving...</span>
             )}
             {error && <span className="text-xs text-red-600">{error}</span>}
         </div>

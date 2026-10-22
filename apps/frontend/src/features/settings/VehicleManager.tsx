@@ -7,6 +7,10 @@ import {
   setDefaultVehicle,
 } from '@/lib/api';
 import type { Vehicle, UpdateVehicle } from '@/lib/types';
+import Button from '@/components/ui/Button';
+import Badge from '@/components/ui/Badge';
+import ConfirmDialog from '@/components/ui/ConfirmDialog';
+import Skeleton from '@/components/ui/Skeleton';
 
 export default function VehicleManager() {
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
@@ -14,6 +18,10 @@ export default function VehicleManager() {
   const [error, setError] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
+  // Vehicle queued for deletion — the ConfirmDialog target (replaces the old
+  // native window.confirm). null = no delete pending.
+  const [deleteTarget, setDeleteTarget] = useState<Vehicle | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [formData, setFormData] = useState<UpdateVehicle>({
     name: '',
     make: null,
@@ -64,12 +72,16 @@ export default function VehicleManager() {
   }
 
   async function handleDelete(id: number) {
-    if (!confirm('Delete this vehicle? Sessions will be unassigned.')) return;
+    setDeleting(true);
+    setError(null);
     try {
       await deleteVehicle(id);
+      setDeleteTarget(null);
       await loadVehicles();
     } catch {
       setError('Failed to delete vehicle.');
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -83,26 +95,50 @@ export default function VehicleManager() {
   }
 
   if (loading) {
-    return <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs"><p className="text-sm leading-relaxed">Loading vehicles...</p></div>;
+    return (
+      <div className="card" aria-busy="true">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <Skeleton className="h-5 w-32" />
+            <Skeleton className="mt-2 h-3 w-72 max-w-full" />
+          </div>
+          <Skeleton className="h-11 w-28 shrink-0 rounded-lg" />
+        </div>
+        <div className="mt-4 space-y-3">
+          {[0, 1, 2].map((i) => (
+            <div
+              key={i}
+              className="flex items-center justify-between rounded border border-border p-3"
+            >
+              <div className="min-w-0">
+                <Skeleton className="h-4 w-40" />
+                <Skeleton className="mt-2 h-3 w-56 max-w-full" />
+              </div>
+              <Skeleton className="h-8 w-40" />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
   }
 
   return (
-    <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
+    <div className="card">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h3 className="text-lg font-semibold leading-relaxed">Vehicles</h3>
-          <p className="mt-1 text-sm leading-relaxed text-gray-500 dark:text-[var(--text-muted)]">
+          <p className="mt-1 text-sm leading-relaxed text-fg-muted">
             Manage your vehicle profiles. The default vehicle is used when Torque
             Pro doesn&rsquo;t send vehicle metadata.
           </p>
         </div>
-        <button
-          type="button"
+        <Button
+          variant="primary"
+          size="sm"
           onClick={() => { setShowAddForm(true); setEditingId(null); }}
-          className="rounded bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-600"
         >
           + Add Vehicle
-        </button>
+        </Button>
       </div>
 
       {error && (
@@ -111,7 +147,7 @@ export default function VehicleManager() {
 
       {/* Add form */}
       {showAddForm && (
-        <div className="mt-4 rounded border border-gray-200 p-4 dark:border-[var(--border-default)]">
+        <div className="mt-4 rounded border border-border p-4">
           <VehicleForm
             data={formData}
             onChange={setFormData}
@@ -124,14 +160,14 @@ export default function VehicleManager() {
       {/* Vehicle list */}
       <div className="mt-4 space-y-3">
         {vehicles.length === 0 && (
-          <p className="text-sm leading-relaxed text-gray-500 dark:text-[var(--text-muted)]">
+          <p className="text-sm leading-relaxed text-fg-muted">
             No vehicles yet. Add one to start organizing your sessions.
           </p>
         )}
         {vehicles.map((v) => (
           <div
             key={v.id}
-            className="flex items-center justify-between rounded border border-gray-200 p-3 dark:border-[var(--border-default)]"
+            className="flex items-center justify-between rounded border border-border p-3"
           >
             {editingId === v.id ? (
               <VehicleForm
@@ -144,33 +180,32 @@ export default function VehicleManager() {
               <>
                 <div className="flex-1">
                   <div className="flex items-center gap-2">
-                    <span className="font-medium text-gray-900 dark:text-white">
+                    <span className="font-medium text-fg">
                       {v.name}
                     </span>
-                    {v.isDefault && (
-                      <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
-                        Default
-                      </span>
-                    )}
+                    {v.isDefault && <Badge tone="ok">Default</Badge>}
                   </div>
-                  <p className="text-sm leading-relaxed text-gray-500 dark:text-[var(--text-muted)]">
+                  <p className="text-sm leading-relaxed text-fg-muted">
                     {[v.year, v.make, v.model].filter(Boolean).join(' ') || 'No details'}
                     {v.engineCc ? ` · ${v.engineCc}cc` : ''}
                   </p>
                 </div>
                 <div className="flex items-center gap-1">
                   {!v.isDefault && (
-                    <button
-                      type="button"
+                    <Button
+                      variant="ghost"
+                      size="sm"
                       onClick={() => handleSetDefault(v.id)}
-                      className="rounded px-3 py-2 text-xs min-h-[36px] text-gray-500 hover:bg-gray-100 dark:text-[var(--text-muted)] dark:hover:bg-gray-700"
+                      className="text-fg-muted"
                       title="Set as default"
+                      aria-label={`Set ${v.name} as default vehicle`}
                     >
                       ★
-                    </button>
+                    </Button>
                   )}
-                  <button
-                    type="button"
+                  <Button
+                    variant="ghost"
+                    size="sm"
                     onClick={() => {
                       setEditingId(v.id);
                       setFormData({
@@ -181,23 +216,37 @@ export default function VehicleManager() {
                         engineCc: v.engineCc,
                       });
                     }}
-                    className="rounded px-3 py-2 text-xs min-h-[36px] text-gray-500 hover:bg-gray-100 dark:text-[var(--text-muted)] dark:hover:bg-gray-700"
+                    className="text-fg-muted"
                   >
                     Edit
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleDelete(v.id)}
-                    className="rounded px-3 py-2 text-xs min-h-[36px] text-red-500 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/30"
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setDeleteTarget(v)}
+                    className="text-red-500 hover:text-red-600"
                   >
                     Delete
-                  </button>
+                  </Button>
                 </div>
               </>
             )}
           </div>
         ))}
       </div>
+
+      {/* Delete confirmation — replaces the old native window.confirm */}
+      {deleteTarget && (
+        <ConfirmDialog
+          open
+          busy={deleting}
+          title="Delete vehicle?"
+          description={`${deleteTarget.name} will be deleted and its sessions unassigned. This cannot be undone.`}
+          confirmLabel="Delete"
+          onClose={() => setDeleteTarget(null)}
+          onConfirm={() => handleDelete(deleteTarget.id)}
+        />
+      )}
     </div>
   );
 }
@@ -221,7 +270,7 @@ function VehicleForm({
         value={data.name ?? ''}
         onChange={(e) => onChange({ ...data, name: e.target.value })}
         placeholder="Vehicle name (e.g. My Civic)"
-        className="w-full rounded border bg-white px-3 py-2 text-sm dark:border-[var(--border-default)] dark:bg-[var(--bg-surface)] dark:text-[var(--text-primary)]"
+        className="w-full rounded border border-border bg-surface-card px-3 py-2 text-sm text-fg"
       />
       <div className="grid grid-cols-2 gap-2">
         <input
@@ -229,42 +278,42 @@ function VehicleForm({
           value={data.make ?? ''}
           onChange={(e) => onChange({ ...data, make: e.target.value || null })}
           placeholder="Make (e.g. Honda)"
-          className="rounded border bg-white px-3 py-2 text-sm dark:border-[var(--border-default)] dark:bg-[var(--bg-surface)] dark:text-[var(--text-primary)]"
+          className="rounded border border-border bg-surface-card px-3 py-2 text-sm text-fg"
         />
         <input
           type="text"
           value={data.model ?? ''}
           onChange={(e) => onChange({ ...data, model: e.target.value || null })}
           placeholder="Model (e.g. Civic)"
-          className="rounded border bg-white px-3 py-2 text-sm dark:border-[var(--border-default)] dark:bg-[var(--bg-surface)] dark:text-[var(--text-primary)]"
+          className="rounded border border-border bg-surface-card px-3 py-2 text-sm text-fg"
         />
         <input
           type="number"
           value={data.year ?? ''}
           onChange={(e) => onChange({ ...data, year: e.target.value ? Number(e.target.value) : null })}
           placeholder="Year"
-          className="rounded border bg-white px-3 py-2 text-sm dark:border-[var(--border-default)] dark:bg-[var(--bg-surface)] dark:text-[var(--text-primary)]"
+          className="rounded border border-border bg-surface-card px-3 py-2 text-sm text-fg"
         />
         <input
           type="number"
           value={data.engineCc ?? ''}
           onChange={(e) => onChange({ ...data, engineCc: e.target.value ? Number(e.target.value) : null })}
           placeholder="Engine CC"
-          className="rounded border bg-white px-3 py-2 text-sm dark:border-[var(--border-default)] dark:bg-[var(--bg-surface)] dark:text-[var(--text-primary)]"
+          className="rounded border border-border bg-surface-card px-3 py-2 text-sm text-fg"
         />
       </div>
       <div className="flex gap-2">
         <button
           type="button"
           onClick={onSave}
-          className="rounded bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-600"
+          className="rounded bg-accent px-4 py-2 text-sm font-medium text-accent-ink shadow-xs hover:bg-accent-hover active:translate-y-px transition min-h-[44px] inline-flex items-center justify-center"
         >
           Save
         </button>
         <button
           type="button"
           onClick={onCancel}
-          className="rounded border bg-white px-4 py-2 text-sm font-medium hover:bg-gray-50 dark:border-[var(--border-default)] dark:bg-[var(--bg-card)] dark:text-[var(--text-primary)] dark:hover:bg-[var(--bg-surface)]"
+          className="rounded border border-border bg-surface-card px-4 py-2 text-sm font-medium text-fg-secondary shadow-xs hover:bg-surface-elevated hover:text-fg transition min-h-[44px] inline-flex items-center justify-center"
         >
           Cancel
         </button>

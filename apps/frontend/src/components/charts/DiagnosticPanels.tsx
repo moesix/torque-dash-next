@@ -16,7 +16,7 @@ import type {
   DiagnosticPanelProps,
 } from './DiagnosticPanel';
 import { computeTotalTrim } from '@/lib/pidDecode';
-import { SERIES_COLOR_TRIM, BRAND_TEAL_AREA } from '@/lib/chartColors';
+import { SERIES_COLOR_TRIM, ACCENT_AREA } from '@/lib/chartColors';
 
 // ── Props ────────────────────────────────────────────────────────────────
 
@@ -50,11 +50,14 @@ const YAXIS_O2_AFR: AxisOverrides = { 0: {}, 1: {} }; // O2 voltage left, AFR ri
 const YAXIS_COOLANT: AxisOverrides = { 0: { min: 60, max: 95 } };
 const YAXIS_BOOST_MAF: AxisOverrides = { 0: {}, 1: {} }; // Boost left, MAF right
 
+// Fuel-trim reference lines use the theme-neutral splitLine colour: their
+// color is omitted here and DiagnosticPanel falls back to getChartTheme(),
+// so the dashed reference adapts to dark/light instead of a fixed #9ca3af.
 const FUEL_TRIM_MARK_LINES: MarkLineConfig[] = [
-  { yAxis: 0, color: '#9ca3af', type: 'dashed' },
+  { yAxis: 0, type: 'dashed' },
 ];
 const FUEL_TRIM_MARK_AREAS: MarkAreaConfig[] = [
-  { yFrom: -10, yTo: 10, color: BRAND_TEAL_AREA },
+  { yFrom: -10, yTo: 10, color: ACCENT_AREA },
 ];
 
 // ── Helpers ──────────────────────────────────────────────────────────────

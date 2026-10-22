@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { updateLlmSettings, testLlmConnection } from '@/lib/api';
 import type { Settings } from '@/lib/types';
+import Button from '@/components/ui/Button';
+import Badge from '@/components/ui/Badge';
 
 const PROVIDERS = [
   { value: 'openai', label: 'OpenAI', models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4.1-nano'] },
@@ -75,7 +77,7 @@ export default function AiProviderCard({ settings, onUpdate }: Props) {
   }
 
   return (
-    <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
+    <div className="card">
       <div className="space-y-4">
         <div>
           <p className="text-sm leading-relaxed font-medium">AI Provider</p>
@@ -86,16 +88,11 @@ export default function AiProviderCard({ settings, onUpdate }: Props) {
         </div>
 
         <div className="flex items-center gap-2">
-          <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ${
-            settings.hasLlmProvider
-              ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-600/20 dark:bg-emerald-900/40 dark:text-emerald-300'
-              : 'bg-gray-50 text-gray-600 ring-1 ring-gray-500/10 dark:bg-[var(--bg-surface)] dark:text-[var(--text-secondary)]'
-          }`}>
-            <span className={`h-1.5 w-1.5 rounded-full ${settings.hasLlmProvider ? 'bg-emerald-500' : 'bg-gray-400'}`} />
+          <Badge tone={settings.hasLlmProvider ? 'ok' : 'neutral'} dot>
             {settings.hasLlmProvider
               ? `Connected (${PROVIDERS.find(p => p.value === settings.llmProvider)?.label || settings.llmProvider})`
               : 'Not configured'}
-          </span>
+          </Badge>
         </div>
 
         {settings.hasLlmProvider && (
@@ -238,23 +235,13 @@ export default function AiProviderCard({ settings, onUpdate }: Props) {
         )}
 
         <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={busy || !provider}
-            className="rounded bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50 transition-colors dark:bg-indigo-500 dark:hover:bg-indigo-600"
-          >
+          <Button variant="primary" size="sm" onClick={handleSave} disabled={busy || !provider}>
             {busy ? 'Saving...' : 'Save'}
-          </button>
+          </Button>
           {settings.hasLlmProvider && (
-            <button
-              type="button"
-              onClick={handleTest}
-              disabled={busy}
-              className="rounded border bg-white px-4 py-2 text-sm font-medium hover:bg-gray-50 disabled:opacity-50 transition-colors dark:border-[var(--border-default)] dark:bg-[var(--bg-card)] dark:hover:bg-[var(--bg-surface)]"
-            >
+            <Button variant="ghost" size="sm" onClick={handleTest} disabled={busy}>
               Test Connection
-            </button>
+            </Button>
           )}
         </div>
 

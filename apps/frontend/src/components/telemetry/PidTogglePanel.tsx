@@ -12,21 +12,10 @@
 import { useMemo, useState } from 'react';
 import type { ChangeEvent } from 'react';
 import type { SeriesSource } from '@/lib/types';
+import { SERIES_COLORS } from '@/lib/chartColors';
+import ChevronIcon from '@/components/ui/ChevronIcon';
 
-// ── Color palette (must match OverlayChart) ──────────────────────────────
-
-const COLORS = [
-  '#009999',
-  '#16a34a',
-  '#dc2626',
-  '#d97706',
-  '#8b5cf6',
-  '#ec4899',
-  '#14b8a6',
-  '#f97316',
-  '#06b6d4',
-  '#84cc16',
-];
+// ── Color swatches come from lib/chartColors.ts (must match OverlayChart) ─
 
 // ── Category heuristic ───────────────────────────────────────────────────
 
@@ -163,7 +152,7 @@ export default function PidTogglePanel({
         <button
           type="button"
           onClick={onSelectAll}
-          className="rounded bg-teal-50 px-3 py-1.5 text-xs font-medium text-teal-700 hover:bg-teal-100 dark:bg-teal-900/40 dark:text-teal-300 dark:hover:bg-teal-900/60 min-h-[36px]"
+          className="rounded bg-accent-soft px-3 py-1.5 text-xs font-medium text-accent hover:bg-accent/20 min-h-[36px]"
         >
           Select All
         </button>
@@ -181,7 +170,7 @@ export default function PidTogglePanel({
         >
           Reset
         </button>
-        <span className="ml-auto text-xs text-gray-400 dark:text-[var(--text-muted)]">
+        <span className="ml-auto text-xs text-fg-muted">
           {count} of {total} selected
         </span>
       </div>
@@ -192,7 +181,7 @@ export default function PidTogglePanel({
         value={search}
         onChange={onSearchChange}
         placeholder="Search metrics…"
-        className="w-full rounded-md border border-gray-300 px-2 py-2 text-sm placeholder-gray-400 focus:border-teal-400 focus:outline-none dark:border-[var(--border-default)] dark:bg-[var(--bg-surface)] dark:text-[var(--text-primary)] dark:placeholder-[var(--text-muted)]"
+        className="w-full rounded-md border border-gray-300 px-2 py-2 text-sm placeholder-gray-400 focus:border-accent focus:outline-none dark:border-[var(--border-default)] dark:bg-[var(--bg-surface)] dark:text-[var(--text-primary)] dark:placeholder-[var(--text-muted)]"
         aria-label="Filter metrics"
       />
 
@@ -213,11 +202,19 @@ export default function PidTogglePanel({
                 aria-controls={`pid-category-${cat}`}
                 className="flex w-full items-center gap-1 rounded px-1 py-1.5 text-left text-xs font-semibold text-gray-500 hover:bg-gray-50 dark:text-[var(--text-muted)] dark:hover:bg-[var(--bg-surface)]"
               >
-                <span className="w-3 text-center text-[10px]">
-                  {isExpanded ? '▼' : '▶'}
+                {/* Real rotating chevron (same pattern as AnalysisHistory's
+                    disclosure) — a transform on an SVG, not two glyph swaps,
+                    so the transition-transform actually animates. Down when
+                    expanded, right when collapsed. */}
+                <span className="flex w-3 justify-center">
+                  <ChevronIcon
+                    className={`h-3 w-3 text-current transition-transform duration-200 ${
+                      isExpanded ? 'rotate-0' : '-rotate-90'
+                    }`}
+                  />
                 </span>
                 <span>{CATEGORY_LABELS[cat] ?? cat}</span>
-                <span className="ml-auto text-[10px] text-gray-400 dark:text-[var(--text-muted)]">
+                <span className="ml-auto text-[10px] text-fg-muted">
                   {items.length}
                 </span>
               </button>
@@ -227,7 +224,7 @@ export default function PidTogglePanel({
                 <div id={`pid-category-${cat}`} className="ml-2 space-y-0.5">
                   {items.map((src) => {
                     const idx = colorIndex.get(src.pid) ?? 0;
-                    const color = COLORS[idx % COLORS.length];
+                    const color = SERIES_COLORS[idx % SERIES_COLORS.length];
                     const isChecked = selected.includes(src.pid);
 
                     return (
@@ -246,7 +243,7 @@ export default function PidTogglePanel({
                           style={{ backgroundColor: color }}
                         />
                         <span className="truncate flex-1">{src.short}</span>
-                        <span className="text-[10px] text-gray-400 shrink-0 dark:text-[var(--text-muted)]">
+                        <span className="text-[10px] shrink-0 text-fg-muted">
                           {src.unit}
                         </span>
                       </label>
@@ -259,7 +256,7 @@ export default function PidTogglePanel({
         })}
 
         {filtered.length === 0 && (
-          <p className="py-4 text-center text-xs text-gray-400 dark:text-[var(--text-muted)]">
+          <p className="py-4 text-center text-xs text-fg-muted">
             No metrics match your search.
           </p>
         )}

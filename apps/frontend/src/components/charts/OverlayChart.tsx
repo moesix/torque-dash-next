@@ -9,7 +9,7 @@
  *   subscription, so group sync is unnecessary.
  */
 
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import * as echarts from 'echarts/core';
 import { LineChart } from 'echarts/charts';
 import {
@@ -22,6 +22,14 @@ import {
 import { CanvasRenderer } from 'echarts/renderers';
 import type { TelemetryFrame, SeriesSource } from '@/lib/types';
 import { getSeriesData } from '@/lib/pidDecode';
+import {
+  ACCENT,
+  ACCENT_AREA,
+  ACCENT_AREA_SOFT,
+  SERIES_COLORS,
+  getChartTheme,
+  subscribeChartTheme,
+} from '@/lib/chartColors';
 
 // Tree-shaken ECharts build.
 echarts.use([
@@ -36,18 +44,8 @@ echarts.use([
 
 // ── Constants ────────────────────────────────────────────────────────────
 
-const COLORS = [
-  '#009999',
-  '#16a34a',
-  '#dc2626',
-  '#d97706',
-  '#8b5cf6',
-  '#ec4899',
-  '#14b8a6',
-  '#f97316',
-  '#06b6d4',
-  '#84cc16',
-];
+// (Series colors and theme neutrals come from lib/chartColors.ts — the
+// declared canonical source — instead of a local copy.)
 
 // ── Props ────────────────────────────────────────────────────────────────
 
@@ -72,6 +70,11 @@ export default function OverlayChart({
 }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<ReturnType<typeof echarts.init> | null>(null);
+
+  // Track the active theme — a flip of `.dark` on <html> re-applies the
+  // theme-aware chart neutrals (axis labels, grid, tooltip) below.
+  const [themeVersion, setThemeVersion] = useState(0);
+  useEffect(() => subscribeChartTheme(() => setThemeVersion((v) => v + 1)), []);
 
   // ── Group sources by unit ──────────────────────────────────────────
   const unitGroups = useMemo(() => {
@@ -172,6 +175,9 @@ export default function OverlayChart({
     const mobileAxisOffset = Math.min(axisOffset, 28);
     const effectiveOffset = isMobile ? mobileAxisOffset : axisOffset;
 
+    // ── Theme-aware chart neutrals ────────────────────────────────────
+    const theme = getChartTheme();
+
     // Build yAxis options — one per unit group
     const yAxisOptions: any[] = [];
     let axisIdx = 0;
@@ -183,10 +189,13 @@ export default function OverlayChart({
         name: unit === '_' ? '' : unit,
         nameLocation: 'middle',
         nameGap: 40,
-        axisLabel: { fontSize: 10 },
+        axisLabel: { fontSize: 10, color: theme.axisLabel },
+        nameTextStyle: { color: theme.axisLabel },
       };
+      opt.axisLine = { lineStyle: { color: theme.splitLine } };
       if (isFirst) {
         opt.position = 'left';
+        opt.splitLine = { lineStyle: { color: theme.splitLine } };
       } else {
         opt.position = 'right';
         opt.offset = effectiveOffset * (axisIdx - 1);
@@ -221,7 +230,7 @@ export default function OverlayChart({
       const u = src.unit || '_';
       // Find yAxisIndex for this unit in the full frequency list
       const yi = unitFrequency.findIndex(([unit]) => unit === u);
-      const color = COLORS[i % COLORS.length];
+      const color = SERIES_COLORS[i % SERIES_COLORS.length];
       const data = getSeriesData(frames, src);
 
       return {
@@ -258,8 +267,17 @@ export default function OverlayChart({
       {
         animation: false,
         grid: { left: isMobile ? 20 : 56, right: rightMargin, top: 24, bottom: 60, containLabel: true },
-        tooltip: { trigger: 'axis' as const },
-        xAxis: { type: 'time' as const },
+        tooltip: {
+          trigger: 'axis' as const,
+          backgroundColor: theme.tooltipBg,
+          borderColor: theme.tooltipBorder,
+          textStyle: { color: theme.tooltipText },
+        },
+        xAxis: {
+          type: 'time' as const,
+          axisLine: { lineStyle: { color: theme.splitLine } },
+          axisLabel: { color: theme.axisLabel },
+        },
         yAxis: yAxisOptions,
         dataZoom: [
           {
@@ -271,17 +289,17 @@ export default function OverlayChart({
             filterMode: 'none' as const,
             height: 20,
             borderColor: 'transparent',
-            backgroundColor: 'rgba(0,153,153,0.08)',
-            fillerColor: 'rgba(0,153,153,0.15)',
-            handleStyle: { color: '#009999' },
-            textStyle: { color: '#6b7280', fontSize: 10 },
+            backgroundColor: ACCENT_AREA_SOFT,
+            fillerColor: ACCENT_AREA,
+            handleStyle: { color: ACCENT },
+            textStyle: { color: theme.axisLabel, fontSize: 10 },
           },
         ],
         series: seriesOptions,
       },
       { notMerge: true },
     );
-  }, [sources, frames, unitGroups]);
+  }, [sources, frames, unitGroups, themeVersion]);
 
   // ── Cursor markLine effect (merge mode — does NOT re-render data) ──
   useEffect(() => {
@@ -328,7 +346,7 @@ export default function OverlayChart({
     return (
       <div
         ref={containerRef}
-        className={`flex w-full min-w-0 items-center justify-center text-sm text-gray-400 ${mergedClassName}`}
+        className={`flex w-full min-w-0 items-center justify-center text-sm text-fg-muted ${mergedClassName}`}
       >
         <span>Select metrics to display</span>
       </div>

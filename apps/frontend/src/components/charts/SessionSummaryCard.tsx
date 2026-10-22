@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import type { TelemetryFrame } from '@/lib/types';
 import { getSeriesData, findNearestFrameIndex } from '@/lib/pidDecode';
 import { usePlaybackStore } from '@/app/playbackStore';
-import { BRAND_TEAL, SERIES_COLORS } from '@/lib/chartColors';
+import { METRIC_COLORS } from '@/lib/chartColors';
 
 interface Props {
   frames: TelemetryFrame[];
@@ -69,7 +69,9 @@ function RingGauge({ label, value, max, unit, color }: GaugeProps) {
           className="stroke-gray-200 dark:stroke-gray-700"
           strokeWidth="8"
         />
-        {/* Colored arc */}
+        {/* Colored arc — stroke-dasharray transition glides the gauge as the
+            playback cursor streams values; the global reduced-motion media
+            rule in index.css neutralizes it. */}
         <circle
           cx="50"
           cy="50"
@@ -80,15 +82,17 @@ function RingGauge({ label, value, max, unit, color }: GaugeProps) {
           strokeLinecap="round"
           strokeDasharray={`${dash} ${circumference}`}
           transform="rotate(-90 50 50)"
+          className="gauge-arc"
         />
-        {/* Value text */}
+        {/* Value text — Martian Mono + tabular alignment so streaming
+            digits don't jitter horizontally */}
         <text
           x="50"
           y="46"
           textAnchor="middle"
           fontSize="16"
           fontWeight="700"
-          className="fill-gray-900 dark:fill-gray-100"
+          className="fill-gray-900 font-mono tabular-nums dark:fill-gray-100"
         >
           {display}
         </text>
@@ -98,7 +102,7 @@ function RingGauge({ label, value, max, unit, color }: GaugeProps) {
           y="62"
           textAnchor="middle"
           fontSize="9"
-          className="fill-gray-500 dark:fill-gray-400"
+          className="fill-gray-500 font-mono dark:fill-gray-400"
         >
           {unit.trim()}
         </text>
@@ -183,7 +187,7 @@ export default function SessionSummaryCard({
   }, [cursorTime, sortedTimestamps, rpmData, coolantData, speedData, frames.length]);
 
   return (
-    <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
+    <div className="card">
       <h3 className="text-lg font-semibold leading-relaxed">Session Summary</h3>
 
       {/* Top: 3 SVG ring gauges */}
@@ -193,21 +197,21 @@ export default function SessionSummaryCard({
           value={currentValues.rpm}
           max={maxRpm ?? 8000}
           unit=" rpm"
-          color={BRAND_TEAL}
+          color="var(--accent)"
         />
         <RingGauge
           label="Coolant"
           value={currentValues.coolant}
           max={maxCoolant ?? 120}
           unit="°C"
-          color={SERIES_COLORS[3]}
+          color={METRIC_COLORS.coolant}
         />
         <RingGauge
           label="Speed"
           value={currentValues.speed}
           max={maxSpeed ?? 240}
           unit=" km/h"
-          color={SERIES_COLORS[1]}
+          color={METRIC_COLORS.speed}
         />
       </div>
 
@@ -232,7 +236,7 @@ export default function SessionSummaryCard({
               <tr key={row.label} className="border-t border-gray-100 dark:border-[var(--border-default)]">
                 <td className="py-1 pr-2 font-medium">
                   {row.label}
-                  <span className="ml-1 text-gray-400 dark:text-[var(--text-muted)]">{row.unit}</span>
+                  <span className="ml-1 text-fg-muted">{row.unit}</span>
                 </td>
                 <td className="py-1 pr-2 text-right tabular-nums">
                   {row.s != null ? Math.round(row.s.min) : '—'}

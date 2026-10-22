@@ -1,6 +1,7 @@
 import { Suspense } from 'react';
 import { RouterProvider, createBrowserRouter } from 'react-router';
 import { routerConfig } from '@/app/router';
+import Skeleton from '@/components/ui/Skeleton';
 
 // App defines the router instance and hands it to RouterProvider.
 // QueryClientProvider is supplied by main.tsx (outer wrapper).
@@ -13,8 +14,12 @@ export default function App() {
     // settings/register) is being fetched; /login never suspends.
     <Suspense
       fallback={
-        <div className="flex items-center justify-center p-8 text-sm text-gray-500 dark:text-[var(--text-muted)]">
-          Loading…
+        // Neutral pulse blocks — no text "Loading…" flicker; mirrors the
+        // app's surface tokens. Nothing interactive here, so it's inert.
+        <div className="w-full max-w-6xl space-y-4 p-4" aria-busy="true">
+          <Skeleton className="h-12 w-64" />
+          <Skeleton className="h-40 w-full" />
+          <Skeleton className="h-64 w-full" />
         </div>
       }
     >

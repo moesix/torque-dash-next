@@ -24,7 +24,15 @@ import {
 import { CanvasRenderer } from 'echarts/renderers';
 import type { TelemetryFrame, SeriesSource } from '@/lib/types';
 import { getSeriesData, getAvailableSeries } from '@/lib/pidDecode';
-import { colorForUnit, BRAND_TEAL, BRAND_TEAL_AREA } from '@/lib/chartColors';
+import ChevronIcon from '@/components/ui/ChevronIcon';
+import {
+  ACCENT,
+  ACCENT_AREA,
+  ACCENT_AREA_SOFT,
+  getChartTheme,
+  subscribeChartTheme,
+  colorForUnit,
+} from '@/lib/chartColors';
 
 // Tree-shaken ECharts build — same as OverlayChart + MarkAreaComponent
 echarts.use([
@@ -105,6 +113,8 @@ function DiagnosticPanel({
   forceExpanded = false,
 }: DiagnosticPanelProps) {
   const [expanded, setExpanded] = useState(!defaultCollapsed);
+  const [themeVersion, setThemeVersion] = useState(0);
+  useEffect(() => subscribeChartTheme(() => setThemeVersion((v) => v + 1)), []);
   const isExpanded = forceExpanded || expanded;
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<ReturnType<typeof echarts.init> | null>(null);
@@ -147,6 +157,9 @@ function DiagnosticPanel({
     const containerWidth = containerRef.current?.clientWidth ?? 640;
     const isMobile = containerWidth < 640;
 
+    // ── Theme-aware chart neutrals ────────────────────────────────────
+    const theme = getChartTheme();
+
     // Determine Y-axis count from yAxisOverrides (more entries = more axes)
     const overrideKeys = yAxisOverrides ? Object.keys(yAxisOverrides).length : 0;
     const axisCount = overrideKeys > 1 ? 2 : 1;
@@ -157,7 +170,8 @@ function DiagnosticPanel({
       const opt: any = {
         type: 'value',
         position: i === 0 ? 'left' : 'right',
-        axisLabel: { fontSize: 10 },
+        axisLabel: { fontSize: 10, color: theme.axisLabel },
+        axisLine: { lineStyle: { color: theme.splitLine } },
       };
       const override = yAxisOverrides?.[i];
       if (override?.min !== undefined) opt.min = override.min;
@@ -165,6 +179,8 @@ function DiagnosticPanel({
       if (i > 0) {
         opt.splitLine = { show: false };
         opt.offset = 45;
+      } else {
+        opt.splitLine = { lineStyle: { color: theme.splitLine } };
       }
       yAxisOptions.push(opt);
     }
@@ -217,7 +233,7 @@ function DiagnosticPanel({
               yAxis: ml.yAxis,
             })),
             lineStyle: {
-              color: markLines[0]?.color ?? '#9ca3af',
+              color: markLines[0]?.color ?? theme.splitLine,
               type: markLines[0]?.type ?? 'dashed',
               width: 1,
             },
@@ -230,7 +246,7 @@ function DiagnosticPanel({
           seriesObj.markArea = {
             silent: true,
             itemStyle: {
-              color: markAreas[0]?.color ?? BRAND_TEAL_AREA,
+              color: markAreas[0]?.color ?? ACCENT_AREA,
             },
             data: markAreas.map((ma) => [
               { yAxis: ma.yFrom, name: 'lower' },
@@ -256,8 +272,17 @@ function DiagnosticPanel({
           bottom: 60,
           containLabel: true,
         },
-        tooltip: { trigger: 'axis' as const },
-        xAxis: { type: 'time' as const },
+        tooltip: {
+          trigger: 'axis' as const,
+          backgroundColor: theme.tooltipBg,
+          borderColor: theme.tooltipBorder,
+          textStyle: { color: theme.tooltipText },
+        },
+        xAxis: {
+          type: 'time' as const,
+          axisLine: { lineStyle: { color: theme.splitLine } },
+          axisLabel: { color: theme.axisLabel },
+        },
         yAxis: yAxisOptions,
         dataZoom: [
           {
@@ -269,10 +294,10 @@ function DiagnosticPanel({
             filterMode: 'none' as const,
             height: 20,
             borderColor: 'transparent',
-            backgroundColor: 'rgba(0,153,153,0.08)',
-            fillerColor: BRAND_TEAL_AREA,
-            handleStyle: { color: BRAND_TEAL },
-            textStyle: { color: '#6b7280', fontSize: 10 },
+            backgroundColor: ACCENT_AREA_SOFT,
+            fillerColor: ACCENT_AREA,
+            handleStyle: { color: ACCENT },
+            textStyle: { color: theme.axisLabel, fontSize: 10 },
           },
         ],
         series: seriesOptions,
@@ -287,6 +312,7 @@ function DiagnosticPanel({
     markLines,
     markAreas,
     yAxisOverrides,
+    themeVersion,
   ]);
 
   // ── Render ─────────────────────────────────────────────────────────
@@ -307,9 +333,11 @@ function DiagnosticPanel({
             {frames.length} rows
           </span>
         </div>
-        <span className="text-gray-400 transition-transform duration-200 dark:text-gray-500">
-          {isExpanded ? '▾' : '▸'}
-        </span>
+        <ChevronIcon
+          className={`h-4 w-4 shrink-0 transition-transform duration-200 ${
+            isExpanded ? 'rotate-180' : 'rotate-0'
+          } text-gray-400 dark:text-gray-500`}
+        />
       </button>
 
       {/* Chart body */}

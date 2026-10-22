@@ -50,10 +50,7 @@ export function MobileLogo() {
   return (
     <div className="mb-8 text-center lg:hidden">
       <img src="/brand/logo.svg" alt="" loading="eager" className="mx-auto mb-4 h-12 w-12 rounded-xl" />
-      <h1
-        className="text-2xl font-bold text-gray-900 dark:text-white"
-        style={{ fontFamily: 'var(--font-mono)' }}
-      >
+      <h1 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-white">
         TorqueDash-Next
       </h1>
     </div>
