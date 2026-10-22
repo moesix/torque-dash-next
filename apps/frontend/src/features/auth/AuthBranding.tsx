@@ -79,7 +79,18 @@ const FEATURES: BrandFeature[] = [
 
 export default function AuthBranding() {
   return (
-    <div className="hidden w-1/2 items-center justify-center bg-gradient-to-br from-teal-700 to-teal-900 p-12 lg:flex">
+    <div
+      className="hidden w-1/2 items-center justify-center p-12 lg:flex"
+      /* Radial accent glow on a deep teal-navy base — replaces the flat
+         teal gradient; theme-aware via --accent-soft. base is the
+         --color-accent-ink token (dark ink for text on accent surfaces)
+         reused as the deepest brand canvas. */
+      style={{
+        backgroundColor: 'var(--color-accent-ink)',
+        backgroundImage:
+          'radial-gradient(120% 120% at 20% 10%, var(--accent-soft), transparent 70%)',
+      }}
+    >
       <div className="max-w-md">
         <div className="text-center">
           <img
@@ -88,10 +99,7 @@ export default function AuthBranding() {
             loading="eager"
             className="mx-auto mb-6 h-16 w-16 rounded-2xl"
           />
-          <h1
-            className="text-3xl font-bold text-white"
-            style={{ fontFamily: 'var(--font-mono)' }}
-          >
+          <h1 className="text-3xl font-bold tracking-tight text-white">
             TorqueDash-Next
           </h1>
           <p className="mt-3 text-lg text-teal-50">

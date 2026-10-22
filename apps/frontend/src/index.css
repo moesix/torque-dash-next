@@ -1,59 +1,92 @@
 @import 'leaflet/dist/leaflet.css';
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
-@config "../tailwind.config.ts";
 
 @source "../node_modules/react-leaflet/**/*.{js,ts,jsx,tsx}";
 
+/* ── Semantic theme tokens ────────────────────────────────────────────────
+   The @theme block exposes the design-system names as Tailwind utilities
+   (bg-surface-card, text-fg-muted, bg-accent, shadow-sm, font-display…).
+   Color tokens map to runtime CSS variables that are re-valued in the
+   `.dark` block below, so utilities follow the active theme without
+   `dark:` duplication. Fonts are defined exactly once, here. */
 @theme {
-  --color-brand-accent: var(--accent);
+  /* Typography — Space Grotesk for display/UI, Martian Mono for data */
+  --font-display: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
+  --font-body: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'Martian Mono', ui-monospace, monospace;
+
+  /* Surfaces */
   --color-surface-base: var(--bg-base);
   --color-surface-card: var(--bg-card);
   --color-surface-elevated: var(--bg-elevated);
+
+  /* Foregrounds */
   --color-fg: var(--text-primary);
   --color-fg-secondary: var(--text-secondary);
   --color-fg-muted: var(--text-muted);
 
-  /* Shadows */
-  --shadow-focus-ring: 0 0 0 2px var(--bg-base), 0 0 0 4px var(--accent);
+  /* Borders */
+  --color-border: var(--border-default);
+  --color-border-strong: var(--border-strong);
+  --color-border-faint: var(--border-faint);
 
-  /* Font families */
-  --font-display: var(--font-display);
-  --font-body: var(--font-body);
-  --font-mono: var(--font-mono);
+  /* ONE accent (teal) */
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-soft: var(--accent-soft);
+  /* Dark ink for text ON accent surfaces. White on #14b8a6 is ~2.5:1 (fails
+     AA); this ink keeps primary buttons ≥4.5:1 in both themes. */
+  --color-accent-ink: #04211f;
+
+  /* Semantic triplet (theme-invariant) */
+  --color-success: #22c55e;
+  --color-warning: #f59e0b;
+  --color-danger: #ef4444;
+
+  /* Tinted shadow ramp — keyed to the dark navy base (#1d2433) so shadows
+     read as depth on both light and dark surfaces instead of pure black.
+     Runtime copies (theme-invariant) live in :root below. */
+  --shadow-xs: 0 1px 2px 0 rgb(29 36 51 / 0.05);
+  --shadow-sm:
+    0 1px 3px 0 rgb(29 36 51 / 0.07), 0 1px 2px -1px rgb(29 36 51 / 0.07);
+  --shadow-lg:
+    0 10px 30px -6px rgb(29 36 51 / 0.18), 0 2px 8px -2px rgb(29 36 51 / 0.1);
 }
 
-/* ── Design-token CSS variables ── */
+/* ── Runtime token values (re-valued in `.dark` below) ── */
 :root {
-  --font-display: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
-  --font-body: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
-  --font-mono: 'Martian Mono', ui-monospace, monospace;
-  --bg-base: #f9fafb;
+  --bg-base: #f4f5f7;
   --bg-card: #ffffff;
   --bg-elevated: #ffffff;
-  --bg-surface: #f3f4f6;
+  --bg-surface: #e9ebef;
 
-  /* Text */
-  --text-primary: #111827;
-  --text-secondary: #4b5563;
-  --text-muted: #9ca3af;
+  /* Text (zinc family) */
+  --text-primary: #18181b;
+  --text-secondary: #3f3f46;
+  --text-muted: #64646d;
 
   /* Borders */
-  --border-default: #e5e7eb;
-  --border-strong: #d1d5db;
+  --border-default: #e4e4e7;
+  --border-strong: #d4d4d8;
+  --border-faint: #edeff3;
 
   /* Accent (teal) */
-  --accent: #009999;
-  --accent-hover: #007a7a;
-
-  /* Semantic colors */
-  --color-success: #22c55e;
-  --color-danger: #ef4444;
-  --color-warning: #f59e0b;
-  --color-info: #009999;
+  --accent: #14b8a6;
+  --accent-hover: #0d9488;
+  --accent-soft: rgb(20 184 166 / 0.12);
 
   /* Focus ring */
   --focus-ring: 0 0 0 2px var(--bg-base), 0 0 0 4px var(--accent);
+
+  /* Tinted shadow ramp (theme-invariant; Tailwind inlines values into its
+     shadow utilities, but plain CSS consumers like .card-hover resolve
+     these runtime vars). Same values as the @theme block above. */
+  --shadow-xs: 0 1px 2px 0 rgb(29 36 51 / 0.05);
+  --shadow-sm:
+    0 1px 3px 0 rgb(29 36 51 / 0.07), 0 1px 2px -1px rgb(29 36 51 / 0.07);
+  --shadow-lg:
+    0 10px 30px -6px rgb(29 36 51 / 0.18), 0 2px 8px -2px rgb(29 36 51 / 0.1);
 
   /* System */
   color-scheme: light dark;
@@ -87,13 +120,26 @@ h1, h2, h3, h4 {
   text-wrap: balance;
 }
 
-/* Monospace data class */
-.font-mono-data {
-  font-family: var(--font-mono);
-}
-
 /* ── Custom variant for dark mode ── */
 @custom-variant dark (&:where(.dark, .dark *));
+
+/* ── Card recipe ──────────────────────────────────────────────────────────
+   The ~15×-duplicated "rounded-xl border bg-card p-4 md:p-6 shadow-xs"
+   recipe, as one utility. Padding bakes in the responsive bump so call
+   sites can stay mechanical. Individual Tailwind utilities (p-2, md:p-4…)
+   can still override per-instance — @utility participates in the same
+   utilities layer. */
+@utility card {
+  border-radius: 0.75rem;
+  border: 1px solid var(--border-default);
+  background-color: var(--bg-card);
+  padding: 1rem;
+  box-shadow: var(--shadow-xs);
+
+  @media (min-width: 768px) {
+    padding: 1.5rem;
+  }
+}
 
 /* ── Skeleton / shimmer animation ── */
 @keyframes shimmer {
@@ -121,21 +167,19 @@ h1, h2, h3, h4 {
   --bg-surface: #2d3039;
   --text-primary: #e4e4e7;
   --text-secondary: #a1a1aa;
-  --text-muted: #71717a;
+  --text-muted: #9699a4;
   --border-default: #2d3039;
   --border-strong: #3f4250;
-  --accent: #2ec4b6;
-  --accent-hover: #009999;
-  --color-success: #22c55e;
-  --color-danger: #ef4444;
-  --color-warning: #fbbf24;
-  --color-info: #2ec4b6;
+  --border-faint: #23262f;
+  --accent: #14b8a6;
+  --accent-hover: #2dd4bf;
+  --accent-soft: rgb(20 184 166 / 0.16);
   --focus-ring: 0 0 0 2px var(--bg-base), 0 0 0 4px var(--accent);
 }
 
 /* ── Accessible focus indicators ── */
 :focus-visible {
-  outline: 2px solid var(--accent, #009999);
+  outline: 2px solid var(--accent, #14b8a6);
   outline-offset: 2px;
 }
 
@@ -186,12 +230,49 @@ h1, h2, h3, h4 {
   overscroll-behavior: contain;
 }
 
+@media (prefers-reduced-motion: no-preference) {
+  .scrollable-area {
+    scroll-behavior: smooth;
+  }
+}
+
+/* ── Nav active accent bar (AppShell sidebar + MobileDrawer) ─────────────── */
+/* Rendered absolutely on the active NavLink; 2px accent bar anchored in the
+   start edge, sitting inside the nav rail's 12px item padding — the rail is
+   fixed LTR, so physical `left` is safe.) */
+.sidebar-active::before {
+  content: '';
+  position: absolute;
+  left: -0.75rem;
+  top: 0.35rem;
+  bottom: 0.35rem;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+}
+
+/* ── GPS track marker (brand teardrop pin) ──────────────────────────────── */
+/* The pin glides to its next position instead of teleporting: Leaflet
+   positions the marker element with translate3d, so a transform transition
+   animates setLatLng jumps (playback ticks update 60×/s already; this only
+   smooths scrub/jump frames). Reduced-motion is neutralized by the global
+   guard below. */
+.torque-pin-icon {
+  filter: drop-shadow(0 2px 3px rgb(4 33 31 / 0.35));
+  transition: transform 140ms ease-out;
+}
+
+/* ── Ring-gauge arc easing (SessionSummaryCard) ─────────────────────────── */
+.gauge-arc {
+  transition: stroke-dasharray 120ms ease-out;
+}
+
 /* ── Card hover ── */
 .card-hover {
   transition: box-shadow 0.2s ease, translate 0.2s ease;
 }
 .card-hover:hover {
-  box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+  box-shadow: var(--shadow-sm);
   translate: 0 -2px;
 }
 
@@ -245,12 +326,14 @@ h1, h2, h3, h4 {
 
 /* ── Print: session report ── */
 @media print {
-  /* Force light tokens regardless of theme */
+  /* Force light tokens regardless of theme (kept in sync with :root) */
   :root { color-scheme: light; }
-  html.dark { --bg-base: #f9fafb; --bg-card: #ffffff; --bg-elevated: #ffffff;
-    --bg-surface: #f3f4f6; --text-primary: #111827; --text-secondary: #4b5563;
-    --text-muted: #9ca3af; --border-default: #e5e7eb; --border-strong: #d1d5db;
-    --accent: #009999; }
+  html.dark { --bg-base: #f4f5f7; --bg-card: #ffffff; --bg-elevated: #ffffff;
+    --bg-surface: #e9ebef; --text-primary: #18181b; --text-secondary: #3f3f46;
+    --text-muted: #64646d; --border-default: #e4e4e7; --border-strong: #d4d4d8;
+    --border-faint: #edeff3;
+    --accent: #14b8a6; --accent-hover: #0d9488;
+    --accent-soft: rgb(20 184 166 / 0.12); }
 
   /* Hide chrome + non-report UI */
   aside, header[role="banner"], .skeleton,
@@ -274,7 +357,7 @@ h1, h2, h3, h4 {
   .rounded-xl { break-inside: avoid; }
 
   /* Reports are black-on-white */
-  body { background: #fff !important; color: #111827 !important; }
+  body { background: var(--bg-card) !important; color: var(--text-primary) !important; }
 
   /* ── Dark-theme print neutralizers ──
      The token overrides above re-point the CSS-variable utilities, but
@@ -283,57 +366,54 @@ h1, h2, h3, h4 {
      readable black-on-white printout. Scoped under html.dark so light-theme
      printing is untouched. */
   html.dark .dark\:text-white,
-  html.dark .dark\:text-gray-100,
-  html.dark .dark\:text-gray-200,
-  html.dark .dark\:text-gray-300 { color: #111827 !important; }
+  html.dark .dark\:text-gray-300 { color: var(--text-primary) !important; }
   /* Mid-gray print text: dark enough to read on paper (matches light-theme
      secondary), still distinguishable from pure body text. */
-  html.dark .dark\:text-gray-400 { color: #4b5563 !important; }
+  html.dark .dark\:text-gray-400 { color: var(--text-secondary) !important; }
 
   /* Pills/buttons whose dark:bg would print as dark blocks with light text —
      make them light-gray with the dark text forced above. */
   html.dark .dark\:bg-gray-700,
-  html.dark .dark\:bg-\[var\(--bg-elevated\)\] { background-color: #e5e7eb !important; }
+  html.dark .dark\:bg-\[var\(--bg-elevated\)\] { background-color: var(--border-default) !important; }
 
   /* SVG gauge text/fills (SessionSummaryCard ring gauges) */
-  html.dark .dark\:fill-gray-100,
-  html.dark .dark\:fill-gray-200 { fill: #111827 !important; }
-  html.dark .dark\:fill-gray-400 { fill: #6b7280 !important; }
-  html.dark .dark\:stroke-gray-700 { stroke: #e5e7eb !important; }
+  html.dark .dark\:fill-gray-100 { fill: var(--text-primary) !important; }
+  html.dark .dark\:fill-gray-400 { fill: var(--text-muted) !important; }
+  html.dark .dark\:stroke-gray-700 { stroke: var(--border-default) !important; }
 
   /* Tailwind Typography `dark:prose-invert` flips every prose color token to
      a light value — reset them to dark-on-light for the printed analysis body
      (the vars cascade to h1-h4/p/a/code/pre/table children of .analysis-prose). */
   html.dark .dark\:prose-invert {
-    --tw-prose-body: #111827;
-    --tw-prose-headings: #111827;
-    --tw-prose-lead: #4b5563;
-    --tw-prose-links: #009999;
-    --tw-prose-bold: #111827;
-    --tw-prose-counters: #4b5563;
-    --tw-prose-bullets: #d1d5db;
-    --tw-prose-hr: #e5e7eb;
-    --tw-prose-quotes: #111827;
-    --tw-prose-quote-borders: #d1d5db;
-    --tw-prose-captions: #6b7280;
-    --tw-prose-kbd: #111827;
+    --tw-prose-body: var(--text-primary);
+    --tw-prose-headings: var(--text-primary);
+    --tw-prose-lead: var(--text-secondary);
+    --tw-prose-links: var(--accent);
+    --tw-prose-bold: var(--text-primary);
+    --tw-prose-counters: var(--text-secondary);
+    --tw-prose-bullets: var(--border-strong);
+    --tw-prose-hr: var(--border-default);
+    --tw-prose-quotes: var(--text-primary);
+    --tw-prose-quote-borders: var(--border-strong);
+    --tw-prose-captions: var(--text-muted);
+    --tw-prose-kbd: var(--text-primary);
     --tw-prose-kbd-shadows: transparent;
-    --tw-prose-code: #111827;
-    --tw-prose-pre-code: #111827;
-    --tw-prose-pre-bg: #f3f4f6;
-    --tw-prose-th-borders: #d1d5db;
-    --tw-prose-td-borders: #e5e7eb;
+    --tw-prose-code: var(--text-primary);
+    --tw-prose-pre-code: var(--text-primary);
+    --tw-prose-pre-bg: var(--bg-surface);
+    --tw-prose-th-borders: var(--border-strong);
+    --tw-prose-td-borders: var(--border-default);
   }
 
   /* `.analysis-prose` also applies literal dark: colors directly to elements
      (see the @apply rules above) — flip those back to the light-theme print
      equivalents. */
   html.dark .analysis-prose h2,
-  html.dark .analysis-prose h3 { color: #111827 !important; }
+  html.dark .analysis-prose h3 { color: var(--text-primary) !important; }
   html.dark .analysis-prose th,
-  html.dark .analysis-prose code:not(pre code) { background-color: #f3f4f6 !important; }
+  html.dark .analysis-prose code:not(pre code) { background-color: var(--bg-surface) !important; }
   html.dark .analysis-prose td,
-  html.dark .analysis-prose h2 { border-color: #e5e7eb !important; }
+  html.dark .analysis-prose h2 { border-color: var(--border-default) !important; }
   html.dark .analysis-prose blockquote { background-color: #fffbeb !important; }
 
   /* `.analysis-prose` carries overflow-hidden (for horizontal scroll on

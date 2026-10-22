@@ -6,6 +6,9 @@
  * second 404'd on the now-missing row and surfaced a spurious error.
  *
  * Contract under test, as implemented in AnalysisPanel.tsx:
+ *   - the row's Delete button opens the shared ConfirmDialog (the native
+ *     window.confirm is gone — Pass B dialog migration) and the actual
+ *     DELETE fires only after the dialog is confirmed.
  *   - handleDeleteAnalysis early-returns while deletingIds.has(preview.id), so a
  *     second click on the same row cannot fire a duplicate DELETE.
  *   - the row's Delete button is disabled + aria-busy while that row is being
@@ -17,16 +20,40 @@
  *
  * The real component is mounted with the API module mocked (listAnalyses →
  * one preview row; deleteAnalysis → programmable). No expansion happens, so
- * the react-markdown/rehype-highlight stack is never exercised. window.confirm
- * is stubbed to auto-accept.
+ * the react-markdown/rehype-highlight stack is never exercised.
+ * [Pass B change] window.confirm is NO LONGER stubbed to auto-accept: the
+ * delete now flows through the ConfirmDialog, so each test clicks the
+ * dialog's "Delete" confirm button (before-delete assertions unchanged).
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { usePlaybackStore } from '@/app/playbackStore';
 import AnalysisPanel from '@/components/ai/AnalysisPanel';
 import { ApiError } from '@/lib/api';
 import type { AnalysisPreview } from '@/lib/types';
+
+/** jsdom exposes HTMLDialogElement but not the modal methods the shared
+ *  ConfirmDialog needs (AnalysisConfirmDialog already shims these in
+ *  printFlow.test.tsx — same shims, this suite mounts a real dialog now). */
+function shimHtmlDialogMethods() {
+  const proto = window.HTMLDialogElement?.prototype as
+    | (HTMLDialogElement & { showModal?: () => void; close?: () => void })
+    | undefined;
+  if (!proto) return;
+  if (typeof proto.showModal !== 'function') {
+    proto.showModal = function showModal() {
+      this.setAttribute('open', '');
+    };
+  }
+  if (typeof proto.close !== 'function') {
+    proto.close = function close() {
+      this.removeAttribute('open');
+    };
+  }
+}
+
+shimHtmlDialogMethods();
 
 // Programmable API mocks — hoisted so the vi.mock factory can reference them.
 const apiMocks = vi.hoisted(() => ({
@@ -70,8 +97,6 @@ describe('AnalysisPanel delete flow (jsdom)', () => {
     apiMocks.getFullSettings.mockResolvedValue({ hasLlmProvider: true });
     apiMocks.listAnalyses.mockResolvedValue([PREVIEW]);
     apiMocks.deleteAnalysis.mockResolvedValue(undefined);
-    // Auto-accept the confirm dialog so delete proceeds without a click.
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
     usePlaybackStore.setState({ cursorTime: null });
   });
 
@@ -79,6 +104,14 @@ describe('AnalysisPanel delete flow (jsdom)', () => {
     vi.restoreAllMocks();
     usePlaybackStore.setState({ cursorTime: null });
   });
+
+  /** Pass B: deletes flow through the shared ConfirmDialog. Click the row's
+   *  Delete button, then the dialog's confirm button (accessible name
+   *  "Delete" — the tree dialog button, NOT the row's aria-label'd one). */
+  async function deleteViaDialog() {
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete analysis' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+  }
 
   it('disables the Delete button while a delete is in flight (no double DELETE)', async () => {
     let releaseDelete: (() => void) | undefined;
@@ -90,10 +123,8 @@ describe('AnalysisPanel delete flow (jsdom)', () => {
     );
 
     render(<AnalysisPanel sessionId="s1" />);
-    // Past analyses load async; wait for the Delete row to appear.
-    const btn = await screen.findByRole('button', { name: 'Delete analysis' });
-
-    fireEvent.click(btn);
+    // Confirm in the dialog → DELETE request fires.
+    await deleteViaDialog();
 
     await waitFor(() => {
       expect(apiMocks.deleteAnalysis).toHaveBeenCalledTimes(1);
@@ -123,9 +154,7 @@ describe('AnalysisPanel delete flow (jsdom)', () => {
     apiMocks.deleteAnalysis.mockRejectedValue(new ApiError('Request failed with status 404', 404));
 
     render(<AnalysisPanel sessionId="s1" />);
-    const btn = await screen.findByRole('button', { name: 'Delete analysis' });
-
-    fireEvent.click(btn);
+    await deleteViaDialog();
 
     // The row is removed from the list as if the delete succeeded.
     await waitFor(() => {
@@ -139,9 +168,7 @@ describe('AnalysisPanel delete flow (jsdom)', () => {
     apiMocks.deleteAnalysis.mockRejectedValue(new ApiError('Request failed with status 500', 500));
 
     render(<AnalysisPanel sessionId="s1" />);
-    const btn = await screen.findByRole('button', { name: 'Delete analysis' });
-
-    fireEvent.click(btn);
+    await deleteViaDialog();
 
     const err = await screen.findByText('Failed to delete analysis.');
     expect(err).toBeTruthy();

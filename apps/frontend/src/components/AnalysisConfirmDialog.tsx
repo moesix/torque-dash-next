@@ -1,4 +1,5 @@
 import { useRef, useEffect } from 'react';
+import Button from '@/components/ui/Button';
 
 interface Props {
     open: boolean;
@@ -58,18 +59,13 @@ export default function AnalysisConfirmDialog({ open, onClose, onConfirm, busy }
                         type="button"
                         onClick={onClose}
                         disabled={busy}
-                        className="rounded border bg-white px-4 py-2 text-sm font-medium hover:bg-gray-50 dark:border-[var(--border-default)] dark:bg-[var(--bg-card)] dark:text-[var(--text-primary)] dark:hover:bg-[var(--bg-surface)]"
+                        className="min-h-[44px] rounded-lg border border-border bg-surface-card px-4 py-2 text-sm font-medium text-fg-secondary shadow-xs transition hover:bg-surface-elevated hover:text-fg disabled:opacity-50"
                     >
                         Cancel
                     </button>
-                    <button
-                        type="button"
-                        onClick={onConfirm}
-                        disabled={busy}
-                        className="rounded bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-600"
-                    >
+                    <Button type="button" onClick={onConfirm} disabled={busy}>
                         {busy ? 'Analyzing...' : 'Analyze'}
-                    </button>
+                    </Button>
                 </div>
             </div>
         </dialog>

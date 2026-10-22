@@ -4,6 +4,7 @@ import { getSessions, getVehicles } from '@/lib/api';
 import type { Vehicle } from '@/lib/types';
 import Skeleton from '@/components/ui/Skeleton';
 import ErrorAlert from '@/components/ui/ErrorAlert';
+import Button from '@/components/ui/Button';
 import SessionTable from '@/components/tables/SessionTable';
 
 export default function SessionBrowser() {
@@ -16,7 +17,10 @@ export default function SessionBrowser() {
     getVehicles().then((v) => setVehicles(v ?? [])).catch(() => {});
   }, []);
 
-  const { data, isLoading, isError } = useQuery({
+  // refetch drives the error-retry button — far better than the old
+  // window.location.reload(), which nuked SPA state (theme, drawer) just to
+  // re-run the TanStack query.
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['sessions', offset, selectedVehicleId],
     queryFn: () => getSessions(limit, offset, selectedVehicleId === 'all' ? null : selectedVehicleId),
   });
@@ -27,7 +31,7 @@ export default function SessionBrowser() {
 
   if (isLoading) {
     return (
-      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-6 shadow-xs">
+      <div className="card">
         <h3 className="text-lg font-semibold leading-relaxed">Your Sessions</h3>
         <p className="text-sm leading-relaxed">Select a session to replay its telemetry.</p>
         <div className="mt-4 space-y-3">
@@ -45,13 +49,13 @@ export default function SessionBrowser() {
 
   if (isError) {
     return (
-      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-6 shadow-xs">
+      <div className="card">
         <h3 className="text-lg font-semibold leading-relaxed">Your Sessions</h3>
         <p className="text-sm leading-relaxed">Select a session to replay its telemetry.</p>
         <div className="mt-4">
           <ErrorAlert
             message="Failed to load sessions. You may need to sign in again."
-            onRetry={() => window.location.reload()}
+            onRetry={() => void refetch()}
           />
         </div>
       </div>
@@ -59,12 +63,12 @@ export default function SessionBrowser() {
   }
 
   return (
-    <div className="session-card rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-6 shadow-xs">
+    <div className="session-card card">
       <h3 className="text-lg font-semibold leading-relaxed">Your Sessions</h3>
       <p className="text-sm leading-relaxed">Select a session to replay its telemetry.</p>
       {vehicles.length > 0 && (
         <div className="mt-4 flex items-center gap-2">
-          <label htmlFor="vehicle-filter" className="text-sm text-gray-600 dark:text-[var(--text-secondary)]">
+          <label htmlFor="vehicle-filter" className="text-sm text-fg-secondary">
             Filter by vehicle:
           </label>
           <select
@@ -74,7 +78,7 @@ export default function SessionBrowser() {
               setSelectedVehicleId(e.target.value === 'all' ? 'all' : Number(e.target.value));
               setOffset(0);
             }}
-            className="rounded border bg-white px-3 py-2.5 min-h-[44px] text-sm dark:border-[var(--border-default)] dark:bg-[var(--bg-surface)] dark:text-[var(--text-primary)]"
+            className="rounded border border-border bg-surface-card px-3 py-2.5 min-h-[44px] text-sm text-fg"
           >
             <option value="all">All vehicles</option>
             {vehicles.map((v) => (
@@ -88,18 +92,43 @@ export default function SessionBrowser() {
         <div className="mt-4 overflow-x-auto">
           <SessionTable sessions={sessions} />
           {hasMore && (
-            <button
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => setOffset((prev) => prev + limit)}
-              className="mt-4 rounded bg-gray-100 px-4 py-2 text-sm hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600"
+              className="mt-4"
             >
               Load More ({sessions.length} of {total})
-            </button>
+            </Button>
           )}
         </div>
       ) : null}
-      {!isLoading && total === 0 ? (
-        <p className="mt-4 text-sm leading-relaxed">No sessions yet.</p>
-      ) : null}
+      {!isLoading && total === 0 ? <EmptyState /> : null}
+    </div>
+  );
+}
+
+/**
+ * Composed getting-started card for a fresh install: one-line explanation,
+ * the exact upload URL shape, and the pointer to the upload-token card in
+ * Settings. Hidden in print (it's guidance, not report content).
+ */
+function EmptyState() {
+  return (
+    <div className="print:hidden mt-4 rounded-lg border border-border-faint bg-surface-elevated p-4 md:p-6">
+      <p className="font-medium text-fg">No sessions yet</p>
+      <p className="mt-1 text-sm text-fg-secondary">
+        Sessions arrive when your Torque Pro app uploads telemetry. Point it at:
+      </p>
+      <code className="mt-2 block break-all rounded border border-border bg-surface-card px-3 py-2 text-xs font-mono text-fg">
+        https://&lt;your-host&gt;/api/upload?eml=&lt;your-email&gt;&amp;session=1&amp;id=1
+      </code>
+      <p className="mt-2 text-xs text-fg-muted">
+        If an upload token is configured, generate one under Settings →
+        Upload API Token, then send it as a{' '}
+        <span className="font-mono">Authorization: Bearer &lt;token&gt;</span>{' '}
+        header.
+      </p>
     </div>
   );
 }

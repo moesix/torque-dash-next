@@ -3,6 +3,8 @@ import { getFullSettings, updateSettings, generateUploadToken } from '@/lib/api'
 import { useVersion } from '@/lib/useVersion';
 import type { Settings } from '@/lib/types';
 import Toggle from '@/components/ui/Toggle';
+import Button from '@/components/ui/Button';
+import Badge from '@/components/ui/Badge';
 import AiProviderCard from './AiProviderCard';
 import VehicleManager from './VehicleManager';
 import AnalysisHistory from '@/components/ai/AnalysisHistory';
@@ -136,7 +138,7 @@ export default function SettingsPage() {
       </div>
 
       {isAdmin === false ? (
-        <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
+        <div className="card">
           <p className="text-sm leading-relaxed font-medium">Account</p>
           <p className="mt-1 text-sm leading-relaxed text-gray-500 dark:text-[var(--text-muted)]">
             Server settings are managed by the administrator.
@@ -146,7 +148,7 @@ export default function SettingsPage() {
 
       {isAdmin ? (
       <>
-      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
+      <div className="card">
         <div className="flex items-center justify-between">
           <div>
             <p className="text-sm leading-relaxed font-medium">Disable registration</p>
@@ -170,7 +172,7 @@ export default function SettingsPage() {
         ) : null}
       </div>
 
-      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
+      <div className="card">
         <div className="space-y-4">
           <div>
             <p className="text-sm leading-relaxed font-medium">Upload API Token</p>
@@ -184,20 +186,9 @@ export default function SettingsPage() {
           </div>
 
           <div className="flex items-center gap-2">
-            <span
-              className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                hasUploadApiToken
-                  ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-600/20 dark:bg-emerald-900/40 dark:text-emerald-300 dark:ring-emerald-600/40'
-                  : 'bg-gray-50 text-gray-600 ring-1 ring-gray-500/10 dark:bg-[var(--bg-surface)] dark:text-[var(--text-secondary)] dark:ring-[var(--border-strong)]'
-              }`}
-            >
-              <span
-                className={`h-1.5 w-1.5 rounded-full ${
-                  hasUploadApiToken ? 'bg-emerald-500 dark:bg-emerald-400' : 'bg-gray-400 dark:bg-gray-500'
-                }`}
-              />
+            <Badge tone={hasUploadApiToken ? 'ok' : 'neutral'} dot>
               {hasUploadApiToken ? 'Token set' : 'No token'}
-            </span>
+            </Badge>
           </div>
 
           {tokenFromEnv ? (
@@ -213,13 +204,9 @@ export default function SettingsPage() {
                 <code className="flex-1 break-all rounded border bg-gray-50 px-3 py-2 text-sm font-mono dark:border-[var(--border-default)] dark:bg-[var(--bg-surface)] dark:text-[var(--text-primary)]">
                   {tokenInput}
                 </code>
-                <button
-                  type="button"
-                  onClick={onCopyToken}
-                  className="rounded border bg-white px-3 py-2 text-sm font-medium hover:bg-gray-50 transition-colors dark:border-[var(--border-default)] dark:bg-[var(--bg-card)] dark:text-[var(--text-primary)] dark:hover:bg-[var(--bg-surface)]"
-                >
+                <Button variant="ghost" size="sm" onClick={onCopyToken}>
                   {tokenCopied ? 'Copied!' : 'Copy'}
-                </button>
+                </Button>
               </div>
               <p className="text-xs leading-relaxed text-amber-600 dark:text-amber-400">
                 Copy this token now. It won&rsquo;t be shown again.
@@ -228,23 +215,24 @@ export default function SettingsPage() {
           ) : null}
 
           <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
+            <Button
+              variant="primary"
+              size="sm"
               onClick={onGenerateToken}
               disabled={tokenBusy || tokenFromEnv}
-              className="rounded bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50 transition-colors dark:bg-indigo-500 dark:hover:bg-indigo-600"
             >
               {tokenBusy ? 'Generating...' : 'Generate New Token'}
-            </button>
+            </Button>
             {hasUploadApiToken && !tokenFromEnv ? (
-              <button
-                type="button"
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={onClearToken}
                 disabled={tokenBusy}
-                className="rounded border border-red-300 bg-white px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 transition-colors dark:border-red-800 dark:bg-transparent dark:text-red-400 dark:hover:bg-red-900/30"
+                className="text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
               >
                 Clear Token
-              </button>
+              </Button>
             ) : null}
           </div>
 
@@ -264,7 +252,7 @@ export default function SettingsPage() {
 
       {isAdmin ? (
       <>
-      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
+      <div className="card">
         <div className="space-y-4">
           <div>
             <p className="text-sm leading-relaxed font-medium">Timezone</p>
@@ -306,7 +294,7 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
+      <div className="card">
         <div className="space-y-4">
           <div>
             <p className="text-sm leading-relaxed font-medium">Data Retention</p>
@@ -381,7 +369,7 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
+      <div className="card">
         <div className="space-y-4">
           <div>
             <p className="text-sm leading-relaxed font-medium">Analysis Retention</p>

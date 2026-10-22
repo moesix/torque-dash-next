@@ -1,25 +1,41 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { MapContainer, TileLayer, Polyline, Marker } from 'react-leaflet';
 import L from 'leaflet';
 import { usePlaybackStore } from '@/app/playbackStore';
 import { findNearestFrameIndex } from '@/lib/pidDecode';
+import { ACCENT } from '@/lib/chartColors';
 import type { TelemetryFrame } from '@/lib/types';
 
 /**
- * Fix Leaflet's default marker icon path issue: with bundlers the icon image
- * URLs resolve to the wrong (non-existent) path, producing broken markers.
- * Pin them explicitly once at module load.
+ * Theme-aware CARTO basemaps (raster styles; free with attribution, built on
+ * OpenStreetMap data). light_all matches the light theme, dark_all the dark
+ * one — the old OSM raster URL rendered identical colors in both themes.
  */
-const DefaultIcon = L.icon({
-  iconRetinaUrl: '/marker-icon-2x.png',
-  iconUrl: '/marker-icon.png',
-  shadowUrl: '/marker-shadow.png',
-  iconSize: [25, 41],
-  iconAnchor: [12, 41],
-  popupAnchor: [1, -34],
-  shadowSize: [41, 41],
-});
-L.Marker.prototype.options.icon = DefaultIcon;
+const TILE_URLS = {
+  light: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+  dark: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+};
+
+// Required attribution: CARTO plus upstream OpenStreetMap contributors.
+const TILE_ATTRIBUTION =
+  '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>';
+
+/**
+ * Brand teardrop marker as a `divIcon` — replaces the stock Leaflet
+ * `marker-icon.png` (which bundlers resolve to broken paths anyway and which
+ * looked off against the accent palette). Accent fill, white hub, glow via
+ * the `.torque-pin-icon` drop-shadow in index.css; the same class carries the
+ * 140ms transform transition so playback scrubbing glides instead of
+ * teleporting (the global reduced-motion guard neutralizes the transition).
+ */
+function buildPinIcon(): L.DivIcon {
+  return L.divIcon({
+    className: 'torque-pin-icon',
+    html: `<svg width="26" height="34" viewBox="0 0 26 34" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M13 1C6.4 1 1 6.3 1 12.9c0 8.6 9.5 16.5 11.3 20a.8.8 0 0 0 1.4 0C15.5 29.4 25 21.5 25 12.9 25 6.3 19.6 1 13 1Z" fill="${ACCENT}" stroke="rgb(4 33 31 / 0.5)" stroke-width="1"/><circle cx="13" cy="13" r="4.2" fill="#fff"/></svg>`,
+    iconSize: [26, 34],
+    iconAnchor: [13, 34],
+  });
+}
 
 /**
  * Resolve the frame the marker should pin to when the map mounts with an
@@ -58,6 +74,26 @@ interface Props {
 export default function GpsTrackMap({ frames, className }: Props) {
   const markerRef = useRef<L.Marker | null>(null);
   const heightClass = className ?? 'h-64 md:h-[360px]';
+  const pinIcon = useMemo(buildPinIcon, []);
+
+  // ── Theme awareness for the basemap ────────────────────────────────
+  // Cheap boolean read on mount + a class observer while mounted (the app
+  // toggles `.dark` on <html> — see lib/theme.ts applyTheme). No chart lib
+  // involvement, no setOption churn.
+  const [isDark, setIsDark] = useState(() =>
+    typeof document !== 'undefined'
+      ? document.documentElement.classList.contains('dark')
+      : false,
+  );
+
+  useEffect(() => {
+    const root = document.documentElement;
+    const observer = new MutationObserver(() => {
+      setIsDark(root.classList.contains('dark'));
+    });
+    observer.observe(root, { attributes: true, attributeFilter: ['class'] });
+    return () => observer.disconnect();
+  }, []);
 
   const positions = useMemo<[number, number][]>(
     () =>
@@ -107,16 +143,15 @@ export default function GpsTrackMap({ frames, className }: Props) {
       center={center}
       zoom={13}
       scrollWheelZoom
-      style={{ width: '100%' }}
-      className={heightClass}
+      className={`w-full ${heightClass}`}
     >
       <TileLayer
-        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-        attribution="&copy; OpenStreetMap contributors"
+        url={isDark ? TILE_URLS.dark : TILE_URLS.light}
+        attribution={TILE_ATTRIBUTION}
       />
-      <Polyline positions={positions} pathOptions={{ color: '#009999', weight: 3 }} />
+      <Polyline positions={positions} pathOptions={{ color: ACCENT, weight: 3 }} />
       {positions.length > 0 ? (
-        <Marker ref={markerRef} position={center} />
+        <Marker ref={markerRef} position={center} icon={pinIcon} />
       ) : null}
     </MapContainer>
   );
