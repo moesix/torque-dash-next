@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MapContainer, TileLayer, Polyline, Marker } from 'react-leaflet';
 import L from 'leaflet';
 import { usePlaybackStore } from '@/app/playbackStore';
@@ -7,18 +7,111 @@ import { ACCENT } from '@/lib/chartColors';
 import type { TelemetryFrame } from '@/lib/types';
 
 /**
- * Theme-aware CARTO basemaps (raster styles; free with attribution, built on
- * OpenStreetMap data). light_all matches the light theme, dark_all the dark
- * one — the old OSM raster URL rendered identical colors in both themes.
+ * Tile providers, best-first with graceful degradation. CARTO's hosted
+ * basemaps are nice (raster styles; free with attribution, built on
+ * OpenStreetMap data) but newer CARTO accounts/endpoints require an API key —
+ * a hosted-key requirement this self-hosted app will never accept. So the
+ * provider model carries a guaranteed fallback: standard OpenStreetMap raster
+ * tiles, which need no key. Lifecycle: start on `carto`; if enough tiles fail
+ * within a short window (see TILE_ERROR_THRESHOLD), flip to `osm` for the
+ * component's lifetime. `{theme}` is replaced with the active theme for
+ * themed providers only (light_all / dark_all).
+ *
+ * Exports (TILE_PROVIDERS, tileConfigFor, mapProviderAttribute, threshold
+ * constants, recordTileError) are the pure provider model consumed by
+ * mapView.test.ts — the component itself only wires them into Leaflet.
  */
-const TILE_URLS = {
-  light: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
-  dark: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-};
+export type TileProviderId = 'carto' | 'osm';
+/** Theme resolved for a `{theme}`-placeholder URL ({theme}_all → light/dark). */
+export type TileTheme = 'light' | 'dark';
 
-// Required attribution: CARTO plus upstream OpenStreetMap contributors.
-const TILE_ATTRIBUTION =
-  '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>';
+export interface TileProvider {
+  id: TileProviderId;
+  /** Leaflet {s}/{z}/{x}/{y}/{r} + custom {theme} placeholders. */
+  url: string;
+  attribution: string;
+  /** True when the URL carries a `{theme}` placeholder (dark_all/light_all). */
+  themed: boolean;
+}
+
+export const TILE_PROVIDERS: readonly TileProvider[] = [
+  {
+    id: 'carto',
+    url: 'https://{s}.basemaps.cartocdn.com/{theme}_all/{z}/{x}/{y}{r}.png',
+    attribution:
+      '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+    themed: true,
+  },
+  {
+    id: 'osm',
+    url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+    attribution:
+      '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    themed: false,
+  },
+];
+
+/** Resolve a provider's concrete URL + attribution for a theme. */
+export function tileConfigFor(
+  id: TileProviderId,
+  theme: TileTheme,
+): { url: string; attribution: string } {
+  const p = TILE_PROVIDERS.find((p) => p.id === id) ?? TILE_PROVIDERS[0];
+  return { url: p.url.replace('{theme}', theme), attribution: p.attribution };
+}
+
+/**
+ * The `data-map-provider` value stamped on the component wrapper. Present
+ * ONLY for `osm` so the dark-theme tile-pane invert filter in index.css is
+ * scoped exclusively to the OSM fallback — the CARTO basemap has real dark
+ * tiles and the attribute is absent, so the filter can never apply to it.
+ */
+export function mapProviderAttribute(
+  id: TileProviderId,
+): Exclude<TileProviderId, 'carto'> | undefined {
+  return id === 'osm' ? 'osm' : undefined;
+}
+
+// ── Tile-error burst detection (pure, unit-testable) ─────────────────────
+// A single tileerror is often transient (weak GPS-cam WiFi, one slow edge
+// node). The provider only flips when ≥ THRESHOLD DISTINCT tiles fail inside
+// WINDOW_MS of one another — repeated errors for the same tile count once.
+// Distinctness is per-tile (url/coords key); the window is sliding and
+// relative to the newest error.
+export const TILE_ERROR_THRESHOLD = 3;
+export const TILE_ERROR_WINDOW_MS = 10_000;
+
+export interface TileErrorEntry {
+  /** Distinct failing-tile key (tile src URL, or z/x/y coords fallback). */
+  key: string;
+  /** Epoch ms of the first (within-window) error for that key. */
+  at: number;
+}
+
+/**
+ * Fold one tileerror into the ledger. Returns the pruned/pushed ledger and
+ * whether the burst threshold has been crossed. Pure — no Date.now() inside.
+ */
+export function recordTileError(
+  ledger: readonly TileErrorEntry[],
+  key: string,
+  at: number,
+): { ledger: TileErrorEntry[]; tripped: boolean } {
+  const fresh = ledger.filter((e) => at - e.at <= TILE_ERROR_WINDOW_MS);
+  if (fresh.some((e) => e.key === key)) {
+    return { ledger: fresh, tripped: fresh.length >= TILE_ERROR_THRESHOLD };
+  }
+  const next = [...fresh, { key, at }];
+  return { ledger: next, tripped: next.length >= TILE_ERROR_THRESHOLD };
+}
+
+/** Extract the distinct-tile key from a Leaflet `tileerror` event. */
+function tileErrorKey(event: L.TileErrorEvent): string {
+  const src = (event.tile as HTMLElement | undefined)?.getAttribute?.('src');
+  if (src) return src;
+  const c = event.coords;
+  return c ? `#${c.z}/${c.x}/${c.y}` : '';
+}
 
 /**
  * Brand teardrop marker as a `divIcon` — replaces the stock Leaflet
@@ -95,6 +188,32 @@ export default function GpsTrackMap({ frames, className }: Props) {
     return () => observer.disconnect();
   }, []);
 
+  // ── Tile provider state (graceful degradation, component lifetime) ──
+  // Starts on CARTO; a tileerror burst (≥ TILE_ERROR_THRESHOLD distinct
+  // tiles inside TILE_ERROR_WINDOW_MS — see recordTileError) flips it to the
+  // keyless standard-OSM provider for the rest of the component's life
+  // (permanently — no recovery re-flip even if CARTO comes back). The error
+  // ledger lives in a ref, so it also survives the keyed TileLayer remounts
+  // a theme swap causes.
+  // Plain state: the flip re-renders <TileLayer> under a new key (layer is
+  // recreated, attribution control updates) — no map remount.
+  const [providerId, setProviderId] = useState<TileProviderId>('carto');
+  // Ledger + latch live in refs so the tileerror handler is a stable
+  // callback (no listener churn on the layer) and reads never go stale.
+  const tileFailuresRef = useRef<{ errors: TileErrorEntry[]; switched: boolean }>(
+    { errors: [], switched: false },
+  );
+
+  const handleTileError = useCallback((event: L.TileErrorEvent) => {
+    const bundle = tileFailuresRef.current;
+    if (bundle.switched) return; // already on the fallback — map stays as is
+    const key = tileErrorKey(event);
+    if (!key) return;
+    const { ledger, tripped } = recordTileError(bundle.errors, key, Date.now());
+    tileFailuresRef.current = { errors: ledger, switched: tripped };
+    if (tripped) setProviderId('osm');
+  }, []);
+
   const positions = useMemo<[number, number][]>(
     () =>
       frames
@@ -110,6 +229,11 @@ export default function GpsTrackMap({ frames, className }: Props) {
     [frames],
   );
 
+  const theme: TileTheme = isDark ? 'dark' : 'light';
+  const tileConfig = useMemo(
+    () => tileConfigFor(providerId, theme),
+    [providerId, theme],
+  );
   const center: [number, number] = positions[0] ?? [0, 0];
 
   // Imperative subscription: move the marker whenever cursorTime changes.
@@ -139,20 +263,32 @@ export default function GpsTrackMap({ frames, className }: Props) {
   }, [frames, timestamps]);
 
   return (
-    <MapContainer
-      center={center}
-      zoom={13}
-      scrollWheelZoom
+    <div
+      // Absent while CARTO serves; `'osm'` on the fallback. The dark-theme
+      // tile-pane invert filter in index.css keys on this attribute.
+      data-map-provider={mapProviderAttribute(providerId)}
       className={`w-full ${heightClass}`}
     >
-      <TileLayer
-        url={isDark ? TILE_URLS.dark : TILE_URLS.light}
-        attribution={TILE_ATTRIBUTION}
-      />
-      <Polyline positions={positions} pathOptions={{ color: ACCENT, weight: 3 }} />
-      {positions.length > 0 ? (
-        <Marker ref={markerRef} position={center} icon={pinIcon} />
-      ) : null}
-    </MapContainer>
+      <MapContainer
+        center={center}
+        zoom={13}
+        scrollWheelZoom
+        className="h-full w-full"
+      >
+        <TileLayer
+          // Key includes provider AND theme: a provider flip (or theme swap)
+          // recreates the layer so the attribution control re-renders with
+          // the active provider's notice.
+          key={`${providerId}:${theme}`}
+          url={tileConfig.url}
+          attribution={tileConfig.attribution}
+          eventHandlers={{ tileerror: handleTileError }}
+        />
+        <Polyline positions={positions} pathOptions={{ color: ACCENT, weight: 3 }} />
+        {positions.length > 0 ? (
+          <Marker ref={markerRef} position={center} icon={pinIcon} />
+        ) : null}
+      </MapContainer>
+    </div>
   );
 }

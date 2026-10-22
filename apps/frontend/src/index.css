@@ -262,6 +262,20 @@ h1, h2, h3, h4 {
   transition: transform 140ms ease-out;
 }
 
+/* ── GPS map provider fallback (keyless OSM tiles) ──────────────────────── */
+/* Standard OSM raster has no dark variant — invert-filter the tile pane so
+   the map stays legible on the dark theme. Scoped to BOTH the dark root
+   class AND the `[data-map-provider="osm"]` attribute GpsTrackMap stamps on
+   its wrapper: while CARTO serves, the attribute is absent and the filter
+   can never apply (CARTO has real theme tiles), and in the light theme
+   plain OSM tiles are already correct. The brand teardrop pin (divIcon) and
+   the accent polyline live outside the tile pane and are not affected —
+   paint-order keeps them above .leaflet-tile-pane. */
+.dark [data-map-provider='osm'] .leaflet-tile-pane {
+  filter: invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)
+    saturate(0.7);
+}
+
 /* ── Ring-gauge arc easing (SessionSummaryCard) ─────────────────────────── */
 .gauge-arc {
   transition: stroke-dasharray 120ms ease-out;
@@ -328,6 +342,10 @@ h1, h2, h3, h4 {
 @media print {
   /* Force light tokens regardless of theme (kept in sync with :root) */
   :root { color-scheme: light; }
+  /* The OSM-fallback tile pane is invert-filtered in dark mode for screens;
+     printing forces light tokens, so cancel the filter or the map prints
+     inverted on the light page. */
+  html.dark [data-map-provider='osm'] .leaflet-tile-pane { filter: none !important; }
   html.dark { --bg-base: #f4f5f7; --bg-card: #ffffff; --bg-elevated: #ffffff;
     --bg-surface: #e9ebef; --text-primary: #18181b; --text-secondary: #3f3f46;
     --text-muted: #64646d; --border-default: #e4e4e7; --border-strong: #d4d4d8;
