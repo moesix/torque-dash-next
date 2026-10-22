@@ -6,6 +6,7 @@ import rehypeHighlight from 'rehype-highlight';
 import { analyzeSession, listAnalyses, deleteAnalysis, getAnalysis, getFullSettings, ApiError } from '@/lib/api';
 import { Link } from 'react-router';
 import StreamRenderer from './StreamRenderer';
+import ConfirmDialog from '@/components/ui/ConfirmDialog';
 import type { Analysis, AnalysisPreview, Settings } from '@/lib/types';
 import { stripMarkdown } from '@/lib/utils';
 
@@ -38,6 +39,10 @@ export default function AnalysisPanel({ sessionId, ref, printMode = false }: Pro
     // Rows with a delete in flight. A Set (not a single id slot) so row A's
     // completion can't re-enable row B's button while B is still deleting.
     const [deletingIds, setDeletingIds] = useState<Set<number>>(new Set());
+    // Delete confirmation target (replaces the native window.confirm).
+    const [deleteTarget, setDeleteTarget] = useState<AnalysisPreview | null>(null);
+    // Rows whose body-fetch FAILED — inline error + retry under the summary.
+    const [expandErrorIds, setExpandErrorIds] = useState<Set<number>>(new Set());
     const latestResponseRef = useRef('');
     const panelRef = useRef<HTMLDivElement>(null);
 
@@ -99,9 +104,7 @@ export default function AnalysisPanel({ sessionId, ref, printMode = false }: Pro
       // A delete is already in flight for this row — ignore the double-click
       // instead of firing a second DELETE that would 404 on the now-missing row.
       if (deletingIds.has(preview.id)) return;
-      if (!confirm('Delete this analysis? This cannot be undone. Export or copy it first if you need to keep it.')) {
-        return;
-      }
+      setDeleteTarget(null); // dialog resolves; errors show in-row
       setDeletingIds((ids) => new Set(ids).add(preview.id));
       setDeleteErrorId(null);
       try {
@@ -180,9 +183,16 @@ export default function AnalysisPanel({ sessionId, ref, printMode = false }: Pro
         const full = await getAnalysis(preview.id);
         if (full) {
           setExpandedMap((prev) => new Map(prev).set(preview.id, full));
+          setExpandErrorIds((ids) => {
+            if (!ids.has(preview.id)) return ids;
+            const next = new Set(ids);
+            next.delete(preview.id);
+            return next;
+          });
         }
       } catch {
-        // Silently ignore — keep collapsed
+        // Surface an inline error + retry instead of a silent no-op.
+        setExpandErrorIds((ids) => new Set(ids).add(preview.id));
       } finally {
         setLoadingId(null);
       }
@@ -190,11 +200,11 @@ export default function AnalysisPanel({ sessionId, ref, printMode = false }: Pro
 
     if (llmSettings && !llmSettings.hasLlmProvider) {
       return (
-        <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
+        <div className="card">
           <h3 className="text-lg font-semibold leading-relaxed">AI Analysis</h3>
           <p className="mt-2 text-sm leading-relaxed text-gray-500 dark:text-[var(--text-muted)]">
             Configure an AI provider in{' '}
-            <Link to="/settings" className="text-indigo-600 hover:underline dark:text-indigo-400">
+            <Link to="/settings" className="text-accent hover:underline">
               Settings
             </Link>{' '}
             to enable session analysis.
@@ -204,7 +214,7 @@ export default function AnalysisPanel({ sessionId, ref, printMode = false }: Pro
     }
 
     return (
-      <div ref={panelRef} className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
+      <div ref={panelRef} className="card">
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <h3 className="text-lg font-semibold leading-relaxed">AI Analysis</h3>
@@ -245,7 +255,7 @@ export default function AnalysisPanel({ sessionId, ref, printMode = false }: Pro
                 const full = expandedMap.get(a.id);
                 const isLoading = loadingId === a.id;
                 return (
-                  <details
+                <details
                     key={a.id}
                     open={!!full || (printMode && a.id === latestId)}
                     className="rounded border border-[var(--border-default)] p-3 dark:border-[var(--border-strong)]"
@@ -269,7 +279,7 @@ export default function AnalysisPanel({ sessionId, ref, printMode = false }: Pro
                           // Stop the row's expand toggle (summary click) from firing.
                           e.preventDefault();
                           e.stopPropagation();
-                          handleDeleteAnalysis(a);
+                          setDeleteTarget(a);
                         }}
                         className="shrink-0 text-xs text-gray-500 hover:text-rose-600 dark:text-gray-400 dark:hover:text-rose-400 disabled:opacity-50 disabled:cursor-wait"
                       >
@@ -279,6 +289,19 @@ export default function AnalysisPanel({ sessionId, ref, printMode = false }: Pro
                     {deleteErrorId === a.id && (
                       <p className="mt-1 text-xs text-rose-600 dark:text-rose-400" role="alert">
                         Failed to delete analysis.
+                      </p>
+                    )}
+                    {expandErrorIds.has(a.id) && (
+                      <p className="mt-1 text-xs text-rose-600 dark:text-rose-400" role="alert">
+                        Couldn&rsquo;t load this analysis.
+                        <button
+                          type="button"
+                          onClick={() => void toggleExpand(a)}
+                          disabled={isLoading}
+                          className="ml-2 font-medium underline hover:no-underline disabled:opacity-50"
+                        >
+                          Retry
+                        </button>
                       </p>
                     )}
                     {full && (
@@ -323,6 +346,20 @@ export default function AnalysisPanel({ sessionId, ref, printMode = false }: Pro
                 );
               })}
             </div>
+          )}
+
+          {/* Delete confirmation — replaces the native window.confirm */}
+          {deleteTarget && (
+            <ConfirmDialog
+              open
+              title="Delete analysis?"
+              description="This cannot be undone. Export or copy it first if you need to keep it."
+              confirmLabel="Delete"
+              onClose={() => setDeleteTarget(null)}
+              onConfirm={() => {
+                if (deleteTarget) void handleDeleteAnalysis(deleteTarget);
+              }}
+            />
           )}
         </div>
       </div>

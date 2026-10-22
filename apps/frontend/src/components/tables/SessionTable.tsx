@@ -13,6 +13,7 @@ export default function SessionTable({ sessions }: Props) {
   const queryClient = useQueryClient();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
+  const [renameError, setRenameError] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   // Focus input when entering edit mode
@@ -27,11 +28,13 @@ export default function SessionTable({ sessions }: Props) {
     e.stopPropagation();
     setEditingId(session.id);
     setEditValue(session.name || '');
+    setRenameError(false);
   };
 
   const cancelEditing = () => {
     setEditingId(null);
     setEditValue('');
+    setRenameError(false);
   };
 
   const saveEditing = async (sessionId: string) => {
@@ -44,10 +47,12 @@ export default function SessionTable({ sessions }: Props) {
     try {
       await renameSession(sessionId, trimmed);
       await queryClient.invalidateQueries({ queryKey: ['sessions'] });
+      cancelEditing();
     } catch {
-      // Silently ignore — the name just won't update
+      // Surface the failure inline and KEEP the editor open so the edit isn't
+      // silently lost (previously the editor closed with no feedback at all).
+      setRenameError(true);
     }
-    cancelEditing();
   };
 
   const handleKeyDown = (
@@ -75,14 +80,10 @@ export default function SessionTable({ sessions }: Props) {
         </tr>
       </thead>
       <tbody className="divide-y divide-gray-100 dark:divide-[var(--border-default)]">
-        {sessions.length === 0 ? (
-          <tr>
-            <td colSpan={6} className="py-2.5 px-4">
-              <p className="text-sm leading-relaxed">No sessions yet.</p>
-            </td>
-          </tr>
-        ) : (
-          sessions.map((s) => {
+        {/* NOTE: no empty-state <tr> here — a zero-session page never renders
+            the table (SessionBrowser shows the getting-started card and the
+            old empty <tr> was unreachable dead markup). */}
+        {sessions.map((s) => {
             const maxSpeed = s.maxSpeed ?? null;
             const maxRpm = s.maxRpm ?? null;
             const isEditing = editingId === s.id;
@@ -103,16 +104,29 @@ export default function SessionTable({ sessions }: Props) {
               >
                 <td className="py-2.5 px-4">
                   {isEditing ? (
-                    <input
-                      ref={inputRef}
-                      type="text"
-                      value={editValue}
-                      onChange={(e) => setEditValue(e.target.value)}
-                      onKeyDown={(e) => handleKeyDown(s.id, e)}
-                      onBlur={() => saveEditing(s.id)}
-                      onClick={(e) => e.stopPropagation()}
-                      className="w-full border border-teal-400 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-teal-300"
-                    />
+                    <div>
+                      <input
+                        ref={inputRef}
+                        type="text"
+                        value={editValue}
+                        onChange={(e) => setEditValue(e.target.value)}
+                        onKeyDown={(e) => handleKeyDown(s.id, e)}
+                        onBlur={() => saveEditing(s.id)}
+                        onClick={(e) => e.stopPropagation()}
+                        aria-invalid={renameError}
+                        aria-describedby={renameError ? `rename-error-${s.id}` : undefined}
+                        className="w-full rounded border border-border bg-surface-card px-2 py-1 text-sm text-fg"
+                      />
+                      {renameError && (
+                        <p
+                          id={`rename-error-${s.id}`}
+                          role="alert"
+                          className="mt-1 text-xs text-red-600 dark:text-red-400"
+                        >
+                          Couldn&rsquo;t rename the session. Press Enter to retry, or Escape to cancel.
+                        </p>
+                      )}
+                    </div>
                   ) : (
                     <span className="group inline-flex items-center gap-1">
                       {s.name || 'Unnamed session'}
@@ -134,7 +148,7 @@ export default function SessionTable({ sessions }: Props) {
                   )}
                 </td>
                 <td className="hidden md:table-cell py-2.5 px-4">
-                  {s.vehicleName || <span className="text-gray-400 dark:text-[var(--text-muted)] italic">Unassigned</span>}
+                  {s.vehicleName || <span className="text-fg-muted italic">Unassigned</span>}
                 </td>
                 <td className="py-2.5 px-4">
                   {s.startDate
@@ -148,8 +162,7 @@ export default function SessionTable({ sessions }: Props) {
                 <td className="py-2.5 px-4">{maxRpm != null ? Math.round(maxRpm) : '—'}</td>
               </tr>
             );
-          })
-        )}
+        })}
       </tbody>
     </table>
     </div>

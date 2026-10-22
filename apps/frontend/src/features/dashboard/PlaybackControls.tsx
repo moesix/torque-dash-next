@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import type { ChangeEvent } from 'react';
 import { usePlaybackStore } from '@/app/playbackStore';
+import Button from '@/components/ui/Button';
 import type { TelemetryFrame } from '@/lib/types';
 
 interface Props {
@@ -70,19 +71,11 @@ export default function PlaybackControls({ frames }: Props) {
     cursorTime != null ? new Date(cursorTime).toLocaleTimeString() : '—';
 
   return (
-    <div className="h-fit rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
+    <div className="h-fit card">
       <div className="flex flex-wrap items-center gap-3">
-        <button
-          type="button"
-          onClick={handlePlayPause}
-          className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white
-            shadow-xs transition hover:bg-indigo-700
-            focus:outline-none focus:ring-2 focus:ring-indigo-500/20
-            disabled:cursor-not-allowed disabled:opacity-50
-            dark:bg-indigo-500 dark:hover:bg-indigo-600"
-        >
+        <Button variant="primary" onClick={handlePlayPause}>
           {isPlaying ? 'Pause' : 'Play'}
-        </button>
+        </Button>
         <input
           type="range"
           min={start}

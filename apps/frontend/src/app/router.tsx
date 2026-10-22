@@ -2,6 +2,7 @@ import { lazy } from 'react';
 import type { RouteObject } from 'react-router';
 import AppShell from '@/components/layout/AppShell';
 import Login from '@/features/auth/Login';
+import NotFound from '@/features/misc/NotFound';
 
 const Register = lazy(() => import('@/features/auth/Register'));
 const SessionBrowser = lazy(() => import('@/features/sessions/SessionBrowser'));
@@ -25,9 +26,14 @@ export const routerConfig: RouteObject[] = [
     element: <AppShell />,
     children: [
       { index: true, element: <SessionBrowser /> },
-      { path: 'session/:id', element: <ReplayDashboard /> },
+      {
+        path: 'session/:id',
+        element: <ReplayDashboard />,
+      },
       { path: 'settings', element: <SettingsPage /> },
+      // Unknown URLs keep the app shell (sidebar/topbar stay usable) and show
+      // a real "Page not found" instead of silently bouncing to Login.
+      { path: '*', element: <NotFound /> },
     ],
   },
-  { path: '*', element: <Login /> },
 ];

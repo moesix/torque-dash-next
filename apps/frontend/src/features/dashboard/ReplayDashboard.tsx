@@ -14,7 +14,7 @@
  */
 
 import React, { useState, useMemo, useCallback, useRef } from 'react';
-import { useParams } from 'react-router';
+import { useParams, Link } from 'react-router';
 import { exportSessionCsv, getVehicles, reassignSessionVehicle } from '@/lib/api';
 import type { AnalysisPanelHandle } from '@/components/ai/AnalysisPanel';
 import type { Session, Vehicle } from '@/lib/types';
@@ -22,6 +22,7 @@ import VehicleReassignDialog from '@/components/vehicles/VehicleReassignDialog';
 import { queryClient } from '@/app/queryClient';
 import Skeleton from '@/components/ui/Skeleton';
 import ErrorAlert from '@/components/ui/ErrorAlert';
+import Badge from '@/components/ui/Badge';
 import { usePlaybackStore } from '@/app/playbackStore';
 import SessionSummaryCard from '@/components/charts/SessionSummaryCard';
 import GpsTrackMap from '@/components/map/GpsTrackMap';
@@ -151,6 +152,32 @@ export default function ReplayDashboard() {
     dialogRef.current?.close();
   }, []);
 
+  // Safari fallback for the chart-expand dialog's light dismiss. fullscreen
+  // dialogs (<dialog open>) don't light-dismiss on older engines the way
+  // closedby="any" does; a click landing on the dialog element itself —
+  // i.e. the backdrop/margin area — collapses it. Unlike the padded
+  // AnalysisConfirmDialog there is NO rect hit-test here: this dialog is
+  // full-bleed (fixed inset-0, h-full w-full) so it covers the viewport and
+  // its rect contains every click — a rect containment test would suppress
+  // ALL outside clicks. target === dialog can still only mean
+  // "not on content" because the content lives in the inner <div
+  // class="h-full card"> child. Checks dialog.open per event so a single
+  // listener covers open/close cycles.
+  React.useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    if ('closedBy' in HTMLDialogElement.prototype) return;
+
+    const handleClick = (e: MouseEvent) => {
+      if (e.target !== dialog || !dialog.open) return;
+      // Fullscreen dialog (see above): target === dialog is already the
+      // "click missed the content" signal — close unconditionally.
+      handleCollapse();
+    };
+    dialog.addEventListener('click', handleClick);
+    return () => dialog.removeEventListener('click', handleClick);
+  }, [handleCollapse]);
+
   function scrollToAnalysis() {
     const el = document.getElementById('ai-analysis-panel');
     el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -250,52 +277,47 @@ export default function ReplayDashboard() {
     return (
       <div className="space-y-4">
         {/* Slim banner skeleton */}
-        <div className="rounded-lg bg-white px-4 py-3 shadow-xs dark:bg-[var(--bg-card)]">
+        <div className="rounded-lg bg-surface-card px-4 py-3 shadow-xs">
           <Skeleton className="h-5 w-48 mb-1" />
           <Skeleton className="h-3 w-64" />
         </div>
 
-        {/* Controls + Gauges skeleton */}
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
-        <div className="lg:w-2/3 self-start">
-            <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
-              <Skeleton className="h-12 w-full" />
-            </div>
-          </div>
-          <div className="lg:w-1/3">
-            <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
-              <div className="flex justify-around">
-                <Skeleton className="h-20 w-20" />
-                <Skeleton className="h-20 w-20" />
-                <Skeleton className="h-20 w-20" />
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Chart area skeleton */}
-        <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
-          <Skeleton className="h-4 w-24 mb-4" />
-          <Skeleton className="h-64 w-full" />
-        </div>
-
-        {/* Map + Metrics skeleton */}
+        {/* Note: this mirrors the loaded layout (three equal columns below,
+            wide controls row above) with the same grid so skeletons don't
+            shift content (CLS) when real data swaps in. */}
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-          <div className="lg:col-span-2 rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
-            <Skeleton className="h-4 w-24 mb-4" />
-            <Skeleton className="h-48 w-full" />
+          <div className="card lg:col-span-2">
+            <Skeleton className="h-64 w-full" />
           </div>
-          <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
-            <Skeleton className="h-4 w-24 mb-4" />
+          <div className="card">
+            <Skeleton className="mb-3 h-5 w-40" />
+            <div className="space-y-2">
+              <Skeleton className="h-4 w-full" />
+              <Skeleton className="h-4 w-5/6" />
+              <Skeleton className="h-4 w-4/6" />
+            </div>
+          </div>
+          <div className="card lg:col-span-2">
+            <Skeleton className="mb-4 h-4 w-24" />
+            <Skeleton className="h-64 w-full" />
+          </div>
+          <div className="card">
+            <Skeleton className="mb-4 h-4 w-24" />
             <Skeleton className="h-32 w-full" />
           </div>
+        </div>
+
+        {/* AI analysis skeleton */}
+        <div className="card">
+          <Skeleton className="mb-4 h-5 w-32" />
+          <Skeleton className="h-24 w-full" />
         </div>
       </div>
     );
   }
   if (error || !session) {
     return (
-      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
+      <div className="card">
         <ErrorAlert message="Session not found." />
       </div>
     );
@@ -305,18 +327,27 @@ export default function ReplayDashboard() {
   return (
     <div className="space-y-4">
       {/* Slim session banner — not a full Card */}
-      <div className="animate-slide-up rounded-lg bg-white px-4 py-3 shadow-xs dark:bg-[var(--bg-card)]">
+      <div className="animate-slide-up rounded-lg bg-surface-card px-4 py-3 shadow-xs">
+        {/* Back affordance — replay is one page deep from the sessions list.
+            Hidden in print so the PDF report keeps its clean title-only
+            banner. */}
+        <Link
+          to="/"
+          className="print:hidden inline-flex min-h-[44px] items-center rounded-md px-1 font-medium text-fg-muted transition-colors hover:text-fg"
+        >
+          ← All sessions
+        </Link>
         <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
           <div className="min-w-0 flex-1">
-            <h1 className="text-lg font-semibold text-gray-900 dark:text-white font-display">
+            <h1 className="text-lg font-semibold text-fg font-display">
               {session.name || 'Session Replay'}
               {session.vehicleName && (
-                <span className="ml-2 inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 dark:bg-gray-700 dark:text-gray-300">
+                <Badge tone="neutral" className="ml-2">
                   {session.vehicleName}
-                </span>
+                </Badge>
               )}
             </h1>
-            <p className="text-sm text-gray-500 dark:text-[var(--text-secondary)]">
+            <p className="text-sm text-fg-secondary">
               {session.startDate
                 ? new Date(session.startDate).toLocaleString()
                 : ''}
@@ -331,7 +362,7 @@ export default function ReplayDashboard() {
               aria-label="Session view mode"
               className="flex items-center whitespace-nowrap rounded-lg border border-gray-200 p-0.5 dark:border-[var(--border-strong)] print:hidden"
             >
-              <span className="mr-1 text-xs text-gray-400">View:</span>
+              <span className="mr-1 text-xs text-fg-muted">View:</span>
               {(['dash', 'map'] as const).map((mode) => (
                 <button
                   key={mode}
@@ -402,12 +433,12 @@ export default function ReplayDashboard() {
               )}
             </button>
             {truncated && (
-              <span
-                className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700 ring-1 ring-amber-600/20 dark:bg-amber-900/30 dark:text-amber-300 dark:ring-amber-500/20"
+              <Badge
+                tone="warn"
                 title="Session exceeds the 100k-frame fetch cap; later points are not shown"
               >
                 Showing first 100k points
-              </span>
+              </Badge>
             )}
             <button
               type="button"
@@ -458,7 +489,7 @@ export default function ReplayDashboard() {
           maxSpeed={maxSpeed}
           maxCoolant={maxCoolant}
         />
-        <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
+        <div className="card">
           <h3 className="text-lg font-semibold leading-relaxed">Metrics</h3>
           <PidTogglePanel
             available={available}
@@ -474,7 +505,7 @@ export default function ReplayDashboard() {
 
       {/* Time Series — full width */}
       <div className="animate-slide-up-delay-3">
-        <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
+        <div className="card">
           <div className="flex items-center justify-between">
             <h3 className="text-lg font-semibold leading-relaxed">Time Series</h3>
             <button
@@ -500,7 +531,7 @@ export default function ReplayDashboard() {
           aria-label="Expanded chart"
           onClose={handleCollapse}
         >
-          <div className="h-full rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
+          <div className="h-full card">
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-semibold leading-relaxed">Time Series</h3>
               <button
@@ -533,7 +564,7 @@ export default function ReplayDashboard() {
 
       {/* GPS Track — full width */}
       <div className="animate-slide-up-delay-4">
-        <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 md:p-6 shadow-xs">
+        <div className="card">
           <h3 className="text-lg font-semibold leading-relaxed">GPS Track</h3>
           <div className="mt-2">
             <GpsTrackMap frames={frames} />
@@ -592,7 +623,16 @@ export default function ReplayDashboard() {
 
       {/* AI Analysis panel — at the bottom */}
       <div id="ai-analysis-panel" className="animate-slide-up-delay-5">
-        <React.Suspense fallback={<div className="text-sm text-gray-400 p-4">Loading analysis panel...</div>}>
+        <React.Suspense
+          fallback={
+            <div className="card" aria-busy="true">
+              <div className="print:hidden">
+                <Skeleton className="mb-4 h-5 w-32" />
+                <Skeleton className="h-24 w-full" />
+              </div>
+            </div>
+          }
+        >
           <AnalysisPanel
             ref={analysisPanelRef}
             sessionId={id as string}

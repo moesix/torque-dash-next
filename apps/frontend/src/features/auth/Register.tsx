@@ -4,6 +4,7 @@ import { useNavigate, Navigate, Link } from 'react-router';
 import { register, getSettings } from '@/lib/api';
 import { useAuth } from './useAuth';
 import AuthBranding from './AuthBranding';
+import Button from '@/components/ui/Button';
 import { MobileLogo } from '@/components/layout/brand';
 
 export default function Register() {
@@ -30,8 +31,17 @@ export default function Register() {
     try {
       await register(email, password);
       navigate('/login');
-    } catch {
-      setError('Registration failed. The email may already be registered.');
+    } catch (err) {
+      // register() throws ApiError(message, status) — the backend's validator
+      // message (e.g. "email must be a valid email", "password ... min 8
+      // characters") and 409 duplicate-email copy are worth surfacing verbatim,
+      // same as Login. Bad-credential style failures fall back to a generic
+      // server message only when the error carries none.
+      setError(
+        err instanceof Error && err.message
+          ? err.message
+          : 'Registration failed. The email may already be registered.',
+      );
     } finally {
       setBusy(false);
     }
@@ -59,7 +69,7 @@ export default function Register() {
               Already have an account?{' '}
               <Link
                 to="/login"
-                className="font-medium text-teal-600 hover:text-teal-500 dark:text-teal-400"
+                className="font-medium text-accent hover:text-accent-hover"
               >
                 Sign in
               </Link>
@@ -90,7 +100,10 @@ export default function Register() {
 
           <form onSubmit={onSubmit} className="mt-6 space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+              <label
+                htmlFor="register-email"
+                className="block text-sm font-medium text-fg-secondary"
+              >
                 Email
               </label>
               <input
@@ -101,51 +114,52 @@ export default function Register() {
                 onChange={(e) => setEmail(e.target.value)}
                 aria-invalid={!!error}
                 aria-describedby={error ? 'register-error' : undefined}
-                className="mt-1 w-full rounded-md border border-gray-300 bg-white px-3 py-3 text-sm
-                  focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500/20
-                  dark:border-gray-600 dark:bg-gray-800 dark:text-white"
+                className="mt-1 w-full rounded-md border border-border bg-surface-card px-3 py-3 text-sm text-fg
+                  focus:border-border-strong"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+              <label
+                htmlFor="register-password"
+                className="block text-sm font-medium text-fg-secondary"
+              >
                 Password
               </label>
               <input
                 id="register-password"
                 type="password"
                 required
+                minLength={8}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 aria-invalid={!!error}
-                aria-describedby={error ? 'register-error' : undefined}
-                className="mt-1 w-full rounded-md border border-gray-300 bg-white px-3 py-3 text-sm
-                  focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500/20
-                  dark:border-gray-600 dark:bg-gray-800 dark:text-white"
+                aria-describedby={`${error ? 'register-error ' : ''}register-password-hint`}
+                className="mt-1 w-full rounded-md border border-border bg-surface-card px-3 py-3 text-sm text-fg
+                  focus:border-border-strong"
               />
+              <p id="register-password-hint" className="mt-1 text-xs text-fg-muted">
+                At least 8 characters.
+              </p>
             </div>
             {error && (
               <p id="register-error" className="text-sm text-red-600 dark:text-red-400" role="alert">
                 {error}
               </p>
             )}
-            <button
+            <Button
               type="submit"
               disabled={busy}
-              className="w-full rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white
-                shadow-xs transition hover:bg-indigo-700
-                focus:outline-none focus:ring-2 focus:ring-indigo-500/20
-                disabled:cursor-not-allowed disabled:opacity-50
-                dark:bg-indigo-500 dark:hover:bg-indigo-600"
+              className="w-full"
             >
               {busy ? 'Creating…' : 'Create account'}
-            </button>
+            </Button>
           </form>
 
           <p className="mt-6 text-center text-sm text-gray-500 dark:text-gray-400">
             Already have an account?{' '}
             <Link
               to="/login"
-              className="font-medium text-teal-600 hover:text-teal-500 dark:text-teal-400"
+              className="font-medium text-accent hover:text-accent-hover"
             >
               Sign in
             </Link>
