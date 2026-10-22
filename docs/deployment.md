@@ -166,6 +166,15 @@ Ollama, or any OpenAI-compatible endpoint). Set `LLM_ENCRYPTION_KEY` in your
 > otherwise travel over plain HTTP. Custom (OpenAI-compatible) endpoints are
 > SSRF-checked server-side before any request.
 
+### Map basemap (optional)
+
+The map basemap provider is an admin-only server setting (`PUT /api/settings`):
+Standard OpenStreetMap tiles are the default and need nothing — configure
+`tileProvider: "carto"` in **Settings** to upgrade to CARTO basemaps, pasting
+your CARTO API key in the same admin card (switching back to OSM clears the
+key's exposure; the key is only surfaced to authenticated browsers while CARTO
+is the active provider).
+
 ---
 
 ## 6. Upgrading

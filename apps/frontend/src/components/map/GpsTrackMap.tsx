@@ -5,25 +5,47 @@ import { usePlaybackStore } from '@/app/playbackStore';
 import { findNearestFrameIndex } from '@/lib/pidDecode';
 import { ACCENT } from '@/lib/chartColors';
 import type { TelemetryFrame } from '@/lib/types';
+import { useTileSettings } from '@/features/dashboard/hooks/useTileSettings';
 
 /**
- * Tile providers, best-first with graceful degradation. CARTO's hosted
- * basemaps are nice (raster styles; free with attribution, built on
- * OpenStreetMap data) but newer CARTO accounts/endpoints require an API key —
- * a hosted-key requirement this self-hosted app will never accept. So the
- * provider model carries a guaranteed fallback: standard OpenStreetMap raster
- * tiles, which need no key. Lifecycle: start on `carto`; if enough tiles fail
- * within a short window (see TILE_ERROR_THRESHOLD), flip to `osm` for the
- * component's lifetime. `{theme}` is replaced with the active theme for
- * themed providers only (light_all / dark_all).
+ * Tile providers, settings-driven with a keyless guaranteed base. Standard
+ * OpenStreetMap raster tiles need no key and are the DEFAULT provider.
+ * CARTO's hosted basemaps are the opt-in admin upgrade: they only activate
+ * when GET /api/settings/full returns tileProvider === 'carto' AND a
+ * non-empty cartoApiKey (the admin's key, surfaced by the backend only while
+ * carto is active). Blank keys, missing fields, and fetch failure all
+ * resolve to OSM — a wrong key is the one case we cannot detect (see
+ * resolveTileTargets below).
  *
- * Exports (TILE_PROVIDERS, tileConfigFor, mapProviderAttribute, threshold
- * constants, recordTileError) are the pure provider model consumed by
- * mapView.test.ts — the component itself only wires them into Leaflet.
+ * Lifecycle: the effective provider comes from resolveTileTargets(settings,
+ * theme); while CARTO is effectively active, a tileerror burst (see
+ * TILE_ERROR_THRESHOLD) latches a degrade to keyless OSM for the session —
+ * that latch never does anything while OSM is already the provider.
+ * `{theme}` is replaced with the active theme for themed providers only
+ * (light_all / dark_all).
+ *
+ * Exports (TILE_PROVIDERS, tileConfigFor, resolveTileTargets,
+ * mapProviderAttribute, threshold constants, recordTileError) are the pure
+ * provider model consumed by mapView.test.ts — the component itself only
+ * wires them into Leaflet.
  */
 export type TileProviderId = 'carto' | 'osm';
 /** Theme resolved for a `{theme}`-placeholder URL ({theme}_all → light/dark). */
 export type TileTheme = 'light' | 'dark';
+
+/**
+ * The map-relevant slice of the authenticated GET /api/settings/full shape
+ * (lib/types.ts Settings). Structural on purpose: the backend omits
+ * cartoApiKey whenever OSM is the configured provider, so every field is
+ * optional; `undefined`/`null` settings (fetch failure) also route here and
+ * must resolve to OSM.
+ */
+export interface AppTileSettings {
+  tileProvider?: 'osm' | 'carto';
+  /** Admin's CARTO API key. Browser credential — the map embeds it in tile
+   *  URLs; never log it, never console it. */
+  cartoApiKey?: string;
+}
 
 export interface TileProvider {
   id: TileProviderId;
@@ -36,22 +58,27 @@ export interface TileProvider {
 
 export const TILE_PROVIDERS: readonly TileProvider[] = [
   {
-    id: 'carto',
-    url: 'https://{s}.basemaps.cartocdn.com/{theme}_all/{z}/{x}/{y}{r}.png',
-    attribution:
-      '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-    themed: true,
-  },
-  {
     id: 'osm',
     url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
     attribution:
       '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
     themed: false,
   },
+  {
+    id: 'carto',
+    url: 'https://{s}.basemaps.cartocdn.com/{theme}_all/{z}/{x}/{y}{r}.png',
+    attribution:
+      '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+    themed: true,
+  },
 ];
 
-/** Resolve a provider's concrete URL + attribution for a theme. */
+/**
+ * Resolve a provider's concrete URL + attribution for a theme. Pure and
+ * key-blind: this is the BASE template only — the keyed CARTO URL is built
+ * by resolveTileTargets (below) so no API key ever lives inside
+ * TILE_PROVIDERS or leaks through this path.
+ */
 export function tileConfigFor(
   id: TileProviderId,
   theme: TileTheme,
@@ -60,11 +87,71 @@ export function tileConfigFor(
   return { url: p.url.replace('{theme}', theme), attribution: p.attribution };
 }
 
+export interface TileTarget {
+  /** Effectively-served provider. */
+  providerId: TileProviderId;
+  /** Concrete Leaflet URL ({theme} already resolved, key already appended). */
+  url: string;
+  attribution: string;
+  /** True only when the resolved URL embeds the admin's CARTO key —
+   *  i.e. the vendor sees a keyed (billable/attributed) request. */
+  keyedStamp: boolean;
+}
+
+/**
+ * THE provider-resolution rule (settings-driven, OSM-default):
+ *
+ *   settings.tileProvider === 'carto' AND non-empty cartoApiKey
+ *     → CARTO, with the key appended per CARTO's documented convention for
+ *       the hosted raster basemap endpoint: a `key` query parameter on the
+ *       tile URL (carto.com/basemaps/docs — Leaflet raster example).
+ *   anything else → OSM.
+ *
+ * `anything else` covers: OSM configured, CARTO configured with a blank key
+ * (the backend permits '', a deliberate mid-state — tiles degrade to OSM
+ * until a key is saved, which the Settings card copy explains),
+ * missing/optional fields, and settings === undefined (settings fetch
+ * failed — the replay dashboard's sessions list must never break, so the
+ * map degrades to the keyless base).
+ *
+ * KNOWN LIMITATION, by design: a WRONG key still resolves HTTP-200 vendor
+ * error-card tiles (CARTO serves 200 images displaying the key message, so
+ * the tileerror burst cannot catch it). That's the admin's configured
+ * choice — the Settings card copy tells the admin to verify the key and
+ * domain-allowlist it. We deliberately do NOT attempt to detect card tiles.
+ *
+ * Pure: no I/O, no Date.now(). The key is embedded in the returned URL only
+ * (encodeURIComponent keeps reserved characters out of the query) — never
+ * logged, never consoled by any consumer of this module.
+ */
+export function resolveTileTargets(
+  settings: AppTileSettings | null | undefined,
+  theme: TileTheme,
+): TileTarget {
+  const key =
+    typeof settings?.cartoApiKey === 'string' ? settings.cartoApiKey.trim() : '';
+  if (settings?.tileProvider === 'carto' && key !== '') {
+    const base = tileConfigFor('carto', theme);
+    return {
+      providerId: 'carto',
+      url: `${base.url}?key=${encodeURIComponent(key)}`,
+      attribution: base.attribution,
+      keyedStamp: true,
+    };
+  }
+  return {
+    providerId: 'osm',
+    ...tileConfigFor('osm', theme),
+    keyedStamp: false,
+  };
+}
+
 /**
  * The `data-map-provider` value stamped on the component wrapper. Present
- * ONLY for `osm` so the dark-theme tile-pane invert filter in index.css is
- * scoped exclusively to the OSM fallback — the CARTO basemap has real dark
- * tiles and the attribute is absent, so the filter can never apply to it.
+ * ONLY while `osm` is effectively serving — the keyless DEFAULT, or the
+ * burst/degrade fallback while settings say carto — so the dark-theme
+ * tile-pane invert filter in index.css never applies to a CARTO basemap,
+ * which has real dark tiles.
  */
 export function mapProviderAttribute(
   id: TileProviderId,
@@ -188,21 +275,46 @@ export default function GpsTrackMap({ frames, className }: Props) {
     return () => observer.disconnect();
   }, []);
 
-  // ── Tile provider state (graceful degradation, component lifetime) ──
-  // Starts on CARTO; a tileerror burst (≥ TILE_ERROR_THRESHOLD distinct
-  // tiles inside TILE_ERROR_WINDOW_MS — see recordTileError) flips it to the
-  // keyless standard-OSM provider for the rest of the component's life
-  // (permanently — no recovery re-flip even if CARTO comes back). The error
-  // ledger lives in a ref, so it also survives the keyed TileLayer remounts
-  // a theme swap causes.
-  // Plain state: the flip re-renders <TileLayer> under a new key (layer is
+  // ── Tile provider state (settings-driven + graceful degradation) ────
+  // The base resolution is settings-driven (resolveTileTargets): settings
+  // undefined (query still loading, or the /api/settings/full call failed)
+  // resolves to OSM, so the map always renders with the keyless base and
+  // never breaks the sessions view. When CARTO+key resolves, a tileerror
+  // burst (≥ TILE_ERROR_THRESHOLD distinct tiles inside
+  // TILE_ERROR_WINDOW_MS — see recordTileError) latches a degrade to
+  // keyless OSM for the rest of the component's life (mid-session key
+  // revocation / net rot). The latch NEVER flips when OSM is already
+  // effectively active — the handler is only attached while the resolved
+  // provider is carto. The error ledger lives in a ref, so it survives the
+  // keyed TileLayer remounts a theme swap causes.
+  //
+  // A settings CHANGE under the same component instance (admin edits the
+  // provider/key) re-arms the safety net: the latch and ledger reset. The
+  // key value is referenced ONLY as a dependency-array identity — it is
+  // never logged, never consoled.
+  //
+  // Plain state: a flip re-renders <TileLayer> under a new key (layer is
   // recreated, attribution control updates) — no map remount.
-  const [providerId, setProviderId] = useState<TileProviderId>('carto');
+  const { tileSettings } = useTileSettings();
+
+  const [sessionFallbackOsm, setSessionFallbackOsm] = useState(false);
+
   // Ledger + latch live in refs so the tileerror handler is a stable
   // callback (no listener churn on the layer) and reads never go stale.
   const tileFailuresRef = useRef<{ errors: TileErrorEntry[]; switched: boolean }>(
     { errors: [], switched: false },
   );
+
+  // Settings epoch reset: whenever the ADMIN-CONFIGURED tile input changes
+  // (provider flipped, key set/cleared/rotated), re-arm the burst safety net
+  // so the new configuration gets its own failure window. Theme is NOT part
+  // of this identity — a light/dark flip must not un-latch mid-session.
+  const settingsKey = tileSettings?.tileProvider;
+  const settingsKeyValue = tileSettings?.cartoApiKey;
+  useEffect(() => {
+    tileFailuresRef.current = { errors: [], switched: false };
+    setSessionFallbackOsm(false);
+  }, [settingsKey, settingsKeyValue]);
 
   const handleTileError = useCallback((event: L.TileErrorEvent) => {
     const bundle = tileFailuresRef.current;
@@ -211,7 +323,7 @@ export default function GpsTrackMap({ frames, className }: Props) {
     if (!key) return;
     const { ledger, tripped } = recordTileError(bundle.errors, key, Date.now());
     tileFailuresRef.current = { errors: ledger, switched: tripped };
-    if (tripped) setProviderId('osm');
+    if (tripped) setSessionFallbackOsm(true);
   }, []);
 
   const positions = useMemo<[number, number][]>(
@@ -230,9 +342,21 @@ export default function GpsTrackMap({ frames, className }: Props) {
   );
 
   const theme: TileTheme = isDark ? 'dark' : 'light';
-  const tileConfig = useMemo(
-    () => tileConfigFor(providerId, theme),
-    [providerId, theme],
+  // Settings-driven effective target ({theme} resolved, key appended).
+  // OSM while settings are absent (loading/failed) — the map never blocks on
+  // the settings call.
+  const resolved = useMemo<TileTarget>(
+    () => resolveTileTargets(tileSettings, theme),
+    [tileSettings, theme],
+  );
+  // The EFFECTIVE provider: settings resolution unless the session-wide
+  // burst latch has degraded it to keyless OSM.
+  const providerId: TileProviderId = sessionFallbackOsm ? 'osm' : resolved.providerId;
+  const tileConfig = useMemo<TileTarget>(
+    // Session-fallback latch: degrade to the keyless OSM template even while
+    // the settings still say carto.
+    () => (sessionFallbackOsm ? { ...tileConfigFor('osm', theme), providerId: 'osm', keyedStamp: false } : resolved),
+    [sessionFallbackOsm, resolved, theme],
   );
   const center: [number, number] = positions[0] ?? [0, 0];
 
@@ -264,8 +388,11 @@ export default function GpsTrackMap({ frames, className }: Props) {
 
   return (
     <div
-      // Absent while CARTO serves; `'osm'` on the fallback. The dark-theme
-      // tile-pane invert filter in index.css keys on this attribute.
+      // `'osm'` only while the keyless OpenStreetMap provider is effectively
+      // serving — the default base, OR the burst-fallback degrade while the
+      // settings say carto. Absent while keyed CARTO serves (its dark tiles
+      // are real, so the `.dark` invert filter in index.css must not touch
+      // it — the filter scopes on this attribute).
       data-map-provider={mapProviderAttribute(providerId)}
       className={`w-full ${heightClass}`}
     >
@@ -278,11 +405,18 @@ export default function GpsTrackMap({ frames, className }: Props) {
         <TileLayer
           // Key includes provider AND theme: a provider flip (or theme swap)
           // recreates the layer so the attribution control re-renders with
-          // the active provider's notice.
+          // the active provider's notice. The URL may embed the admin's
+          // CARTO key — never printed, never logged anywhere.
           key={`${providerId}:${theme}`}
           url={tileConfig.url}
           attribution={tileConfig.attribution}
-          eventHandlers={{ tileerror: handleTileError }}
+          // The tileerror burst safety net is wired ONLY while keyed CARTO
+          // is effectively active: a degrade latch to keyless OSM is
+          // meaningful exactly then. While OSM serves (default or fallback)
+          // no handler is attached, so the latch can never fire.
+          eventHandlers={
+            providerId === 'carto' ? { tileerror: handleTileError } : {}
+          }
         />
         <Polyline positions={positions} pathOptions={{ color: ACCENT, weight: 3 }} />
         {positions.length > 0 ? (

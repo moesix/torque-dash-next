@@ -26,6 +26,9 @@ const {
   validateRetentionEnabled,
   validateRetentionDays,
   validateAnalysisRetentionDays,
+  validateTileProvider,
+  validateCartoApiKey,
+  MAX_CARTO_API_KEY_LENGTH,
 } = require('../lib/validators');
 const {
   formatDuration,
@@ -195,6 +198,73 @@ describe('validateAnalysisRetentionDays', () => {
   });
 });
 
+// ── Map tile provider (basemap, migration 021) ────────────────────────
+
+describe('validateTileProvider', () => {
+  it('accepts the default keyless provider ("osm")', () => {
+    assert.deepStrictEqual(validateTileProvider('osm'), { ok: true, value: 'osm' });
+  });
+
+  it('accepts the opt-in upgrade ("carto")', () => {
+    assert.deepStrictEqual(validateTileProvider('carto'), { ok: true, value: 'carto' });
+  });
+
+  it('rejects an unknown provider with 400-style message naming the allowlist', () => {
+    const r = validateTileProvider('osm-custom');
+    assert.strictEqual(r.ok, false);
+    assert.match(r.error, /osm, carto/);
+  });
+
+  it('rejects null (the DB column is NOT NULL)', () => {
+    assert.strictEqual(validateTileProvider(null).ok, false);
+  });
+
+  it('rejects non-string values', () => {
+    assert.strictEqual(validateTileProvider(1).ok, false);
+    assert.strictEqual(validateTileProvider(true).ok, false);
+    assert.strictEqual(validateTileProvider({}).ok, false);
+  });
+
+  it('accepts undefined as "field absent from this PUT"', () => {
+    assert.deepStrictEqual(validateTileProvider(undefined), { ok: true });
+  });
+});
+
+describe('validateCartoApiKey', () => {
+  it('accepts a normal string key', () => {
+    assert.deepStrictEqual(validateCartoApiKey('abcd1234'), { ok: true, value: 'abcd1234' });
+  });
+
+  it('trims surrounding whitespace (" " normalizes to "")', () => {
+    assert.deepStrictEqual(validateCartoApiKey('  '), { ok: true, value: '' });
+    assert.deepStrictEqual(validateCartoApiKey(' key '), { ok: true, value: 'key' });
+  });
+
+  it('allows an explicit empty string (stored as given, never rendered)', () => {
+    assert.deepStrictEqual(validateCartoApiKey(''), { ok: true, value: '' });
+  });
+
+  it('rejects keys longer than the 255-character cap', () => {
+    const r = validateCartoApiKey('k'.repeat(MAX_CARTO_API_KEY_LENGTH + 1));
+    assert.strictEqual(r.ok, false);
+    assert.match(r.error, /at most 255 characters/);
+  });
+
+  it('accepts a key exactly at the 255-character cap (boundary)', () => {
+    const long = 'k'.repeat(MAX_CARTO_API_KEY_LENGTH);
+    assert.deepStrictEqual(validateCartoApiKey(long), { ok: true, value: long });
+  });
+
+  it('rejects null (only undefined means "absent"; clearing is the empty string)', () => {
+    assert.strictEqual(validateCartoApiKey(null).ok, false);
+  });
+
+  it('rejects non-string values', () => {
+    assert.strictEqual(validateCartoApiKey(42).ok, false);
+    assert.strictEqual(validateCartoApiKey(['k']).ok, false);
+  });
+});
+
 // ── Settings response shape (REAL settingsView from UserController) ─
 
 describe('settings response shape (real settingsView)', () => {
@@ -228,6 +298,53 @@ describe('settings response shape (real settingsView)', () => {
       Object.prototype.hasOwnProperty.call(res, 'retentionPolicyApplied'),
       false
     );
+  });
+});
+
+// ── Map basemap response shape (migration 021) ─────────────────────────
+
+describe('settings response shape — map tile provider (real settingsView)', () => {
+  it('defaults tileProvider to "osm" when the column is unset (pre-migration row)', () => {
+    const res = settingsView({});
+    assert.strictEqual(res.tileProvider, 'osm');
+  });
+
+  it('passes through tileProvider "carto"', () => {
+    const res = settingsView({ tileProvider: 'carto' });
+    assert.strictEqual(res.tileProvider, 'carto');
+  });
+
+  it('never exposes cartoApiKey while OSM is active', () => {
+    const res = settingsView({ tileProvider: 'osm', cartoApiKey: 'leak-me' });
+    assert.strictEqual(
+      Object.prototype.hasOwnProperty.call(res, 'cartoApiKey'),
+      false,
+      'cartoApiKey must be omitted entirely when tileProvider is osm'
+    );
+  });
+
+  it('never exposes cartoApiKey when the provider is unset (defaults to osm)', () => {
+    const res = settingsView({ cartoApiKey: 'leak-me' });
+    assert.strictEqual(
+      Object.prototype.hasOwnProperty.call(res, 'cartoApiKey'),
+      false
+    );
+  });
+
+  it('exposes the stored cartoApiKey when carto is the active provider', () => {
+    const res = settingsView({ tileProvider: 'carto', cartoApiKey: 'k'.repeat(255) });
+    assert.strictEqual(res.cartoApiKey, 'k'.repeat(255));
+  });
+
+  it('exposes tileProvider "carto" with an empty-string key (frontend declines to render it)', () => {
+    const res = settingsView({ tileProvider: 'carto', cartoApiKey: '' });
+    assert.strictEqual(res.tileProvider, 'carto');
+    assert.strictEqual(res.cartoApiKey, '');
+  });
+
+  it('treats a null key under carto as absent-but-exposed empty string', () => {
+    const res = settingsView({ tileProvider: 'carto', cartoApiKey: null });
+    assert.strictEqual(res.cartoApiKey, '');
   });
 });
 

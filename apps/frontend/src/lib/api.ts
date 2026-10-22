@@ -230,6 +230,10 @@ export async function updateSettings(
     retentionEnabled?: boolean;
     retentionDays?: number;
     analysisRetentionDays?: number | null;
+    /** Admin-only map basemap fields (backend validates + admin-gates). The
+     *  key is stored server-side and only ever read back via GET. */
+    tileProvider?: 'osm' | 'carto';
+    cartoApiKey?: string;
   },
 ): Promise<Settings | undefined> {
   return request<Settings>('/api/settings', {

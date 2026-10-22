@@ -9,10 +9,12 @@ import { describe, it, expect, vi } from 'vitest';
  *
  * 1. `resolveFrameAtCursor` — the GPS map's "cursor on entry" logic
  *    (plan 094 Step 5).
- * 2. The tile-provider model — CARTO → keyless standard-OSM graceful
- *    degradation: provider constants, theme URL resolution, the attribution
- *    swap, the `[data-map-provider]` attribute pairing with the dark-theme
- *    tile-pane filter in src/index.css, and the filter rule source.
+ * 2. The tile-provider model — settings-driven resolution (keyless standard
+ *    OSM is the DEFAULT; keyed CARTO is the opt-in admin upgrade) plus the
+ *    tileerror burst degrade-to-OSM latch: provider constants, theme URL
+ *    resolution, the key= query append, the attribution swap, the
+ *    `[data-map-provider]` attribute pairing with the dark-theme tile-pane
+ *    filter in src/index.css, and the filter rule source.
  */
 vi.mock('leaflet', () => ({
   default: {
@@ -36,7 +38,9 @@ import {
   TILE_PROVIDERS,
   mapProviderAttribute,
   recordTileError,
+  resolveTileTargets,
   tileConfigFor,
+  type AppTileSettings,
   type TileErrorEntry,
 } from '@/components/map/GpsTrackMap';
 import { resolveFrameAtCursor } from '@/components/map/GpsTrackMap';
@@ -95,24 +99,112 @@ describe('resolveFrameAtCursor', () => {
   });
 });
 
-// ── Tile-provider model (CARTO → keyless OSM fallback) ───────────────────
+// ── Tile-provider model (settings-driven: OSM default, CARTO opt-in) ──────
 
-describe('tile providers — carto default with themed urls', () => {
-  it('starts on CARTO with light/dark theme variants and its attribution', () => {
-    expect(TILE_PROVIDERS[0].id).toBe('carto');
-    expect(TILE_PROVIDERS[0].themed).toBe(true);
+describe('tile providers — keyless OSM is the base; CARTO needs the {theme} route', () => {
+  it('OSM is the default base provider (keyless, theme-independent)', () => {
+    expect(TILE_PROVIDERS[0].id).toBe('osm');
+    expect(TILE_PROVIDERS[0].themed).toBe(false);
+
+    const osm = tileConfigFor('osm', 'dark');
+    expect(osm.url).toBe('https://tile.openstreetmap.org/{z}/{x}/{y}.png');
+    expect(osm.attribution).toContain('OpenStreetMap');
+    // No keyless provider should ever carry a CARTO credit on its tiles.
+    expect(osm.attribution).not.toContain('CARTO');
+  });
+
+  it('CARTO is the opt-in provider with light/dark theme variants and attribution', () => {
+    expect(TILE_PROVIDERS[1].id).toBe('carto');
+    expect(TILE_PROVIDERS[1].themed).toBe(true);
 
     const light = tileConfigFor('carto', 'light');
     const dark = tileConfigFor('carto', 'dark');
     expect(light.url).toMatch(/basemaps\.cartocdn\.com\/light_all\//);
     expect(dark.url).toMatch(/basemaps\.cartocdn\.com\/dark_all\//);
     // The {theme} placeholder is always resolved away — Leaflet only knows
-    // {s}/{z}/{x}/{y}/{r}.
+    // {s}/{z}/{x}/{y}/{r}. The BASE template is key-blind: the key
+    // append lives in resolveTileTargets, so no key ever sits in
+    // TILE_PROVIDERS.
     expect(light.url).not.toContain('{theme}');
     expect(dark.url).not.toContain('{theme}');
+    expect(dark.url).not.toContain('key=');
 
     expect(light.attribution).toContain('OpenStreetMap');
     expect(light.attribution).toContain('CARTO');
+  });
+});
+
+// ── resolveTileTargets: THE settings-driven resolution rule ──────────────
+
+describe('resolveTileTargets — settings-driven provider resolution', () => {
+  it('no settings at all (settings fetch failed/loading) resolves OSM, unkeyed', () => {
+    const t = resolveTileTargets(undefined, 'light');
+    expect(t.providerId).toBe('osm');
+    expect(t.url).toBe('https://tile.openstreetmap.org/{z}/{x}/{y}.png');
+    expect(t.attribution).not.toContain('CARTO');
+    expect(t.keyedStamp).toBe(false);
+  });
+
+  it('osm configured → osm always, unkeyed, whatever the stored fields', () => {
+    const s: AppTileSettings = { tileProvider: 'osm', cartoApiKey: undefined };
+    const t = resolveTileTargets(s, 'dark');
+    expect(t.providerId).toBe('osm');
+    expect(t.url).toBe('https://tile.openstreetmap.org/{z}/{x}/{y}.png');
+    expect(t.keyedStamp).toBe(false);
+  });
+
+  it('carto + key → carto with the documented key query param appended', () => {
+    const s: AppTileSettings = { tileProvider: 'carto', cartoApiKey: 'abc123XYZ' };
+    const light = resolveTileTargets(s, 'light');
+    expect(light.providerId).toBe('carto');
+    expect(light.url).toBe(
+      'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png?key=abc123XYZ',
+    );
+    expect(light.keyedStamp).toBe(true);
+    expect(light.attribution).toContain('CARTO');
+
+    const dark = resolveTileTargets(s, 'dark');
+    expect(dark.url).toMatch(/basemaps\.cartocdn\.com\/dark_all\/\{z\}\/\{x\}\/\{y\}\{r\}\.png\?key=abc123XYZ/);
+    expect(dark.keyedStamp).toBe(true);
+  });
+
+  it('carto + blank key resolves OSM (no keyless-carto request, no fallback latch needed)', () => {
+    const blank: AppTileSettings = { tileProvider: 'carto', cartoApiKey: '' };
+    const t = resolveTileTargets(blank, 'light');
+    expect(t.providerId).toBe('osm');
+    expect(t.url).toBe('https://tile.openstreetmap.org/{z}/{x}/{y}.png');
+    expect(t.url).not.toContain('key=');
+    expect(t.keyedStamp).toBe(false);
+
+    // Whitespace churn from any layer never counts as a key.
+    const whitespace: AppTileSettings = { tileProvider: 'carto', cartoApiKey: '   ' };
+    expect(resolveTileTargets(whitespace, 'light').providerId).toBe('osm');
+  });
+
+  it('keyedStamp is true exactly when the URL embeds the admin key (never logged)', () => {
+    const keyed = resolveTileTargets(
+      { tileProvider: 'carto', cartoApiKey: 'k' },
+      'light',
+    );
+    const unkeyed = resolveTileTargets(undefined, 'light');
+    expect(keyed.keyedStamp).toBe(true);
+    expect(unkeyed.keyedStamp).toBe(false);
+    // keyless resolution must not reference any vendor key param at all.
+    expect(unkeyed.url).not.toContain('key=');
+  });
+
+  it('data-map-provider pairs with the EFFECTIVE provider in both directions', () => {
+    // CARTO serving: attribute absent — the .dark invert filter can never
+    // touch its real dark tiles.
+    const carto = resolveTileTargets(
+      { tileProvider: 'carto', cartoApiKey: 'k' },
+      'light',
+    );
+    expect(mapProviderAttribute(carto.providerId)).toBeUndefined();
+    // OSM serving (default, blank-key degrade, or burst fallback): attribute
+    // 'osm' — the filter scopes on it.
+    const osm = resolveTileTargets(undefined, 'light');
+    expect(mapProviderAttribute(osm.providerId)).toBe('osm');
   });
 });
 
@@ -159,21 +251,20 @@ describe('tile providers — tileerror burst flips to the keyless OSM fallback',
   });
 
   it('after a burst, the resolved config is the keyless OSM template', () => {
-    // Ramp every frontend tile URL off cartocdn's API-key wall: the fallback
-    // is standard OpenStreetMap raster — no key, no subdomain template.
-    expect(TILE_PROVIDERS[1].id).toBe('osm');
-    expect(TILE_PROVIDERS[1].themed).toBe(false);
-    const osm = tileConfigFor('osm', 'dark');
-    expect(osm.url).toBe('https://tile.openstreetmap.org/{z}/{x}/{y}.png');
-    expect(osm.attribution).toContain('OpenStreetMap');
+    // The burst-fallback target is the same keyless standard-OSM provider
+    // the settings route resolves to — no key, no subdomain template.
+    const t = resolveTileTargets(undefined, 'dark');
+    expect(t.providerId).toBe('osm');
+    expect(t.url).toBe('https://tile.openstreetmap.org/{z}/{x}/{y}.png');
+    expect(t.attribution).toContain('OpenStreetMap');
     // Provider swap also swaps the attribution notice (TileLayer keyed
     // remount re-creates it) — no stale CARTO credit on OSM tiles.
-    expect(osm.attribution).not.toContain('CARTO');
+    expect(t.attribution).not.toContain('CARTO');
   });
 });
 
 describe('tile providers — data-map-provider attribute / dark filter pairing', () => {
-  it('stamps the attribute ONLY on the osm fallback, in either theme', () => {
+  it('stamps the attribute ONLY on the effective osm provider, in either theme', () => {
     // CARTO: attribute absent → the invert filter in index.css can never
     // apply to the themed CARTO basemap, even in dark mode.
     expect(mapProviderAttribute('carto')).toBeUndefined();
