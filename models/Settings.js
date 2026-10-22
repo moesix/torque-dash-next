@@ -112,6 +112,21 @@ module.exports = (sequelize, DataTypes) => {
             allowNull: true,
             defaultValue: null,
         },
+
+        // ── Map basemap (migration 021) ──────────────────────────
+        // 'osm' is the default keyless provider; 'carto' is the opt-in
+        // upgrade and needs the admin's CARTO API key (the browser embeds it
+        // in tile URLs, so it is surfaced only while 'carto' is active).
+        tileProvider: {
+            type: DataTypes.STRING(16),
+            allowNull: false,
+            defaultValue: 'osm',
+        },
+        cartoApiKey: {
+            type: DataTypes.TEXT,
+            allowNull: true,
+            defaultValue: null,
+        },
     });
 
     // ── In-memory TTL cache ─────────────────────────────────────────────
@@ -145,6 +160,8 @@ module.exports = (sequelize, DataTypes) => {
                 retentionEnabled: false,
                 retentionDays: 365,
                 analysisRetentionDays: null,
+                tileProvider: 'osm',
+                cartoApiKey: null,
             },
         });
         _settingsCache = row;

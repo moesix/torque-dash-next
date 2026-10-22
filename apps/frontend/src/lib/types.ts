@@ -135,6 +135,14 @@ export interface Settings {
   /** App-side prune window for stale Analysis rows (days, 90-365). NULL (or
    *  absent) disables the prune job — analyses are kept indefinitely. */
   analysisRetentionDays?: number | null;
+
+  // ── Map basemap (migration 021) ─────────────────────────────────
+  /** 'osm' is the default keyless provider; 'carto' is the opt-in upgrade
+   *  (admin-set via PUT /api/settings). */
+  tileProvider?: 'osm' | 'carto';
+  /** The admin's CARTO API key. Returned ONLY while tileProvider === 'carto'
+   *  (the browser embeds it in map tile URLs). Never log or console it. */
+  cartoApiKey?: string;
 }
 
 /** Response from POST /api/settings/upload-token (token generation). The full

@@ -422,9 +422,10 @@ configurable TimescaleDB retention policy for automatic cleanup:
   `POST /api/settings/upload-token` are gated by `requireAdmin()` in
   `UserController` (403 for non-admins). Covered by `test/adminGate.test.js`.
   Admin-only config includes the AI provider/LLM config, the upload token,
-  the registration toggle, the timezone, and both retention controls —
+  the registration toggle, the timezone, both retention controls —
   telemetry (`retentionEnabled`/`retentionDays`) and analyses
-  (`analysisRetentionDays`, below).
+  (`analysisRetentionDays`, below) — **plus the map basemap** (below):
+  the `tileProvider` choice and, when CARTO is selected, the `cartoApiKey`.
 - **Settings response** — `GET /api/settings` returns
   `{ disableRegistration, tokenFromEnv }` plus `isAdmin` **only when
   authenticated** (the login/register pages keep the anonymous two-field
@@ -454,6 +455,37 @@ configurable TimescaleDB retention policy for automatic cleanup:
   `exportAnalyses` keyset cursor (`createdAt < c OR (= c AND id < id_c)`)
   deterministic at equal-createdAt batch boundaries (the pair is already unique
   via the id PK, so no pre-existing data can violate it).
+
+**Map basemap (migration 021):**
+
+- **Setting** — `Settings.tileProvider` VARCHAR(16) NOT NULL DEFAULT `'osm'`
+  with a CHECK constraint (`settings_tile_provider_check`) allowing only
+  `'osm'`/`'carto'` (mirroring the Joi enum in `lib/validators.js`),
+  plus `Settings.cartoApiKey` TEXT (nullable). `osm` (Standard
+  OpenStreetMap tiles) is the default **keyless** provider — no credentials
+  anywhere in the tile-URL chain; `carto` is the **opt-in upgrade**
+  (CARTO Voyager / Dark Matter basemaps) and requires the admin's CARTO API
+  key. Migration 021 is idempotent (`ADD COLUMN IF NOT EXISTS`; for the
+  CHECK — Postgres has no `ADD CONSTRAINT IF NOT EXISTS` — the fixedly named
+  constraint is added via the same benign-error swallow pattern
+  `001_log_hypertable.sql` documents for constraint statements, since
+  `scripts/migrate.js`'s naive `;`-splitter can't run a `DO $$` block).
+- **Validation** — `PUT /api/settings` accepts optional `tileProvider`
+  (`Joi.string().valid('osm','carto')` via `validateTileProvider`) and optional
+  `cartoApiKey` (`Joi.string().trim().max(255).allow('')` via
+  `validateCartoApiKey`). Omitted fields are not written (partial PUTs keep
+  the exact prior shape); whitespace-only keys trim to `''` and an explicit `''`
+  is a legal stored value (the SPA declines to render CARTO tiles without a
+  key); `null` is rejected with 400 — clearing a key is the empty string.
+- **Key exposure contract** — `GET /api/settings/full` (authenticated) always
+  carries `tileProvider` (default `'osm'`), but `cartoApiKey` is included
+  **only while `tileProvider === 'carto'`** — the browser must embed the key
+  in tile request URLs, so there is nothing to leak otherwise. It is never
+  present in the anonymous `GET /api/settings` two-field public shape.
+  Both flows are admin sessions (the Settings UI) but the full-settings
+  endpoint serves non-admins too, hence the conditional exposure.
+  Covered by `test/settingsValidation.test.js`,
+  `test/surfaceTightening.test.js`, and `test/adminGate.test.js`.
 
 ---
 
@@ -932,8 +964,8 @@ See `docs/deployment.md` for the full deployment guide.
 | `GET /api/analyses/export` | cookie | export all analyses as a Markdown file download (optional `vehicleId` filter) |
 | `GET /api/analyses/:analysisId` | cookie | get a single analysis by id across vehicles (full response + reasoning) |
 | `GET /api/settings` | none (adds `isAdmin` when authenticated) | public settings for unauthenticated register/login pages (disableRegistration, tokenFromEnv; appends `isAdmin` when authenticated) |
-| `GET /api/settings/full` | cookie | full settings for the settings UI (disableRegistration, hasUploadApiToken, tokenFromEnv, isAdmin, LLM provider/model/endpoint, hasLlmApiKey, llmMaxTokens, llmThinkingMode, llmReasoningEffort, timezoneOffset, retentionEnabled, retentionDays, analysisRetentionDays, vehicle fields) |
-| `PUT /api/settings` | cookie + **admin** | admin-only settings update (disableRegistration, uploadApiToken, llmProvider, llmApiKey, llmModel, llmEndpoint, llmThinkingMode, llmReasoningEffort, llmMaxTokens, retentionEnabled, retentionDays, analysisRetentionDays, vehicle fields, timezoneOffset); 403 for non-admins; response includes `retentionPolicyApplied` |
+| `GET /api/settings/full` | cookie | full settings for the settings UI (disableRegistration, hasUploadApiToken, tokenFromEnv, isAdmin, LLM provider/model/endpoint, hasLlmApiKey, llmMaxTokens, llmThinkingMode, llmReasoningEffort, timezoneOffset, retentionEnabled, retentionDays, analysisRetentionDays, tileProvider (always, default `osm`), cartoApiKey (only when `tileProvider === 'carto'` — the browser embeds it in tile URLs), vehicle fields) |
+| `PUT /api/settings` | cookie + **admin** | admin-only settings update (disableRegistration, uploadApiToken, llmProvider, llmApiKey, llmModel, llmEndpoint, llmThinkingMode, llmReasoningEffort, llmMaxTokens, retentionEnabled, retentionDays, analysisRetentionDays, tileProvider (`osm`\|`carto`), cartoApiKey (string ≤255, trimmed, `''` clears), vehicle fields, timezoneOffset); 403 for non-admins; response includes `retentionPolicyApplied` |
 | `POST /api/settings/upload-token` | cookie + **admin** | admin-only — generate a new upload API token (shown once); 403 for non-admins |
 | `POST /api/settings/test-llm` | cookie | test LLM connection (returns streaming response) |
 | `GET /api/vehicles` | cookie | list all vehicles for authenticated user |
