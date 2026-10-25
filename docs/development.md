@@ -518,32 +518,53 @@ caching and **Node 22** (`node-version: '22'`, matching the `node:22-bookworm-sl
 runtime images). The backend lint step is **enforced** — the previous `continue-on-error: true`
 has been removed, so ESLint failures correctly block the build.
 
+Release commits pushed by the Version Bump workflow do **not** trigger CI —
+they are pushed with `GITHUB_TOKEN`, which deliberately skips downstream
+workflow push-triggers. That is safe because every release is keyed on the
+squash merge of a single-topic PR into `development`, and *that* push is CI
+validated (see §9.5).
+
 ### 9.5 Versioning
 
-A **Version Bump** workflow (`.github/workflows/version-bump.yml`) runs on every
-push to `master`. It:
+Versioning is **dev-led**: a **Version Bump** workflow
+(`.github/workflows/version-bump.yml`) runs on every push to `development`
+(a concurrency group serializes back-to-back squash merges) and produces the
+release there. It:
 
 1. Analyses commits since the last tag using Conventional Commits heuristics to
-   determine the bump type (major / minor / patch).
+   determine the bump type (major / minor / patch). Because single-topic PRs
+   squash-merge into `development`, the squash title itself drives semver — a
+   `feat:` PR lands as a **minor** release on the next bump run.
 2. Runs `npm version <bump> --no-git-tag-version` to update `package.json` and
    `package-lock.json`.
 3. Commits the result as `chore: release v<version>` and creates an annotated
-   tag.
-4. Pushes the commit and tag back to `master`.
+   tag — **on `development`**.
+4. Pushes the commit and tag back to `development`.
 
 The workflow guards against self-triggering: it skips when the triggering
 commit message starts with `chore: release`.
 
+> **Never squash `development → master`.** `master` is a read-only mirror of
+> the released line, fast-forwarded to `development` by the **Mirror master**
+> workflow (`.github/workflows/merge-master.yml`) after every bump — merges
+> into it are automatic, never manual squashes. Squashing dev→master destroys
+> the ancestor relation between the branches, making the mirror permanently
+> non-fast-forwardable: the mirror then fails loudly (`::error`) and opens a
+> reconcile PR, which must be resolved as an ordinary merge — **without
+> squash**. Direct pushes to `master` (including release chores) are likewise
+> forbidden.
+
 > **Chaining to Docker builds:** `docker-publish.yml` does **not** rely on the
 > `GITHUB_TOKEN` push trigger (pushes made with the default token do not fire
-> downstream workflows). Instead it listens for a `workflow_run` event on the
-> **Version Bump** workflow completing with `conclusion == 'success'`, and also
-> triggers on `v*` tag pushes and manual dispatch. On the `workflow_run` path it
-> explicitly checks out `master`, which by then already contains the bumped
-> commit — so `/api/version` (which reads the root `package.json` at request
-> time in `routes/api.js`) always matches the built image.
+> downstream workflows) — no PAT is needed. Instead it listens for a
+> `workflow_run` event on the **Version Bump** workflow completing with
+> `conclusion == 'success'`, and also triggers on `v*` tag pushes and manual
+> dispatch. It checks out the **newest `v*` tag** (full history +
+> `fetch-tags`), so the built images always correspond to the annotated
+> release tag — `/api/version` (which reads the root `package.json` at request
+> time in `routes/api.js`) matches the image.
 
-Docker images built by `docker-publish.yml` now include **semver tags** in
+Docker images built by `docker-publish.yml` include **semver tags** in
 addition to the SHA and `latest` tags — `v<version>` and `<major>.<minor>` for
 pinned deployments.
 
@@ -729,7 +750,9 @@ blockers are resolved and re-reviewed as PASS:
 - **Dev tooling:** ESLint 10 (`eslint.config.js`), husky 9 + lint-staged 17
   (pre-commit lint + syntax check), CI pipeline (`.github/workflows/ci.yml`)
   running on push/PR to `development` (Node 22), and automated semver version bump
-  (`.github/workflows/version-bump.yml`) on push to `master`.
+  (`.github/workflows/version-bump.yml`) on push to `development` — the `chore: release`
+  commit and `v*` tag land on the development line, and `master` is fast-forwarded to
+  it by `.github/workflows/merge-master.yml`.
 - **Session Notes (Plan 040)** — `notes` TEXT column on Sessions, `PATCH /api/sessions/notes/:sessionId` endpoint, auto-save textarea in the replay dashboard. Migration: `008_add_session_notes.sql`.
 - **Multi-Vehicle Support (Plan 041)** — full `Vehicle` model (name, make, model, year, engineCc, isDefault) with userId FK. Sessions gain nullable `vehicleId` FK. CRUD endpoints at `/api/vehicles/*`, session reassign via `PATCH /api/sessions/:sessionId/vehicle`. UploadController resolves Torque's `v` param to a vehicle. Frontend: `VehicleManager` in Settings with add/edit/delete/default, vehicle filter in session list, vehicle column in session table, reassign dialog in replay dashboard. Migration: `009_add_vehicles.sql`.
 - **Improved LLM Analysis Prompt (Plan 042)** — `lib/llmPrompt.js` was rewritten with five exported functions (up from two): `computeSummaryStats()` pre-computes min/max/mean/median per PID with null-safe filtering; `resampleTelemetry()` uniformly resamples across the full timeline replacing head/tail slicing; `buildTelemetryCsv()` outputs token-efficient CSV instead of Markdown tables; `buildContext()` and `buildAnalysisPrompt()` were cleaned up and now include pre-calculated statistical aggregates, four diagnostic guardrails, dynamic engine size injection, and five specific analysis categories. See section 8 for full details.

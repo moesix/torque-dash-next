@@ -1,0 +1,48 @@
+name: Mirror master
+
+on:
+  workflow_run:
+    workflows: ["Version Bump"]
+    types: [completed]
+
+# master is a read-only mirror: fast-forward it to development so raw
+# githubusercontent URLs (README quick start) keep pointing at the
+# released line. Never a history rewrite, never a squash.
+concurrency:
+  group: mirror-master
+  cancel-in-progress: false
+
+jobs:
+  fast-forward:
+    runs-on: ubuntu-latest
+    if: >
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'development'
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: master
+          fetch-depth: 0
+
+      - name: Fast-forward master to development (or open a PR)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git fetch origin development master --no-tags
+          BEFORE=$(git rev-parse HEAD)
+          if git merge --ff-only origin/development; then
+            git push origin master
+            echo "master fast-forwarded: ${BEFORE} -> $(git rev-parse HEAD)"
+          else
+            # Non-FF means master and development have diverged — the very
+            # failure mode this pipeline enforces against (squash-to-master
+            # or direct master pushes). Surface it loudly instead of masking.
+            echo "::error::master cannot be fast-forwarded to development." \
+                 "Never squash dev->master nor push release chores to master."
+            gh pr create --base master --head development \
+              --title "chore: reconcile master (mirror fell behind)" \
+              --body "Automatic mirror failed — resolve manually, then merge WITHOUT squash." \
+              || echo "::error::PR creation failed; reconcile master manually."
+          fi
