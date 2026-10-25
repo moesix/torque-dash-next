@@ -2,18 +2,26 @@ name: Version Bump
 
 on:
   push:
-    branches: [master]
+    branches: [development]
+
+concurrency:
+  group: version-bump-${{ github.ref }}
+  cancel-in-progress: false
 
 # ── INFINITE LOOP PREVENTION ────────────────────────────────────
 # The workflow checks if the triggering commit starts with
-# "chore: release" and skips itself.
+# "chore: release" and skips itself, so its own release commit
+# never re-triggers the bump.
 # ────────────────────────────────────────────────────────────────
 
 # ── GITHUB_TOKEN LIMITATION ─────────────────────────────────────
 # Pushes made with GITHUB_TOKEN do NOT trigger downstream
 # workflows. Instead of using a PAT, docker-publish.yml uses a
 # workflow_run trigger on "Version Bump" completion, which
-# bypasses the GITHUB_TOKEN limitation entirely.
+# bypasses the GITHUB_TOKEN limitation entirely. This also means
+# the release commit pushed here intentionally skips CI (GITHUB_
+# TOKEN push) — a merge-commit squash into `development` is
+# validated by CI before the bump runs.
 # See: https://docs.github.com/en/actions/security-guides/
 #      automatic-token-authentication#using-the-github_token
 # ────────────────────────────────────────────────────────────────
@@ -73,7 +81,7 @@ jobs:
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
             git tag -a "v${NEW_VERSION}" -m "Release v${NEW_VERSION}"
-            git push origin master --follow-tags
+            git push origin development --follow-tags
           else
             # Install deps to keep package-lock.json pristine
             npm ci
@@ -90,7 +98,7 @@ jobs:
             git commit -m "chore: release v${NEW_VERSION}"
             git tag -a "v${NEW_VERSION}" -m "Release v${NEW_VERSION}"
             # Push commit and tag (GITHUB_TOKEN is fine; docker-publish uses workflow_run trigger)
-            git push origin master --follow-tags
+            git push origin development --follow-tags
           fi
 
       # ── Outputs for downstream workflows (docker-publish.yml) ──

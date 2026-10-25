@@ -101,29 +101,37 @@ starts. The backend waits for the database to be healthy.
 
 ## 4. CI/CD Pipeline
 
-The project uses three GitHub Actions workflows that form a continuous delivery
-chain:
+The project uses four GitHub Actions workflows that form a continuous delivery
+chain. Versioning is **dev-led**: releases happen on `development`, and
+`master` is a fast-forward mirror of the released line (kept so raw
+`raw.githubusercontent.com` URLs keep working).
 
 | Workflow | Trigger | Actions |
 |----------|---------|---------|
 | **CI** (`.github/workflows/ci.yml`) | Push / PR to `development` | Runs `npm test` + `npm run lint` (backend), `tsc --noEmit` + `npm run build` (frontend) |
-| **Version Bump** (`.github/workflows/version-bump.yml`) | Push to `master` | Analyses commits since last tag, bumps `package.json` semver, commits and tags as `chore: release v<version>` |
-| **Docker Publish** (`.github/workflows/docker-publish.yml`) | Push to `master` | Builds and pushes `backend` and `frontend` images to GHCR with SHA, `latest`, and semver tags |
+| **Version Bump** (`.github/workflows/version-bump.yml`) | Push to `development` | Analyses commits since last tag, bumps `package.json` semver, commits and tags as `chore: release v<version>` **on `development`** |
+| **Docker Publish** (`.github/workflows/docker-publish.yml`) | `workflow_run` on Version Bump success, `v*` tag push, manual dispatch | Checks out the **newest `v*` tag**, builds and pushes `backend` and `frontend` images to GHCR with SHA, `latest`, and semver tags |
+| **Mirror master** (`.github/workflows/merge-master.yml`) | `workflow_run` on Version Bump success | Fast-forwards `master` to `development` — automatic, never a squash |
 
 ### Workflow chain
 
-1. A PR merges into `development` → **CI** validates the code.
-2. `development` is merged into `master` → **Version Bump** increments the
-   semver, commits, and pushes a new tag.
-3. The version bump push to `master` triggers **Docker Publish**, which builds
-   images and pushes them to GHCR with the new version tags.
+1. A single-topic PR squash-merges into `development` → **CI** validates the
+   pushed squash (this push is what drives the release).
+2. On that same push, **Version Bump** increments the semver, commits
+   `chore: release v<version>` and pushes an annotated tag — all on
+   `development`. The release commit itself skips CI (it is pushed with
+   `GITHUB_TOKEN`, and CI has already passed on the squash that preceded it).
+3. **Docker Publish** fires on Version Bump success and builds images from
+   the newest `v*` tag, pushing them to GHCR with the new semver tags.
+4. **Mirror master** fast-forwards `master` to the release commit so raw
+   file URLs keep pointing at the released line. Manual `development →
+   master` syncs are no longer needed; **never squash dev→master** — it
+   would break the fast-forward mirror.
 
-> **PAT requirement:** pushes made with the default `GITHUB_TOKEN` do **not**
-> trigger downstream workflows. The version-bump workflow includes instructions
-> to configure a personal access token (`secrets.GH_PAT`) with `contents:write`
-> scope so the version bump commit triggers the Docker publish workflow. Without
-> this, the version bump and Docker build are decoupled and must be triggered
-> manually.
+> **Decoupled publish:** pushes made with the default `GITHUB_TOKEN` do **not**
+> trigger downstream workflows. No PAT is needed: Docker Publish and Mirror
+> master listen for the `workflow_run` event on **Version Bump** completing
+> with `conclusion == 'success'` instead.
 
 ---
 
