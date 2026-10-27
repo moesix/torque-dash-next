@@ -314,6 +314,14 @@ export default function AnalysisHistory() {
                         {full.response}
                       </Markdown>
                     </div>
+                    {full.tokenUsage?.aborted === true && (
+                      <p
+                        className="mt-2 text-sm leading-relaxed text-amber-600 dark:text-amber-400"
+                        role="alert"
+                      >
+                        Analysis was cut off before completion.
+                      </p>
+                    )}
                   </div>
                 )}
               </details>

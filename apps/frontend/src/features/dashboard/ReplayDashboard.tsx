@@ -581,7 +581,7 @@ export default function ReplayDashboard() {
           scrollToAnalysis();
           analysisPanelRef.current?.triggerAnalysis();
         }}
-        busy={false}
+        busy={analysisPanelRef.current?.isAnalyzing() ?? false}
       />
 
       {/* Vehicle reassign dialog */}

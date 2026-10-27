@@ -762,13 +762,29 @@ describe('buildDataQualityNote', () => {
 // instance or DB connection is built.
 const preworkQueryCalls = [];
 let preworkQueryHandler = async () => [];
+// Mutable fixtures for the analyzeSession lifecycle suite (plans/012). The
+// controller is required once below, so its models deps must be programmable
+// from here rather than re-stubbed per test.
+const lifecycle = {
+  session: null,
+  sample: [],
+  created: [],
+};
 const modelsPath = require.resolve('../models');
 require.cache[modelsPath] = {
   id: modelsPath,
   filename: modelsPath,
   loaded: true,
   exports: {
-    Session: {}, Log: {}, Analysis: {}, Vehicle: {}, Settings: {},
+    Session: { findOne: async () => lifecycle.session },
+    Log: { findAll: async () => lifecycle.sample },
+    Analysis: { create: async (row) => { lifecycle.created.push(row); return row; } },
+    Vehicle: {},
+    Settings: {
+      getSingleton: async () => ({
+        llmProvider: 'openai', llmModel: 'test-model', llmApiKeyEnc: 'encrypted-key',
+      }),
+    },
     sequelize: {
       query: async (sql, opts) => {
         preworkQueryCalls.push({ sql, opts });
@@ -776,6 +792,27 @@ require.cache[modelsPath] = {
       },
       QueryTypes: { SELECT: 'SELECT' },
     },
+  },
+};
+
+// The controller destructures analyze/streamEvents at require time, so the
+// provider module must be stubbed before that require. The real providers were
+// already loaded above (line ~36) for their own suites and keep working there.
+const llmProvidersPath = require.resolve('../lib/llmProviders');
+const llmStubs = {
+  analyze: async () => { throw new Error('llm analyze stub not installed'); },
+  streamEvents: async function* () {
+    yield* []; // never reached: callers install a real stream generator
+    throw new Error('llm streamEvents stub not installed');
+  },
+};
+require.cache[llmProvidersPath] = {
+  id: llmProvidersPath,
+  filename: llmProvidersPath,
+  loaded: true,
+  exports: {
+    analyze: (...args) => llmStubs.analyze(...args),
+    streamEvents: (...args) => llmStubs.streamEvents(...args),
   },
 };
 
@@ -1003,6 +1040,199 @@ describe('analysis prework: no full-session scans remain', () => {
 
   test('ranked, session-scoped selector present', () => {
     assert.match(src, /FROM "Logs"\s+WHERE "sessionId" = :sessionId\s*\)\s*ranked/);
+  });
+});
+
+// ── Analysis lifecycle (plans/012) ─────────────────────────────────────────
+
+describe('analyzeSession single-flight guard', () => {
+  /** res double: records SSE frames + terminal state. */
+  function makeRes() {
+    const res = {
+      statusCode: 200,
+      headersSent: false,
+      headers: {},
+      chunks: [],
+      ended: false,
+      setHeader(key, value) { res.headers[key] = value; },
+      flushHeaders() { res.headersSent = true; },
+      status(code) { res.statusCode = code; return res; },
+      json(body) { res.body = body; return res; },
+      write(chunk) { res.chunks.push(String(chunk)); return true; },
+      end() { res.ended = true; },
+    };
+    return res;
+  }
+
+  /** req double: `emitClose` drives the controller's `req.on('close')`. */
+  function makeReq(sessionId) {
+    const listeners = {};
+    return {
+      user: { id: 1 },
+      params: { sessionId: String(sessionId) },
+      query: {},
+      body: {},
+      on(event, cb) { listeners[event] = cb; },
+      emitClose() { if (listeners.close) listeners.close(); },
+    };
+  }
+
+  function installSession(sessionId) {
+    lifecycle.session = {
+      id: sessionId,
+      firstTimestamp: new Date('2026-10-01T10:00:00.000Z'),
+      lastTimestamp: new Date('2026-10-01T10:01:00.000Z'),
+      toJSON: () => ({ id: sessionId, name: 'Lifecycle session', vehicleId: null }),
+    };
+    lifecycle.sample = [{
+      timestamp: new Date('2026-10-01T10:00:00.000Z'),
+      lat: 1, lon: 2, engine_rpm: 900, vehicle_speed: 0, values: {},
+    }];
+  }
+
+  function installQueries() {
+    preworkQueryHandler = async (sql) => {
+      if (sql.includes('jsonb_object_keys')) return [[]];
+      if (sql.includes('MIN("timestamp")')) {
+        return [[{
+          startTs: new Date('2026-10-01T10:00:00.000Z'),
+          endTs: new Date('2026-10-01T10:01:00.000Z'),
+        }]];
+      }
+      if (sql.includes('COUNT(*)')) return [[{ cnt: '1' }]];
+      return [];
+    };
+  }
+
+  function installAnalyze() {
+    llmStubs.analyze = async () => ({
+      response: {},
+      abortController: { abort() {} },
+      timeoutGuard: { bump() {}, clear() {} },
+    });
+  }
+
+  function reset(sessionId) {
+    lifecycle.created = [];
+    installSession(sessionId);
+    installQueries();
+    installAnalyze();
+  }
+
+  test('second concurrent request for the same session → 409, first still completes', async () => {
+    reset(101);
+    let release;
+    const gate = new Promise((resolve) => { release = resolve; });
+    llmStubs.streamEvents = async function* () {
+      yield { type: 'content', text: 'a' };
+      await gate;
+      yield { type: 'content', text: 'b' };
+    };
+
+    const res1 = makeRes();
+    const first = AnalysisController.analyzeSession(makeReq(101), res1);
+    // The guard is registered synchronously, before the first await.
+    const res2 = makeRes();
+    await AnalysisController.analyzeSession(makeReq(101), res2);
+
+    assert.strictEqual(res2.statusCode, 409);
+    assert.deepStrictEqual(res2.body, { error: 'Analysis already running for this session.' });
+
+    release();
+    await first;
+
+    assert.ok(res1.chunks.includes('data: [DONE]\n\n'), res1.chunks.join(''));
+    assert.strictEqual(lifecycle.created.length, 1);
+    assert.strictEqual(lifecycle.created[0].response, 'ab');
+  });
+
+  test('guard clears after a thrown stream → same session can retry', async () => {
+    reset(102);
+    llmStubs.streamEvents = async function* () {
+      yield { type: 'content', text: 'partial' };
+      throw new Error('provider stream died');
+    };
+
+    await AnalysisController.analyzeSession(makeReq(102), makeRes());
+    // The failed run persisted its partial output and released the slot.
+    assert.strictEqual(lifecycle.created.length, 1);
+
+    llmStubs.streamEvents = async function* () {
+      yield { type: 'content', text: 'retry ok' };
+    };
+    const retryRes = makeRes();
+    await AnalysisController.analyzeSession(makeReq(102), retryRes);
+
+    assert.notStrictEqual(retryRes.statusCode, 409);
+    assert.ok(retryRes.chunks.includes('data: [DONE]\n\n'), retryRes.chunks.join(''));
+    assert.strictEqual(lifecycle.created.length, 2);
+    assert.strictEqual(lifecycle.created[1].response, 'retry ok');
+    assert.strictEqual(lifecycle.created[1].tokenUsage, null);
+  });
+
+  test('client close mid-stream persists the partial answer with tokenUsage.aborted', async () => {
+    reset(103);
+    const req = makeReq(103);
+    llmStubs.streamEvents = async function* () {
+      yield { type: 'content', text: 'partial answer' };
+      req.emitClose();
+      throw new Error('aborted');
+    };
+
+    await AnalysisController.analyzeSession(req, makeRes());
+
+    assert.strictEqual(lifecycle.created.length, 1);
+    const row = lifecycle.created[0];
+    assert.strictEqual(row.response, 'partial answer');
+    assert.strictEqual(row.reasoning, null);
+    assert.deepStrictEqual(row.tokenUsage, {
+      aborted: true,
+      responseChars: 'partial answer'.length,
+      reasoningChars: 0,
+    });
+  });
+
+  test('client close before any chunk persists no row', async () => {
+    reset(104);
+    const req = makeReq(104);
+    llmStubs.streamEvents = async function* () {
+      yield* []; // no chunk ever arrives before the disconnect
+      req.emitClose();
+      throw new Error('aborted');
+    };
+
+    const res = makeRes();
+    await AnalysisController.analyzeSession(req, res);
+
+    assert.strictEqual(lifecycle.created.length, 0);
+    assert.ok(!res.chunks.includes('data: [DONE]\n\n'));
+  });
+});
+
+describe('exportAnalyses backpressure (plans/012)', () => {
+  const src = fs.readFileSync(
+    path.join(__dirname, '..', 'controllers', 'AnalysisController.js'), 'utf8'
+  );
+
+  test('row writes await drain via the exportCsv idiom (exactly one listener site)', () => {
+    // Only the helper may register the listener: one site means every chunk
+    // goes through the same guard, and a second ad-hoc write would fail here.
+    const drains = [...src.matchAll(/res\.once\('drain'/g)];
+    assert.strictEqual(drains.length, 1, src.match(/.*res\.once\('drain'.*/)?.[0]);
+    assert.match(
+      src,
+      /if \(!res\.write\(chunk\)\) \{\s*await new Promise\(resolve => res\.once\('drain', resolve\)\);/,
+    );
+  });
+
+  test('the export loop no longer writes rows unchecked', () => {
+    const exportBody = src.slice(src.indexOf('static async exportAnalyses'));
+    const loop = exportBody.slice(
+      exportBody.indexOf('for (const a of batch)'),
+      exportBody.indexOf('if (batch.length < BATCH)')
+    );
+    assert.ok(!/res\.write\(/.test(loop), loop);
+    assert.match(loop, /await writeChunk\(/);
   });
 });
 

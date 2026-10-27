@@ -12,6 +12,11 @@ const { classifyAnalysisError } = require('../lib/analysisErrors');
 const { isInt4Id } = require('../lib/validators');
 const { requireAdmin } = require('./UserController');
 
+// Sessions with an analysis stream currently running. Single-container compose
+// assumption (same as ingestBuffer): one process owns the set, so a duplicate
+// request is rejected instead of paying the provider twice.
+const inFlight = new Set();
+
 class AnalysisController {
   // Gap/peak stats in one round trip (plans/014). Reference semantics:
   // detectBackfillGaps() in lib/llmPrompt.js. That function reports every
@@ -102,10 +107,28 @@ class AnalysisController {
   }
 
   static async analyzeSession(req, res) {
+    // Per-session single-flight guard (plans/012). validateIds('sessionId') on
+    // the route already rejects non-int4 ids; this local coercion keeps the
+    // controller safe for direct callers without changing the 400 ordering.
+    const sid = Number(req.params.sessionId);
+    if (!Number.isInteger(sid)) return res.status(400).json({ error: 'Invalid sessionId.' });
+    if (inFlight.has(sid)) {
+      return res.status(409).json({ error: 'Analysis already running for this session.' });
+    }
+    inFlight.add(sid);
+
     // Hoisted to function scope (NOT the try block): the catch below reads it,
     // and a block-scoped declaration inside try would be lexically invisible
     // there — every error reaching the catch would throw ReferenceError.
     let clientDisconnected = false;
+    // Same hoisting reason for the stream accumulators: the abort path persists
+    // whatever arrived before the client went away.
+    let fullResponse = '';
+    let fullReasoning = '';
+    let finishReason = null;
+    // Row identity for the abort path — unusable from the catch when declared
+    // inside the try with session/settings/prompt.
+    let persistContext = null;
     try {
       // 1. Ownership check — eager-loads the assigned Vehicle profile so the AI
       // prompt can describe the right car (plans/118); engineCc is not among the
@@ -207,6 +230,15 @@ class AnalysisController {
         settings, sample, pidKeys, dataQualityNote
       );
 
+      // Row identity for the abort path (built before the first byte streams).
+      persistContext = {
+        sessionId: session.id,
+        userId: req.user.id,
+        provider: settings.llmProvider,
+        model: settings.llmModel || 'default',
+        prompt,
+      };
+
       // 6. Set up SSE headers
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
@@ -221,10 +253,6 @@ class AnalysisController {
       const { response: llmRes, abortController: llmAbort, timeoutGuard } =
         await analyze(prompt, settings);
       clientGone.signal.addEventListener('abort', () => llmAbort.abort(), { once: true });
-
-      let fullResponse = '';
-      let fullReasoning = '';
-      let finishReason = null;
 
       // Body-phase timeout is inactivity-based: every streamed event
       // (reasoning included) re-arms it; always disarm when the stream
@@ -268,6 +296,8 @@ class AnalysisController {
       } catch (cacheErr) {
         console.error('[AnalysisController] Failed to cache analysis:', cacheErr.message);
       }
+      // The row exists now; a later socket error must not write a second one.
+      persistContext = null;
 
       if (budgetExhausted) {
         console.warn(`[AnalysisController] analyzeSession: token budget exhausted (finish=${finishReason}, reasoning=${fullReasoning.length} chars, response=${fullResponse.length} chars)`);
@@ -276,6 +306,27 @@ class AnalysisController {
       res.write('data: [DONE]\n\n');
       res.end();
     } catch (err) {
+      // Client gone or provider failed mid-stream: the tokens were already
+      // billed, so keep the partial answer with an `aborted` marker instead of
+      // discarding it. An empty stream (nothing billed) writes no row.
+      const partial = fullResponse || fullReasoning;
+      if (persistContext && partial) {
+        try {
+          await Analysis.create({
+            ...persistContext,
+            response: partial,
+            reasoning: fullReasoning || null,
+            tokenUsage: {
+              ...(finishReason ? { finishReason } : {}),
+              aborted: true,
+              responseChars: fullResponse.length,
+              reasoningChars: fullReasoning.length,
+            },
+          });
+        } catch (cacheErr) {
+          console.error('[AnalysisController] Failed to cache aborted analysis:', cacheErr.message);
+        }
+      }
       if (clientDisconnected) {
         console.log('[AnalysisController] analyzeSession aborted: client disconnected');
         return;
@@ -288,6 +339,8 @@ class AnalysisController {
         res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
         res.end();
       }
+    } finally {
+      inFlight.delete(sid);
     }
   }
 
@@ -379,7 +432,7 @@ class AnalysisController {
     try {
       const analysis = await Analysis.findOne({
         where: { id: req.params.analysisId, userId: req.user.id },
-        attributes: ['id', 'sessionId', 'provider', 'model', 'response', 'reasoning', 'createdAt'],
+        attributes: ['id', 'sessionId', 'provider', 'model', 'response', 'reasoning', 'tokenUsage', 'createdAt'],
       });
       if (!analysis) return res.status(404).json({ error: 'Analysis not found' });
       res.json(analysis);
@@ -402,7 +455,15 @@ class AnalysisController {
 
       res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
       res.setHeader('Content-Disposition', 'attachment; filename="analyses.md"');
-      res.write('# AI Analysis History\n\n');
+      // Backpressure: await the socket before queueing the next chunk, the same
+      // idiom as SessionController.exportCsv. Without it a large history piles
+      // every TEXT body into the process's write buffer at once.
+      const writeChunk = async (chunk) => {
+        if (!res.write(chunk)) {
+          await new Promise(resolve => res.once('drain', resolve));
+        }
+      };
+      await writeChunk('# AI Analysis History\n\n');
 
       // Stream rows in createdAt-DESC keyset batches (id DESC tiebreak) so at
       // most one full batch of TEXT bodies is in memory per fetch — the same
@@ -430,15 +491,15 @@ class AnalysisController {
         if (batch.length === 0) break;
 
         for (const a of batch) {
-          res.write(`## ${a.Session?.name || 'Unknown Session'} — ${a.createdAt.toISOString().split('T')[0]}\n\n`);
-          res.write(`**Provider:** ${a.provider} | **Model:** ${a.model}\n\n`);
-          res.write(a.response + '\n\n');
+          await writeChunk(`## ${a.Session?.name || 'Unknown Session'} — ${a.createdAt.toISOString().split('T')[0]}\n\n`);
+          await writeChunk(`**Provider:** ${a.provider} | **Model:** ${a.model}\n\n`);
+          await writeChunk(a.response + '\n\n');
           if (a.reasoning) {
-            res.write('<details><summary>Reasoning</summary>\n\n');
-            res.write(a.reasoning + '\n\n');
-            res.write('</details>\n\n');
+            await writeChunk('<details><summary>Reasoning</summary>\n\n');
+            await writeChunk(a.reasoning + '\n\n');
+            await writeChunk('</details>\n\n');
           }
-          res.write('---\n\n');
+          await writeChunk('---\n\n');
         }
 
         if (batch.length < BATCH) break;

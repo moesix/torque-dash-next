@@ -27,9 +27,11 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { createRef } from 'react';
 import { usePlaybackStore } from '@/app/playbackStore';
 import AnalysisPanel from '@/components/ai/AnalysisPanel';
+import type { AnalysisPanelHandle } from '@/components/ai/AnalysisPanel';
 import { ApiError } from '@/lib/api';
 import type { AnalysisPreview } from '@/lib/types';
 
@@ -178,5 +180,64 @@ describe('AnalysisPanel delete flow (jsdom)', () => {
     await waitFor(() => {
       expect(deleteButton().disabled).toBe(false);
     });
+  });
+});
+
+/**
+ * Single-flight guard (plans/012). `analyzing` is the only state; the imperative
+ * handle exposes `isAnalyzing()` so the dashboard's confirm dialog can disable
+ * its buttons while a run is live. A second trigger before the first finishes
+ * must not start a second (paid) analysis.
+ */
+describe('AnalysisPanel analysis single-flight (jsdom)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    apiMocks.getFullSettings.mockResolvedValue({ hasLlmProvider: true });
+    apiMocks.listAnalyses.mockResolvedValue([]);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('ignores a second trigger while the first analysis is in flight', async () => {
+    // Never settles: the first analysis stays in flight for the whole test.
+    apiMocks.analyzeSession.mockReturnValue(new Promise(() => {}));
+
+    const ref = createRef<AnalysisPanelHandle>();
+    render(<AnalysisPanel sessionId="s1" ref={ref} />);
+    await waitFor(() => expect(ref.current).not.toBeNull());
+
+    act(() => {
+      ref.current?.triggerAnalysis();
+    });
+    await waitFor(() => expect(ref.current?.isAnalyzing()).toBe(true));
+
+    act(() => {
+      ref.current?.triggerAnalysis();
+    });
+
+    expect(apiMocks.analyzeSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('re-enables after a failed start and allows a retry', async () => {
+    apiMocks.analyzeSession.mockRejectedValue(new Error('provider unavailable'));
+
+    const ref = createRef<AnalysisPanelHandle>();
+    render(<AnalysisPanel sessionId="s1" ref={ref} />);
+    await waitFor(() => expect(ref.current).not.toBeNull());
+
+    act(() => {
+      ref.current?.triggerAnalysis();
+    });
+
+    expect(await screen.findByText('provider unavailable')).toBeTruthy();
+    await waitFor(() => expect(ref.current?.isAnalyzing()).toBe(false));
+
+    act(() => {
+      ref.current?.triggerAnalysis();
+    });
+
+    await waitFor(() => expect(apiMocks.analyzeSession).toHaveBeenCalledTimes(2));
   });
 });
