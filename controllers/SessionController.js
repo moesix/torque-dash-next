@@ -8,6 +8,15 @@ const { nanoid } = require('nanoid');
 const { discoverPidKeys, invalidatePidKeys } = require('../lib/pidRegistry');
 const ingestBuffer = require('../services/ingestBuffer');
 const { evictSession } = require('./UploadController');
+// Summary aggregate lives in one place (plans/017) — re-exported below for
+// existing consumers/tests.
+const {
+    aggregateSummaries,
+    decorateWithSummaries,
+    recomputeSummary,
+} = require('../services/sessionSummaries');
+// CSV helpers extracted to lib/ (plans/017) — re-exported below.
+const { formatDuration, sanitizeFilename, csvEscape } = require('../lib/csvExport');
 const {
   renameSchema,
   notesSchema,
@@ -489,109 +498,6 @@ class SessionController {
     }
 }
 
-// Aggregated session summary (start/end time + max speed/RPM) computed with a
-// single GROUP BY query — replaces the legacy per-session summary that issued
-// two Log.findAll() queries per session and loaded every log row. Uses the real
-// Log columns (vehicle_speed, engine_rpm) confirmed against models/Log.js.
-async function aggregateSummaries(sessionIds) {
-    const map = new Map();
-    if (!sessionIds || sessionIds.length === 0) return map;
-
-    // Read denormalized columns from Session first
-    const sessions = await Session.findAll({
-        where: { id: sessionIds },
-        attributes: ['id', 'firstTimestamp', 'lastTimestamp', 'maxRpm', 'maxSpeed'],
-        raw: true,
-    });
-
-    const missingIds = [];
-    for (const s of sessions) {
-        if (s.firstTimestamp != null) {
-            map.set(s.id, {
-                start: s.firstTimestamp,
-                end: s.lastTimestamp,
-                maxSpeed: s.maxSpeed,
-                maxRpm: s.maxRpm,
-            });
-        } else {
-            missingIds.push(s.id);
-        }
-    }
-
-    // Fallback to Log aggregate for sessions with NULL denormalized columns
-    if (missingIds.length > 0) {
-        const rows = await Log.findAll({
-            where: { sessionId: missingIds },
-            attributes: [
-                'sessionId',
-                [sequelize.fn('min', sequelize.col('timestamp')), 'start'],
-                [sequelize.fn('max', sequelize.col('timestamp')), 'end'],
-                [sequelize.fn('max', sequelize.col('vehicle_speed')), 'maxSpeed'],
-                [sequelize.fn('max', sequelize.col('engine_rpm')), 'maxRpm']
-            ],
-            group: ['sessionId']
-        });
-
-        for (const row of rows) {
-            const d = row.dataValues;
-            map.set(d.sessionId, {
-                start: d.start || null,
-                end: d.end || null,
-                maxSpeed: (d.maxSpeed != null) ? d.maxSpeed : null,
-                maxRpm: (d.maxRpm != null) ? d.maxRpm : null
-            });
-        }
-    }
-    return map;
-}
-
-// Format a [start, end] pair into a compact human-readable duration string.
-// Returns null when either bound is missing.
-// Produces e.g. "1h 2m 5s" or "3d 1h 0m 5s", trimming leading zero units.
-function formatDuration(start, end) {
-    if (!start || !end) return null;
-    const ms = new Date(end).getTime() - new Date(start).getTime();
-    if (ms < 0) return null;
-    const totalSeconds = Math.floor(ms / 1000);
-    const d = Math.floor(totalSeconds / 86400);
-    const h = Math.floor((totalSeconds % 86400) / 3600);
-    const m = Math.floor((totalSeconds % 3600) / 60);
-    const s = totalSeconds % 60;
-    const parts = [];
-    if (d > 0) parts.push(`${d}d`);
-    if (h > 0) parts.push(`${h}h`);
-    if (m > 0) parts.push(`${m}m`);
-    parts.push(`${s}s`);
-    return parts.join(' ');
-}
-
-// Strip path-dangerous chars from session names for Content-Disposition filenames,
-// replace spaces with hyphens, and cap at 100 characters.
-function sanitizeFilename(name) {
-    return (String(name)
-        .replace(/[^a-zA-Z0-9_\- ]/g, '')
-        .replace(/\s+/g, '-')
-        .slice(0, 100)
-    ) || 'session';
-}
-
-// Escape a single CSV cell value: null/undefined -> empty string; if the value
-// contains commas, double-quotes, newlines, carriage returns, or tabs, wrap it
-// in double-quotes and escape embedded quotes as "".  Also prefix cells starting
-// with +, -, =, @, or | with a single quote to prevent Excel formula injection.
-function csvEscape(val) {
-    if (val === null || val === undefined) return '';
-    let str = String(val);
-    // Excel formula injection guard: prefix dangerous leading chars
-    if (/^[+\-=@|]/.test(str)) {
-        str = "'" + str;
-    }
-    if (/[,"\n\r\t]/.test(str)) {
-        return '"' + str.replace(/"/g, '""') + '"';
-    }
-    return str;
-}
-
 module.exports = SessionController;
 module.exports.formatDuration = formatDuration;
 module.exports.sanitizeFilename = sanitizeFilename;
@@ -612,43 +518,4 @@ async function drainIngest() {
 
 async function loadOwnedSession(sessionId, userId) {
     return Session.findOne({ where: { id: sessionId, userId } });
-}
-
-function decorateWithSummaries(session, summary) {
-    const out = session.toJSON ? session.toJSON() : session;
-    out.startDate = summary.start || null;
-    out.endDate = summary.end || null;
-    out.duration = formatDuration(summary.start, summary.end);
-    out.maxSpeed = summary.maxSpeed ?? null;
-    out.maxRpm = summary.maxRpm ?? null;
-    return out;
-}
-
-async function recomputeSummary(sessionId) {
-    if (!sessionId) return;
-    // Drop the cached PID key-set BEFORE reading the aggregate: cut/filter can
-    // remove every row, in which case the cache is the most wrong (it still
-    // carries PIDs that no longer exist) and the early return below would skip
-    // invalidation entirely.
-    invalidatePidKeys(sessionId);
-    const log = await Log.findOne({
-        where: { sessionId },
-        attributes: [
-            [sequelize.fn('min', sequelize.col('timestamp')), 'start'],
-            [sequelize.fn('max', sequelize.col('timestamp')), 'end'],
-            [sequelize.fn('max', sequelize.col('vehicle_speed')), 'maxSpeed'],
-            [sequelize.fn('max', sequelize.col('engine_rpm')), 'maxRpm'],
-        ],
-        raw: true,
-    });
-    if (!log) return;
-    await Session.update(
-        {
-            firstTimestamp: log.start || null,
-            lastTimestamp: log.end || null,
-            maxRpm: log.maxRpm ?? null,
-            maxSpeed: log.maxSpeed ?? null,
-        },
-        { where: { id: sessionId } }
-    );
 }
