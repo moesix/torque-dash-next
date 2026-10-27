@@ -26,13 +26,13 @@
  * this module inherited), so a module-load-time binding would go stale.
  */
 
-const { invalidatePidKeys } = require('../lib/pidRegistry');
 const { formatDuration } = require('../lib/csvExport');
 
 function models() {
     return require('../models');
 }
 
+// internal — exported for tests
 /** The shared min/max aggregate: the SQL column set is defined exactly once. */
 function aggregateAttributes() {
     const { sequelize } = models();
@@ -44,6 +44,7 @@ function aggregateAttributes() {
     ];
 }
 
+// internal — exported for tests
 /**
  * Normalize one aggregate row (raw object, Sequelize instance, or a test
  * double's `{ dataValues }`) into the summary shape. Keeps the historical
@@ -59,6 +60,7 @@ function summaryFromAggregateRow(row) {
     };
 }
 
+// internal — exported for tests
 /**
  * Batched Log aggregate for the list/single-read fallback: one GROUP BY query
  * for every id whose denormalized columns are missing. Returns a Map of
@@ -81,6 +83,7 @@ async function loadAggregateRanges(sessionIds) {
     return map;
 }
 
+// internal — exported for tests
 /** Single-session Log aggregate for `recomputeSummary` (raw: true, as before). */
 async function loadAggregateRange(sessionId) {
     const { Log } = models();
@@ -154,6 +157,11 @@ async function recomputeSummary(sessionId) {
     // remove every row, in which case the cache is the most wrong (it still
     // carries PIDs that no longer exist) and the early return below would skip
     // invalidation entirely.
+    //
+    // Resolved lazily, like the models above: some suites stub `lib/pidRegistry`
+    // in require.cache with a partial surface (`discoverPidKeys` only), so a
+    // load-time destructure would bind `undefined` for the whole process.
+    const { invalidatePidKeys } = require('../lib/pidRegistry');
     invalidatePidKeys(sessionId);
     const log = await loadAggregateRange(sessionId);
     if (!log) return;

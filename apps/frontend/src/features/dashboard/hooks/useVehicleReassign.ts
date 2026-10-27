@@ -20,7 +20,7 @@ export function useVehicleReassign(sessionId: string | undefined) {
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [reassignError, setReassignError] = useState<string | null>(null);
 
-  /** Load the vehicle list, then open the dialog (closed on load failure). */
+  /** Load the vehicle list, then open the dialog (stays closed on load failure). */
   const openReassign = useCallback(async () => {
     if (!sessionId) return;
     setReassignError(null);

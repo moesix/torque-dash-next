@@ -89,8 +89,10 @@ describe('aggregateSummaries — reads from Session columns', () => {
       { id: 's1', firstTimestamp: '2026-01-01T00:00:00Z', lastTimestamp: '2026-01-01T01:00:00Z', maxRpm: 5000, maxSpeed: 120 },
       { id: 's2', firstTimestamp: '2026-02-01T00:00:00Z', lastTimestamp: '2026-02-01T02:00:00Z', maxRpm: 6000, maxSpeed: 150 },
     ];
+    let logCalls = 0;
     const mockModels = makeMockModels({
       Session: { findAll: async () => mockSessions },
+      Log: { findAll: async () => { logCalls++; return []; } },
     });
 
     const { restore } = loadWithMocks(mockModels);
@@ -104,6 +106,8 @@ describe('aggregateSummaries — reads from Session columns', () => {
       assert.strictEqual(map.get('s1').maxSpeed, 120);
       assert.strictEqual(map.get('s2').maxRpm, 6000);
       assert.strictEqual(map.get('s2').maxSpeed, 150);
+      assert.strictEqual(logCalls, 0,
+        'fast path must not scan Logs when every denormalized column is present');
     } finally {
       restore();
     }
