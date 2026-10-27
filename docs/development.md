@@ -604,6 +604,12 @@ coverage artifact. `migrate-checks`, `integration-checks`, and
 previous `continue-on-error: true` has been removed, so ESLint failures
 correctly block the build.
 
+Dependency updates are automated by `.github/dependabot.yml`: weekly npm
+updates for both packages (minor/patch grouped into one PR, limit 5) and
+weekly `github-actions` updates. Workflow actions stay on major version tags
+(dependabot bumps them with release notes); full-SHA pinning is deliberately
+deferred to a future hardening pass.
+
 Release commits pushed by the Version Bump workflow do **not** trigger CI —
 they are pushed with `GITHUB_TOKEN`, which deliberately skips downstream
 workflow push-triggers. That is safe because every release is keyed on the
