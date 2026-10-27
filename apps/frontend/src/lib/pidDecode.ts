@@ -214,23 +214,45 @@ export function getAvailableSeries(frames: TelemetryFrame[]): SeriesSource[] {
 }
 
 /**
+ * Parse every frame timestamp to epoch ms ONCE, preserving the exact
+ * `new Date(timestamp).getTime()` semantics the series helpers always had.
+ * Callers that derive several series from the same frames array (dashboard
+ * `allSeriesData`, overlay chart options, GPS map) pass the result as the
+ * optional `epochs` argument instead of paying one Date construction per
+ * frame per series.
+ */
+export function precomputeEpochs(frames: TelemetryFrame[]): number[] {
+  const epochs = new Array<number>(frames.length);
+  for (let i = 0; i < frames.length; i++) {
+    epochs[i] = new Date(frames[i].timestamp).getTime();
+  }
+  return epochs;
+}
+
+/**
  * Extract time-series data for a single source from frames.
  *
  * For column sources reads the dedicated field; for pid sources reads
  * from `values` via `coerceScalar`.  Returns `[timestamp_ms, value | null]`
  * pairs suitable for ECharts.
+ *
+ * `epochs` (optional) must be `precomputeEpochs(frames)` for the SAME frames
+ * array, in the same order; it is computed internally when omitted so every
+ * existing call-site stays valid.
  */
 export function getSeriesData(
   frames: TelemetryFrame[],
   source: SeriesSource,
+  epochs?: number[],
 ): [number, number | null][] {
   const data: [number, number | null][] = new Array(frames.length);
+  const ts = epochs ?? precomputeEpochs(frames);
 
   if (source.source === 'column') {
     for (let i = 0; i < frames.length; i++) {
       const f = frames[i];
       data[i] = [
-        new Date(f.timestamp).getTime(),
+        ts[i],
         // Use coerceScalar to safely cast the TelemetryFrame field value
         coerceScalar(f[source.field]),
       ];
@@ -241,7 +263,7 @@ export function getSeriesData(
       const f = frames[i];
       const raw = f.values?.[source.pid];
       data[i] = [
-        new Date(f.timestamp).getTime(),
+        ts[i],
         coerceScalar(raw),
       ];
     }
@@ -285,21 +307,27 @@ export function computeStats(
  * Both STFT (k6) and LTFT (k7) must be non-null for a result; if either
  * is null at a timestamp, that point is null.
  *
+ * `epochs` (optional) must be `precomputeEpochs(frames)` for the SAME frames
+ * array, in the same order; it is computed internally when omitted.
+ *
  * Returns [timestamp_ms, value | null][] suitable for ECharts.
  */
-export function computeTotalTrim(frames: TelemetryFrame[]): [number, number | null][] {
+export function computeTotalTrim(
+  frames: TelemetryFrame[],
+  epochs?: number[],
+): [number, number | null][] {
   const data: [number, number | null][] = new Array(frames.length);
+  const ts = epochs ?? precomputeEpochs(frames);
 
   for (let i = 0; i < frames.length; i++) {
     const f = frames[i];
-    const ts = new Date(f.timestamp).getTime();
     const stft = coerceScalar(f.values?.k6);
     const ltft = coerceScalar(f.values?.k7);
 
     if (stft !== null && ltft !== null) {
-      data[i] = [ts, stft + ltft];
+      data[i] = [ts[i], stft + ltft];
     } else {
-      data[i] = [ts, null];
+      data[i] = [ts[i], null];
     }
   }
 

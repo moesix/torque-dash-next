@@ -44,6 +44,10 @@ import {
   type TileErrorEntry,
 } from '@/components/map/GpsTrackMap';
 import { resolveFrameAtCursor } from '@/components/map/GpsTrackMap';
+import {
+  decimatePositions,
+  splitAntimeridian,
+} from '@/components/map/GpsTrackMap';
 import type { TelemetryFrame } from '@/lib/types';
 
 function frame(
@@ -96,6 +100,62 @@ describe('resolveFrameAtCursor', () => {
       frame('2026-01-01T00:00:10.000Z', null, null),
     ];
     expect(resolveFrameAtCursor(gpsless, at('2026-01-01T00:00:05.000Z'))).toBeNull();
+  });
+});
+
+// ── Static route geometry (decimation + antimeridian split) ──────────────
+
+describe('decimatePositions', () => {
+  const route = (n: number): [number, number][] =>
+    Array.from({ length: n }, (_, i) => [10 + i * 0.0001, 7 + i * 0.0001]);
+
+  it('bounds the vertex count at `max` and keeps both endpoints exact', () => {
+    const positions = route(10_000);
+    const decimated = decimatePositions(positions, 4_000);
+    expect(decimated.length).toBeLessThanOrEqual(4_000);
+    // Endpoints are the recording's real start/end — never sliced off.
+    expect(decimated[0]).toEqual(positions[0]);
+    expect(decimated[decimated.length - 1]).toEqual(positions[positions.length - 1]);
+    // Order is preserved (no reordering/shuffling of the track).
+    expect(decimated[1][0]).toBeGreaterThan(decimated[0][0]);
+  });
+
+  it('applies the default 4000-vertex budget', () => {
+    expect(decimatePositions(route(100_000)).length).toBe(4_000);
+  });
+
+  it('leaves an already-small route untouched and handles empties', () => {
+    const positions = route(3);
+    expect(decimatePositions(positions, 4_000)).toBe(positions);
+    expect(decimatePositions([])).toEqual([]);
+  });
+});
+
+describe('splitAntimeridian', () => {
+  it('splits a dateline crossing into two segments', () => {
+    const segments = splitAntimeridian([
+      [10, 179.9],
+      [10, -179.9],
+    ]);
+    expect(segments).toHaveLength(2);
+    expect(segments[0]).toEqual([[10, 179.9]]);
+    expect(segments[1]).toEqual([[10, -179.9]]);
+  });
+
+  it('keeps an ordinary (non-dateline) track in ONE segment', () => {
+    const positions: [number, number][] = [
+      [45.0, 7.0],
+      [45.1, 7.1],
+      [45.2, 6.9],
+    ];
+    const segments = splitAntimeridian(positions);
+    expect(segments).toHaveLength(1);
+    expect(segments[0]).toEqual(positions);
+  });
+
+  it('returns no segments for an empty route and one for a single point', () => {
+    expect(splitAntimeridian([])).toEqual([]);
+    expect(splitAntimeridian([[1, 2]])).toEqual([[[1, 2]]]);
   });
 });
 

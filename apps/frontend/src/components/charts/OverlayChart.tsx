@@ -53,6 +53,9 @@ interface Props {
   frames: TelemetryFrame[];
   /** The currently-selected sources to plot. */
   sources: SeriesSource[];
+  /** `precomputeEpochs(frames)` for this exact frames array — shared so the
+   *  options rebuild never re-parses frame timestamps per series. */
+  epochs: number[];
   cursorTime: number | null;
   onCursorMove: (tsMs: number | null) => void;
   /** Additional CSS classes merged with computed height class. */
@@ -64,6 +67,7 @@ interface Props {
 export default function OverlayChart({
   frames,
   sources,
+  epochs,
   cursorTime,
   onCursorMove,
   className,
@@ -231,7 +235,7 @@ export default function OverlayChart({
       // Find yAxisIndex for this unit in the full frequency list
       const yi = unitFrequency.findIndex(([unit]) => unit === u);
       const color = SERIES_COLORS[i % SERIES_COLORS.length];
-      const data = getSeriesData(frames, src);
+      const data = getSeriesData(frames, src, epochs);
 
       return {
         name: src.short,
@@ -299,7 +303,7 @@ export default function OverlayChart({
       },
       { notMerge: true },
     );
-  }, [sources, frames, unitGroups, themeVersion]);
+  }, [sources, frames, epochs, unitGroups, themeVersion]);
 
   // ── Cursor markLine effect (merge mode — does NOT re-render data) ──
   useEffect(() => {

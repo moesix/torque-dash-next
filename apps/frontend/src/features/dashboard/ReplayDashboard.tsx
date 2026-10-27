@@ -31,7 +31,7 @@ import OverlayChart from '@/components/charts/OverlayChart';
 import DiagnosticPanels from '@/components/charts/DiagnosticPanels';
 import PidTogglePanel from '@/components/telemetry/PidTogglePanel';
 import DecodedMetricsTable from '@/components/telemetry/DecodedMetricsTable';
-import { getAvailableSeries, getSeriesData, coerceScalar } from '@/lib/pidDecode';
+import { getAvailableSeries, getSeriesData, precomputeEpochs, coerceScalar } from '@/lib/pidDecode';
 import { useSessionTelemetry } from './hooks/useSessionTelemetry';
 import { usePidSelection } from './hooks/usePidSelection';
 import NotesCard from '@/components/NotesCard';
@@ -128,15 +128,20 @@ export default function ReplayDashboard() {
     handleReset,
   } = usePidSelection(available, id);
 
+  // Parse frame timestamps ONCE per frames load: shared by the all-series
+  // build below and by every OverlayChart (options rebuild on source/theme
+  // change would otherwise re-parse every frame per selected series).
+  const epochs = useMemo(() => precomputeEpochs(frames), [frames]);
+
   // Build series data for ALL available sources (used by DecodedMetricsTable).
   // Memoized — no re-scan of frames on re-render.
   const allSeriesData = useMemo(() => {
     const map = new Map<string, [number, number | null][]>();
     for (const src of available) {
-      map.set(src.pid, getSeriesData(frames, src));
+      map.set(src.pid, getSeriesData(frames, src, epochs));
     }
     return map;
-  }, [frames, available]);
+  }, [frames, available, epochs]);
 
   // ── Handlers ───────────────────────────────────────────────────────
   const handleCursorMove = useCallback(
@@ -520,6 +525,7 @@ export default function ReplayDashboard() {
           <OverlayChartWithCursor
             frames={frames}
             sources={selectedSources}
+            epochs={epochs}
             onCursorMove={handleCursorMove}
           />
         </div>
@@ -546,6 +552,7 @@ export default function ReplayDashboard() {
             <OverlayChartWithCursor
               frames={frames}
               sources={selectedSources}
+              epochs={epochs}
               onCursorMove={handleCursorMove}
               className="h-full"
             />
