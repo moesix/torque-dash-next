@@ -499,6 +499,11 @@ The config (`node` env, `es2022`, `eslint:recommended`) ignores
 - `no-console` is **off** — the server intentionally uses `console.log`/`console.error`.
 - `no-empty` is `error` — empty catch blocks are forbidden.
 
+**Formatting** is enforced by `.editorconfig` only (4-space indent, LF, trimmed
+trailing whitespace). Prettier is deliberately deferred: the structural guards
+(`checkMirrors`, ESLint) cover correctness, and adopting a formatter would churn
+blame across the tree for no behavioral gain.
+
 ### 9.2 Pre-commit Hooks (husky + lint-staged)
 
 The project uses **husky 9** and **lint-staged 17** to run lint and syntax checks
