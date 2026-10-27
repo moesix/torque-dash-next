@@ -102,29 +102,6 @@ describe('Error contract — backend response shapes', () => {
     assert.strictEqual(calls.body.error, 'Session not found');
   });
 
-  // ── Session getOneShared ───────────────────────────────────────
-
-  test('session getOneShared returns 404 JSON when user not found', async () => {
-    // Mock models: User.findOne returns null → triggers 404
-    const req = makeStubReq({ params: { shareId: 'bad-share', sessionId: 's1' } });
-    const { res, calls } = makeStubRes();
-    await SessionController.getOneShared(req, res);
-    assert.strictEqual(calls.statusCode, 404);
-    assert.ok(typeof calls.body === 'object' && calls.body !== null, 'body should be an object');
-    assert.strictEqual(typeof calls.body.error, 'string', 'body.error should be a string');
-  });
-
-  // ── Session getAllShared ───────────────────────────────────────
-
-  test('session getAllShared returns 404 JSON when user not found', async () => {
-    const req = makeStubReq({ params: { shareId: 'bad-share' } });
-    const { res, calls } = makeStubRes();
-    await SessionController.getAllShared(req, res);
-    assert.strictEqual(calls.statusCode, 404);
-    assert.ok(typeof calls.body === 'object' && calls.body !== null, 'body should be an object');
-    assert.strictEqual(typeof calls.body.error, 'string', 'body.error should be a string');
-  });
-
   // ── Session addLocation ────────────────────────────────────────
 
   test('session addLocation returns 404 JSON when session not found', async () => {

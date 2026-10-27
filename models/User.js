@@ -13,10 +13,6 @@ module.exports = (sequelize, DataTypes) => {
             type: DataTypes.STRING,
             allowNull: false
         },
-        shareId: {
-            type: DataTypes.STRING,
-            unique: true
-        },
         tokenVersion: {
             type: DataTypes.INTEGER,
             defaultValue: 0,

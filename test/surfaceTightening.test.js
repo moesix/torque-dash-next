@@ -65,9 +65,37 @@ require.cache[modelsPath] = {
   exports: mockModels,
 };
 
-// ── Imports ─────────────────────────────────────────────────────────
-const SessionController = require('../controllers/SessionController');
-const { safeSharedSession } = SessionController;
+// ── Mock heavy LLM-analysis dependencies so requiring routes/api.js
+// (which pulls in AnalysisController) stays side-effect free.
+const llmProvidersPath = require.resolve('../lib/llmProviders');
+require.cache[llmProvidersPath] = {
+  id: llmProvidersPath,
+  filename: llmProvidersPath,
+  loaded: true,
+  exports: {
+    analyze: async () => ({ response: { body: '' }, abortController: { abort: () => {} } }),
+    streamEvents: async function* () {},
+  },
+};
+const llmPromptPath = require.resolve('../lib/llmPrompt');
+require.cache[llmPromptPath] = {
+  id: llmPromptPath,
+  filename: llmPromptPath,
+  loaded: true,
+  exports: {
+    buildAnalysisPrompt: () => 'test prompt',
+    formatSessionDuration: () => '',
+    detectBackfillGaps: () => [],
+    buildDataQualityNote: () => '',
+  },
+};
+const pidRegistryPath = require.resolve('../lib/pidRegistry');
+require.cache[pidRegistryPath] = {
+  id: pidRegistryPath,
+  filename: pidRegistryPath,
+  loaded: true,
+  exports: { discoverPidKeys: async () => ({}) },
+};
 
 // ── Helpers ─────────────────────────────────────────────────────────
 function makeStubRes() {
@@ -217,72 +245,6 @@ describe('GET /api/settings/full — authenticated full settings', () => {
   });
 });
 
-// ── 3. safeSharedSession excludes sensitive fields ──────────────────
-
-describe('safeSharedSession — field projection', () => {
-  it('excludes notes, sessionId, vehicleId, vehicleName, userId, updatedAt', () => {
-    const session = {
-      id: 42,
-      name: 'Test Drive',
-      startLocation: 'Home',
-      endLocation: 'Office',
-      createdAt: '2026-01-01T00:00:00Z',
-      updatedAt: '2026-01-01T01:00:00Z',
-      // Fields that should be excluded:
-      notes: 'Personal notes here',
-      sessionId: 'nanoid_abc123',
-      vehicleId: 7,
-      vehicleName: 'My Car',
-      userId: 99,
-    };
-    const summary = {
-      start: '2026-01-01T00:00:00Z',
-      end: '2026-01-01T01:00:00Z',
-      maxSpeed: 120,
-      maxRpm: 5500,
-    };
-
-    const result = safeSharedSession(session, summary);
-
-    // Should include
-    assert.strictEqual(result.id, 42);
-    assert.strictEqual(result.name, 'Test Drive');
-    assert.strictEqual(result.startLocation, 'Home');
-    assert.strictEqual(result.endLocation, 'Office');
-    assert.strictEqual(result.startDate, '2026-01-01T00:00:00Z');
-    assert.strictEqual(result.endDate, '2026-01-01T01:00:00Z');
-    assert.strictEqual(result.maxSpeed, 120);
-    assert.strictEqual(result.maxRpm, 5500);
-    assert.strictEqual(result.createdAt, '2026-01-01T00:00:00Z');
-
-    // Should NOT include
-    assert.strictEqual(result.notes, undefined);
-    assert.strictEqual(result.sessionId, undefined);
-    assert.strictEqual(result.vehicleId, undefined);
-    assert.strictEqual(result.vehicleName, undefined);
-    assert.strictEqual(result.userId, undefined);
-    assert.strictEqual(result.updatedAt, undefined);
-  });
-
-  it('returns null for missing summary fields', () => {
-    const session = {
-      id: 1,
-      name: 'Short Trip',
-      startLocation: null,
-      endLocation: null,
-      createdAt: '2026-01-01T00:00:00Z',
-    };
-
-    const result = safeSharedSession(session, {});
-
-    assert.strictEqual(result.startDate, null);
-    assert.strictEqual(result.endDate, null);
-    assert.strictEqual(result.duration, null);
-    assert.strictEqual(result.maxSpeed, null);
-    assert.strictEqual(result.maxRpm, null);
-  });
-});
-
 // ── 4. Registration returns generic message on duplicate email ──────
 
 describe('POST /api/users/register — enumeration prevention', () => {
@@ -311,210 +273,51 @@ describe('POST /api/users/register — enumeration prevention', () => {
   });
 });
 
-// ── 5. Shared endpoints project safe fields through the controller ──
+// ── 5. Share-link surface removed — its routes are gone ──────────────
 
-// A session row carrying every field a share link must never leak.
-function makeSensitiveSession(overrides = {}) {
-  return {
-    id: 42,
-    sessionId: 'nanoid_secret_abc',
-    name: 'Weekend Trip',
-    notes: 'private annotation — must never be published',
-    vehicleId: 7,
-    vehicleName: 'My Car',
-    userId: 99,
-    createdAt: '2026-02-02T10:00:00Z',
-    updatedAt: '2026-02-02T11:00:00Z',
-    ...overrides,
-  };
+// Boot the real api router on an ephemeral port with the models above, then
+// let unmatched requests fall through to the same JSON 404 the app installs.
+// The response body is consumed inside the helper so every call site gets the
+// same { status, body } shape and the server can be closed safely.
+function withApiServer(handler) {
+  const express = require('express');
+  const apiRouter = require('../routes/api');
+  return new Promise((resolve, reject) => {
+    const app = express();
+    app.use(express.json());
+    app.use('/api', apiRouter);
+    app.use((req, res) => res.status(404).json({ error: 'Not found' }));
+    const server = app.listen(0, '127.0.0.1', async () => {
+      const { port } = server.address();
+      try {
+        const out = await handler(`http://127.0.0.1:${port}`);
+        server.close(() => resolve(out));
+      } catch (err) {
+        server.close(() => reject(err));
+      }
+    });
+  });
 }
 
-describe('getOneShared — safe projection through the controller', () => {
-  it('response body contains NO notes/sessionId/vehicleId/vehicleName', async () => {
-    const originalUserFindOne = mockModels.User.findOne;
-    const originalSessionFindOne = mockModels.Session.findOne;
-    mockModels.User.findOne = async () => ({ id: 99, shareId: 'share_abc' });
-    mockModels.Session.findOne = async () =>
-      makeSensitiveSession({ id: 42 });
+describe('removed share-link endpoints — route-gone regression', () => {
+  it('GET /api/sessions/shared/<anything> returns the app-level JSON 404', async () => {
+    const { status, body } = await withApiServer(async (base) => {
+      const res = await fetch(`${base}/api/sessions/shared/anything`);
+      return { status: res.status, body: await res.json() };
+    });
 
-    try {
-      const req = { params: { shareId: 'share_abc', sessionId: '42' }, query: {} };
-      const { res, calls } = makeStubRes();
-
-      await SessionController.getOneShared(req, res);
-
-      assert.ok(calls.body, 'expected a JSON body (200 path)');
-      for (const forbidden of ['notes', 'sessionId', 'vehicleId', 'vehicleName']) {
-        assert.strictEqual(calls.body[forbidden], undefined,
-          `shared response leaked "${forbidden}"`);
-      }
-      // Safe fields still present
-      assert.strictEqual(calls.body.id, 42);
-      assert.strictEqual(calls.body.name, 'Weekend Trip');
-      assert.strictEqual(calls.body.startDate, null); // empty summary → null, not missing
-    } finally {
-      mockModels.User.findOne = originalUserFindOne;
-      mockModels.Session.findOne = originalSessionFindOne;
-    }
-  });
-});
-
-describe('getAllShared — pagination envelope and projection', () => {
-  // findAll is called by BOTH the handler (page fetch) and the internal
-  // aggregateSummaries helper (denormalized-column lookup). Distinguish them:
-  // the handler's call carries `limit`; aggregateSummaries carries `attributes`.
-  function installFindAllCapture(fakeSessions) {
-    const allCalls = [];
-    const original = mockModels.Session.findAll;
-    mockModels.Session.findAll = async (opts) => {
-      allCalls.push(opts);
-      if (opts && opts.attributes) return []; // aggregate lookup → no denormalized rows
-      return fakeSessions;
-    };
-    return { allCalls, restore: () => { mockModels.Session.findAll = original; } };
-  }
-
-  it('passes limit/offset/order to findAll and returns the {sessions,total,limit,offset} envelope', async () => {
-    const originalUserFindOne = mockModels.User.findOne;
-    const originalSessionCount = mockModels.Session.count;
-    mockModels.User.findOne = async () => ({ id: 99, shareId: 'share_abc' });
-    mockModels.Session.count = async () => 42; // total ≫ page size
-    const fakeSessions = [
-      makeSensitiveSession({ id: 1, name: 'Trip 1' }),
-      makeSensitiveSession({ id: 2, name: 'Trip 2' }),
-      makeSensitiveSession({ id: 3, name: 'Trip 3' }),
-    ];
-    const { allCalls, restore } = installFindAllCapture(fakeSessions);
-
-    try {
-      const req = { params: { shareId: 'share_abc' }, query: {} }; // no params → defaults
-      const { res, calls } = makeStubRes();
-
-      await SessionController.getAllShared(req, res);
-
-      // findAll captured options include default limit/offset + DESC order
-      const handlerCalls = allCalls.filter(o => o && o.limit !== undefined);
-      assert.strictEqual(handlerCalls.length, 1, 'handler should issue exactly one page-fetch findAll');
-      const opts = handlerCalls[0];
-      assert.strictEqual(opts.limit, 50, 'default limit must be 50');
-      assert.strictEqual(opts.offset, 0, 'default offset must be 0');
-      assert.deepStrictEqual(opts.order, [['createdAt', 'DESC']]);
-      assert.deepStrictEqual(opts.where, { userId: 99 });
-
-      // Envelope shape — not a bare array
-      assert.deepStrictEqual(
-        Object.keys(calls.body).sort(),
-        ['limit', 'offset', 'sessions', 'total'],
-        `unexpected envelope keys: ${Object.keys(calls.body).join(', ')}`
-      );
-      assert.strictEqual(calls.body.total, 42);
-      assert.strictEqual(calls.body.limit, 50);
-      assert.strictEqual(calls.body.offset, 0);
-      assert.strictEqual(calls.body.sessions.length, 3);
-
-      // Each element lacks private fields
-      for (const s of calls.body.sessions) {
-        assert.strictEqual(s.notes, undefined);
-        assert.strictEqual(s.sessionId, undefined);
-        assert.strictEqual(s.vehicleId, undefined);
-        assert.strictEqual(s.vehicleName, undefined);
-        assert.strictEqual(s.userId, undefined);
-      }
-
-      // Public short-lived cache header
-      assert.strictEqual(calls.headers['Cache-Control'], 'public, max-age=30');
-
-      // aggregateSummaries receives ONLY the fetched page's ids (≤ limit),
-      // never the owner's full history (total=42).
-      const aggCall = allCalls.find(o => o && o.where && o.where.id !== undefined);
-      assert.ok(aggCall, 'aggregateSummaries should query Session by the page id list');
-      assert.ok(Array.isArray(aggCall.where.id), 'aggregate where.id should be an id array');
-      assert.ok(aggCall.where.id.length <= opts.limit,
-        `aggregate got ${aggCall.where.id.length} ids; must be ≤ limit (${opts.limit})`);
-      assert.deepStrictEqual([...aggCall.where.id].sort((a, b) => a - b), [1, 2, 3]);
-    } finally {
-      mockModels.User.findOne = originalUserFindOne;
-      mockModels.Session.count = originalSessionCount;
-      restore();
-    }
+    assert.strictEqual(status, 404);
+    assert.deepStrictEqual(body, { error: 'Not found' });
   });
 
-  it('honors ?limit=&offset= and caps limit at 200', async () => {
-    const originalUserFindOne = mockModels.User.findOne;
-    const originalSessionCount = mockModels.Session.count;
-    mockModels.User.findOne = async () => ({ id: 99 });
-    mockModels.Session.count = async () => 1000;
-    const { allCalls, restore } = installFindAllCapture([]);
+  it('PATCH /api/users/shareid returns the app-level JSON 404', async () => {
+    const { status, body } = await withApiServer(async (base) => {
+      const res = await fetch(`${base}/api/users/shareid`, { method: 'PATCH' });
+      return { status: res.status, body: await res.json() };
+    });
 
-    try {
-      // Explicit valid values pass through
-      let { res, calls } = makeStubRes();
-      await SessionController.getAllShared(
-        { params: { shareId: 'share_abc' }, query: { limit: '10', offset: '5' } }, res);
-      let handlerOpts = allCalls.filter(o => o && o.limit !== undefined).pop();
-      assert.strictEqual(handlerOpts.limit, 10);
-      assert.strictEqual(handlerOpts.offset, 5);
-      assert.strictEqual(calls.body.limit, 10);
-      assert.strictEqual(calls.body.offset, 5);
-
-      // Cap at 200; garbage offset falls back to 0
-      allCalls.length = 0;
-      ({ res, calls } = makeStubRes());
-      await SessionController.getAllShared(
-        { params: { shareId: 'share_abc' }, query: { limit: '999999', offset: 'oops' } }, res);
-      handlerOpts = allCalls.filter(o => o && o.limit !== undefined).pop();
-      assert.strictEqual(handlerOpts.limit, 200, 'limit must cap at 200');
-      assert.strictEqual(handlerOpts.offset, 0, 'non-numeric offset must fall back to 0');
-      assert.strictEqual(calls.body.limit, 200);
-
-      // Garbage limit falls back to the 50 default
-      allCalls.length = 0;
-      ({ res } = makeStubRes());
-      await SessionController.getAllShared(
-        { params: { shareId: 'share_abc' }, query: { limit: 'banana' } }, res);
-      handlerOpts = allCalls.filter(o => o && o.limit !== undefined).pop();
-      assert.strictEqual(handlerOpts.limit, 50);
-    } finally {
-      mockModels.User.findOne = originalUserFindOne;
-      mockModels.Session.count = originalSessionCount;
-      restore();
-    }
-  });
-});
-
-describe('shared endpoints — unknown shareId', () => {
-  it('returns JSON 404 without querying sessions (negative-cache sanity)', async () => {
-    const originalUserFindOne = mockModels.User.findOne;
-    let sessionQueried = false;
-    const originalSessionFindAll = mockModels.Session.findAll;
-    const originalSessionFindOne = mockModels.Session.findOne;
-    mockModels.User.findOne = async () => null;
-    mockModels.Session.findAll = async () => { sessionQueried = true; return []; };
-    mockModels.Session.findOne = async () => { sessionQueried = true; return {}; };
-
-    try {
-      // getAllShared
-      let req = { params: { shareId: 'unknown-share-id' }, query: {} };
-      let { res, calls } = makeStubRes();
-      await SessionController.getAllShared(req, res);
-      assert.strictEqual(calls.statusCode, 404);
-      assert.deepStrictEqual(calls.body, { error: 'User not found' });
-
-      // getOneShared
-      req = { params: { shareId: 'unknown-share-id', sessionId: '42' }, query: {} };
-      ({ res, calls } = makeStubRes());
-      await SessionController.getOneShared(req, res);
-      assert.strictEqual(calls.statusCode, 404);
-      assert.deepStrictEqual(calls.body, { error: 'User not found' });
-
-      // Neither handler may touch Session before the user check passes
-      assert.strictEqual(sessionQueried, false,
-        'session queries ran despite unknown shareId');
-    } finally {
-      mockModels.User.findOne = originalUserFindOne;
-      mockModels.Session.findAll = originalSessionFindAll;
-      mockModels.Session.findOne = originalSessionFindOne;
-    }
+    assert.strictEqual(status, 404);
+    assert.deepStrictEqual(body, { error: 'Not found' });
   });
 });
 

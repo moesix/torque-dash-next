@@ -110,68 +110,6 @@ class SessionController {
             res.status(500).json({ error: 'Internal server error' });
         }
     }
-    static async getOneShared(req, res) {
-        try{
-            // Check if user exists
-            let user = await User.findOne({
-                where: { shareId: req.params.shareId }
-            });
-            if(!user) return res.status(404).json({ error: 'User not found' });
-
-            // Get session for user (no eager Log load)
-            let session = await Session.findOne({
-                where: { 
-                    userId: user.id,
-                    id: req.params.sessionId
-                }
-            });
-            if(!session) return res.status(404).json({ error: 'Session not found' });
-
-            // Single aggregate query for start/end + max speed/RPM.
-            const summaries = await aggregateSummaries([session.id]);
-            const s = summaries.get(session.id) || {};
-            const out = safeSharedSession(session, s);
-            res.json(out);
-        }
-        catch (err) {
-            console.error('[SessionController]', err);
-            res.status(500).json({ error: 'Internal server error' });
-        }
-    }
-    static async getAllShared(req, res) {
-        try {
-            // Check if user exists
-            let user = await User.findOne({
-                where: { shareId: req.params.shareId }
-            });
-            if(!user) return res.status(404).json({ error: 'User not found' });
-
-            // One page of sessions (defaults: 50 per page, newest first).
-            const limit = Math.min(parseInt(req.query.limit, 10) || 50, 200);
-            const offset = parseInt(req.query.offset, 10) || 0;
-
-            const where = { userId: user.id };
-            let sessions = await Session.findAll({
-                where,
-                limit,
-                offset,
-                order: [['createdAt', 'DESC']],
-            });
-            const total = await Session.count({ where });
-
-            // Aggregate ONLY the fetched page's ids — never the owner's full history.
-            const summaries = await aggregateSummaries(sessions.map(s => s.id));
-            const out = sessions.map(session =>
-                safeSharedSession(session, summaries.get(session.id) || {})
-            );
-            res.set('Cache-Control', 'public, max-age=30');
-            res.json({ sessions: out, total, limit, offset });
-        }
-        catch (err) {
-            console.error('[SessionController]', err);
-            res.status(500).json({ error: 'Internal server error' });
-        }
-    }
     static async rename(req, res) {
         try {
             const { error: valErr } = renameSchema.validate(req.body);
@@ -623,7 +561,6 @@ module.exports.loadOwnedSession = loadOwnedSession;
 module.exports.decorateWithSummaries = decorateWithSummaries;
 module.exports.aggregateSummaries = aggregateSummaries;
 module.exports.recomputeSummary = recomputeSummary;
-module.exports.safeSharedSession = safeSharedSession;
 
 // ── Shared helpers ──────────────────────────────────────────────────────────
 
@@ -663,18 +600,4 @@ async function recomputeSummary(sessionId) {
         },
         { where: { id: sessionId } }
     );
-}
-
-function safeSharedSession(session, summary) {
-    const EXCLUDE = new Set(['notes', 'sessionId', 'vehicleId', 'vehicleName', 'userId', 'updatedAt']);
-    const out = {};
-    for (const [key, value] of Object.entries(session)) {
-        if (!EXCLUDE.has(key)) out[key] = value;
-    }
-    out.startDate = summary.start || null;
-    out.endDate = summary.end || null;
-    out.duration = formatDuration(summary.start, summary.end);
-    out.maxSpeed = summary.maxSpeed ?? null;
-    out.maxRpm = summary.maxRpm ?? null;
-    return out;
 }

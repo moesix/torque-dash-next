@@ -1,9 +1,9 @@
 'use strict';
 
 // Plan 110: behavioral coverage for TelemetryController.range over the real
-// router (routes/api.js) — ownership scoping, ?shareId shared access, the
-// 400/404/401 contract and the limit clamp. Mirrors the analysisJournal
-// HTTP-level harness: real router, mocked models via require.cache.
+// router (routes/api.js) — ownership scoping, the 400/404/401 contract and the
+// limit clamp. Mirrors the analysisJournal HTTP-level harness: real router,
+// mocked models via require.cache.
 
 // Set dummy env vars BEFORE any module loading so config.js doesn't throw.
 process.env.DATABASE_URL = process.env.DATABASE_URL || 'postgres://x:x@localhost/x';
@@ -110,11 +110,11 @@ try {
 // ── Helpers ─────────────────────────────────────────────────────────
 
 // Per-test DB behavior. Returns recorders for the calls the controller made.
-function installDbMocks({ userByShareId = null, ownedSession = null, logRows = [] } = {}) {
+function installDbMocks({ ownedSession = null, logRows = [] } = {}) {
     const calls = { userFindOne: [], sessionFindOne: [], logFindAll: [] };
     mockModels.User.findOne = async (opts) => {
         calls.userFindOne.push(opts);
-        return userByShareId;
+        return null;
     };
     mockModels.Session.findOne = async (opts) => {
         calls.sessionFindOne.push(opts);
@@ -292,44 +292,56 @@ describe('GET /api/sessions/:id/telemetry — TelemetryController.range', { skip
         assert.strictEqual(calls.logFindAll.length, 0, 'no log query on ownership miss');
     });
 
-    test('?shareId resolves the session under the SHARED user, not the caller', async () => {
-        // Caller is user 1; the shareId maps to user 2 who owns session 7.
-        const calls = installDbMocks({
-            userByShareId: { id: 2 },
-            ownedSession: { id: 7 },
-            logRows: [{ id: 9, timestamp: FROM }],
-        });
+    test('stray obsolete share parameter is ignored — own data only', async () => {
+        // Older clients still append this query key; it is not part of the
+        // schema (allowUnknown), so it must not change the ownership scope.
+        // stale client param — must be ignored
+        const rows = [{ id: 11, timestamp: FROM, lon: 1.5, lat: 2.5, values: {} }];
+        const calls = installDbMocks({ ownedSession: OWNED_SESSION, logRows: rows });
 
         const { status, body } = await withServer({ id: 1 }, (base) =>
-            getJson(base, TELEMETRY_PATH(`${qsFromTo()}&shareId=shared-public-id`))
+            getJson(base, TELEMETRY_PATH(`${qsFromTo()}&shareId=whatever`))
         );
 
         assert.strictEqual(status, 200);
         assert.strictEqual(body.length, 1);
-        // The session lookup must be scoped to the SHARE OWNER (2), never the caller.
-        assert.deepStrictEqual(calls.userFindOne[0], { where: { shareId: 'shared-public-id' } });
-        assert.deepStrictEqual(calls.sessionFindOne[0].where, { userId: 2, id: '7' });
+        assert.strictEqual(body[0].id, 11);
+        // Scoped to the caller; no share-owner lookup happens.
+        assert.deepStrictEqual(calls.sessionFindOne[0].where, { userId: 1, id: '7' });
         assert.strictEqual(calls.logFindAll[0].where.sessionId, 7);
+        assert.strictEqual(calls.userFindOne.length, 0, 'stray param must not trigger a user lookup');
     });
 
-    test('?shareId for an unknown share owner returns 404 without a session lookup', async () => {
-        const calls = installDbMocks({ userByShareId: null });
-
-        const { status, body } = await withServer({ id: 1 }, (base) =>
-            getJson(base, TELEMETRY_PATH(`${qsFromTo()}&shareId=nope`))
-        );
-
-        assert.strictEqual(status, 404);
-        assert.deepStrictEqual(body, { error: 'Not found' });
-        assert.strictEqual(calls.sessionFindOne.length, 0, 'session must not be queried when the share owner is unknown');
-        assert.strictEqual(calls.logFindAll.length, 0);
-    });
-
-    test('unauthenticated non-shareId request returns 401 JSON', async () => {
+    test('unauthenticated request returns 401 JSON', async () => {
         await withServer(null, async (base) => {
             const { status, body } = await getJson(base, TELEMETRY_PATH(qsFromTo()));
             assert.strictEqual(status, 401);
             assert.deepStrictEqual(body, { error: 'Unauthorized' });
         });
+    });
+});
+
+// Direct controller call (no router, no middleware): pins the 401 guard in
+// TelemetryController.range itself, so it cannot be lost by only exercising
+// the HTTP path where some middleware might answer first.
+describe('TelemetryController.range — direct call without req.user', () => {
+    test('returns 401 Unauthorized and never touches the DB', async () => {
+        const TelemetryController = require('../controllers/TelemetryController');
+        const calls = installDbMocks({ ownedSession: OWNED_SESSION });
+        const out = {};
+        const res = {
+            status(code) { out.status = code; return res; },
+            json(body) { out.body = body; return res; },
+        };
+
+        await TelemetryController.range({
+            query: { from: '2026-01-01T00:00:00Z', to: '2026-01-02T00:00:00Z' },
+            params: { id: '7' },
+        }, res);
+
+        assert.strictEqual(out.status, 401);
+        assert.deepStrictEqual(out.body, { error: 'Unauthorized' });
+        assert.strictEqual(calls.sessionFindOne.length, 0,
+            'unauthenticated request must not reach Session.findOne');
     });
 });
