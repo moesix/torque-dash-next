@@ -24,6 +24,7 @@ const mockModels = {
   },
   Log: {
     count: async () => 0,
+    findOne: async () => null,
     findAll: async () => [],
     destroy: async () => 0,
   },
@@ -281,6 +282,118 @@ describe('SessionController reassignVehicle (ownership guard)', () => {
       assert.strictEqual(calls.sessionUpdates.length, 0);
     } finally {
       restoreMocks();
+    }
+  });
+});
+
+// ── copy / join — derived sessions preserve notes + vehicle ──────────
+// A copy is the same car on the same day and a join is a merge of logs from
+// one vehicle, so derived sessions must inherit the ownership fields the list
+// and vehicle filters read. Dropping vehicleId makes them "Unassigned" and
+// hides them from the filter that produced the source.
+
+describe('SessionController copy/join (derived-session field preservation)', () => {
+  const originals = {
+    sessionFindOne: mockModels.Session.findOne,
+    sessionCreate: mockModels.Session.create,
+    sessionUpdate: mockModels.Session.update,
+    logFindOne: mockModels.Log.findOne,
+    sequelizeQuery: mockModels.sequelize.query,
+  };
+
+  function restoreAll() {
+    mockModels.Session.findOne = originals.sessionFindOne;
+    mockModels.Session.create = originals.sessionCreate;
+    mockModels.Session.update = originals.sessionUpdate;
+    mockModels.Log.findOne = originals.logFindOne;
+    mockModels.sequelize.query = originals.sequelizeQuery;
+  }
+
+  test('copy carries notes and vehicleId onto the new session', async () => {
+    const createPayloads = [];
+    const source = {
+      id: 's1',
+      userId: 1,
+      notes: 'check engine light',
+      vehicleId: 7,
+      startLocation: 'A',
+      endLocation: 'B',
+    };
+    try {
+      mockModels.Session.findOne = async () => source;
+      mockModels.Session.create = async (payload) => {
+        createPayloads.push(payload);
+        return { id: 42 };
+      };
+      mockModels.Session.update = async () => [1];
+      mockModels.Log.findOne = async () => null;
+
+      const req = makeStubReq({ body: { name: 'copy of s1' } });
+      const { res, calls } = makeStubRes();
+      await SessionController.copy(req, res);
+
+      assert.strictEqual(calls.statusCode, 200);
+      assert.strictEqual(createPayloads.length, 1);
+      assert.strictEqual(createPayloads[0].name, 'copy of s1');
+      assert.strictEqual(createPayloads[0].notes, 'check engine light');
+      assert.strictEqual(createPayloads[0].vehicleId, 7);
+      assert.strictEqual(createPayloads[0].startLocation, 'A');
+      assert.strictEqual(createPayloads[0].endLocation, 'B');
+      assert.strictEqual(createPayloads[0].userId, 1);
+    } finally {
+      restoreAll();
+    }
+  });
+
+  test('copy stores null (not undefined) when the source has no notes/vehicle', async () => {
+    const createPayloads = [];
+    try {
+      mockModels.Session.findOne = async () => ({ id: 's1', userId: 1 });
+      mockModels.Session.create = async (payload) => {
+        createPayloads.push(payload);
+        return { id: 43 };
+      };
+      mockModels.Session.update = async () => [1];
+      mockModels.Log.findOne = async () => null;
+
+      const req = makeStubReq({ body: { name: 'bare copy' } });
+      const { res, calls } = makeStubRes();
+      await SessionController.copy(req, res);
+
+      assert.strictEqual(calls.statusCode, 200);
+      assert.strictEqual(createPayloads[0].notes, null);
+      assert.strictEqual(createPayloads[0].vehicleId, null);
+    } finally {
+      restoreAll();
+    }
+  });
+
+  test('join inherits the PRIMARY (first) source vehicleId', async () => {
+    const createPayloads = [];
+    try {
+      mockModels.Session.findOne = async (opts) => {
+        if (opts.where.id === 's1') return { id: 's1', userId: 1, vehicleId: 7 };
+        if (opts.where.id === 2) return { id: 2, userId: 1, vehicleId: 9 };
+        return null;
+      };
+      mockModels.Session.create = async (payload) => {
+        createPayloads.push(payload);
+        return { id: 99 };
+      };
+      mockModels.Session.update = async () => [1];
+      mockModels.Log.findOne = async () => null;
+
+      const req = makeStubReq({ body: { joinSessionId: 2, name: 'merged' } });
+      const { res, calls } = makeStubRes();
+      await SessionController.join(req, res);
+
+      assert.strictEqual(calls.statusCode, 200);
+      assert.strictEqual(createPayloads.length, 1);
+      assert.strictEqual(createPayloads[0].vehicleId, 7, 'first source session is the primary');
+      assert.strictEqual(createPayloads[0].name, 'merged');
+      assert.strictEqual(createPayloads[0].userId, 1);
+    } finally {
+      restoreAll();
     }
   });
 });

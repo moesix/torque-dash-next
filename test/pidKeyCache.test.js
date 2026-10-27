@@ -215,3 +215,109 @@ describe('flush integration — invalidates touched sessions on success only', (
         }
     });
 });
+
+// ── recomputeSummary invalidation (Plan 011) ───────────────────────────────
+// cut/filter/copy/join mutate Logs outside ingestBuffer.flush(), so the PID
+// key-set cache must be dropped by recomputeSummary — including when the
+// mutation removed EVERY row (the case where the cached keys are most wrong).
+// The invalidation sits before the `if (!log) return;` early exit.
+
+function loadControllerWithMocks(logRow) {
+    const modelsPath = require.resolve('../models');
+    const originalModelsCache = require.cache[modelsPath];
+    require.cache[modelsPath] = {
+        id: modelsPath,
+        filename: modelsPath,
+        loaded: true,
+        exports: {
+            Session: { update: async () => [1] },
+            Log: { findOne: async () => logRow },
+            sequelize: { fn: () => null, col: () => null, query: async () => [] },
+            Sequelize: { Op: { and: Symbol('and'), gt: Symbol('gt'), lte: Symbol('lte') } },
+        },
+    };
+
+    const scPath = require.resolve('../controllers/SessionController');
+    const originalSCCache = require.cache[scPath];
+    delete require.cache[scPath];
+
+    return {
+        recomputeSummary: require('../controllers/SessionController').recomputeSummary,
+        restore() {
+            if (originalModelsCache) {
+                require.cache[modelsPath] = originalModelsCache;
+            } else {
+                delete require.cache[modelsPath];
+            }
+            if (originalSCCache) {
+                require.cache[scPath] = originalSCCache;
+            } else {
+                delete require.cache[scPath];
+            }
+        },
+    };
+}
+
+describe('recomputeSummary — invalidates pid cache for Log mutations', () => {
+    test('all-null aggregate row (every log removed) still invalidates', async () => {
+        const spy = makeSequelizeSpy({ 'summary-null-agg': ['k5', 'kc'] });
+
+        await discoverPidKeys('summary-null-agg', spy.sequelize);
+        assert.strictEqual(spy.queryCount, 1);
+
+        const { recomputeSummary, restore } = loadControllerWithMocks({
+            start: null, end: null, maxSpeed: null, maxRpm: null,
+        });
+        try {
+            await recomputeSummary('summary-null-agg');
+        } finally {
+            restore();
+        }
+
+        const keys = await discoverPidKeys('summary-null-agg', spy.sequelize);
+        assert.strictEqual(spy.queryCount, 2, 'cache dropped even though the aggregate is all NULL');
+        assert.deepStrictEqual(keys, ['k5', 'kc']);
+    });
+
+    test('missing aggregate row (Log.findOne null, early return) still invalidates', async () => {
+        const spy = makeSequelizeSpy({ 'summary-no-row': ['kd'] });
+
+        await discoverPidKeys('summary-no-row', spy.sequelize);
+        assert.strictEqual(spy.queryCount, 1);
+
+        // Log.findOne resolves null → recomputeSummary returns before
+        // Session.update; invalidation must still have happened.
+        const { recomputeSummary, restore } = loadControllerWithMocks(null);
+        try {
+            await recomputeSummary('summary-no-row');
+        } finally {
+            restore();
+        }
+
+        const keys = await discoverPidKeys('summary-no-row', spy.sequelize);
+        assert.strictEqual(spy.queryCount, 2, 'early-return path must invalidate before returning');
+        assert.deepStrictEqual(keys, ['kd']);
+    });
+
+    test('ordinary recompute (logs remain) also invalidates', async () => {
+        const spy = makeSequelizeSpy({ 'summary-normal': ['kb', 'kf'] });
+
+        await discoverPidKeys('summary-normal', spy.sequelize);
+        assert.strictEqual(spy.queryCount, 1);
+
+        const { recomputeSummary, restore } = loadControllerWithMocks({
+            start: '2026-01-01T00:00:00Z',
+            end: '2026-01-01T01:00:00Z',
+            maxSpeed: 0,
+            maxRpm: 0,
+        });
+        try {
+            await recomputeSummary('summary-normal');
+        } finally {
+            restore();
+        }
+
+        await discoverPidKeys('summary-normal', spy.sequelize);
+        assert.strictEqual(spy.queryCount, 2);
+    });
+});

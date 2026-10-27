@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useInfiniteQuery } from '@tanstack/react-query';
 import { getSessions, getVehicles } from '@/lib/api';
 import type { Vehicle } from '@/lib/types';
 import Skeleton from '@/components/ui/Skeleton';
@@ -8,7 +8,6 @@ import Button from '@/components/ui/Button';
 import SessionTable from '@/components/tables/SessionTable';
 
 export default function SessionBrowser() {
-  const [offset, setOffset] = useState(0);
   const limit = 50;
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [selectedVehicleId, setSelectedVehicleId] = useState<number | 'all'>('all');
@@ -17,17 +16,27 @@ export default function SessionBrowser() {
     getVehicles().then((v) => setVehicles(v ?? [])).catch(() => {});
   }, []);
 
-  // refetch drives the error-retry button — far better than the old
-  // window.location.reload(), which nuked SPA state (theme, drawer) just to
-  // re-run the TanStack query.
-  const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ['sessions', offset, selectedVehicleId],
-    queryFn: () => getSessions(limit, offset, selectedVehicleId === 'all' ? null : selectedVehicleId),
+  // Pages accumulate: each "Load More" appends a page instead of replacing the
+  // table. The vehicle filter is part of the query key, so switching vehicles
+  // starts a fresh key at page 0 (no manual offset reset needed).
+  const q = useInfiniteQuery({
+    queryKey: ['sessions', selectedVehicleId],
+    initialPageParam: 0,
+    queryFn: ({ pageParam }) =>
+      getSessions(limit, pageParam, selectedVehicleId === 'all' ? null : selectedVehicleId),
+    getNextPageParam: (last, all) => {
+      const loaded = all.flatMap((p) => p?.sessions ?? []).length;
+      return (last?.total ?? 0) > loaded ? loaded : undefined;
+    },
   });
 
-  const sessions = data?.sessions ?? [];
-  const total = data?.total ?? 0;
-  const hasMore = offset + limit < total;
+  const { isLoading, isError, refetch } = q;
+  // refetch drives the error-retry button — no window.location.reload(), which
+  // would nuke SPA state just to re-run the query.
+  const sessions = q.data?.pages.flatMap((p) => p?.sessions ?? []) ?? [];
+  const pages = q.data?.pages ?? [];
+  const total = pages.length > 0 ? (pages[pages.length - 1]?.total ?? 0) : 0;
+  const hasMore = q.hasNextPage;
 
   if (isLoading) {
     return (
@@ -74,10 +83,7 @@ export default function SessionBrowser() {
           <select
             id="vehicle-filter"
             value={selectedVehicleId}
-            onChange={(e) => {
-              setSelectedVehicleId(e.target.value === 'all' ? 'all' : Number(e.target.value));
-              setOffset(0);
-            }}
+            onChange={(e) => setSelectedVehicleId(e.target.value === 'all' ? 'all' : Number(e.target.value))}
             className="rounded border border-border bg-surface-card px-3 py-2.5 min-h-[44px] text-sm text-fg"
           >
             <option value="all">All vehicles</option>
@@ -95,7 +101,8 @@ export default function SessionBrowser() {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => setOffset((prev) => prev + limit)}
+              onClick={() => void q.fetchNextPage()}
+              disabled={q.isFetchingNextPage}
               className="mt-4"
             >
               Load More ({sessions.length} of {total})

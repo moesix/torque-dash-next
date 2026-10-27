@@ -5,7 +5,7 @@ const Vehicle = require('../models').Vehicle;
 const sequelize = require('../models').sequelize;
 const Op = require('../models').Sequelize.Op;
 const { nanoid } = require('nanoid');
-const { discoverPidKeys } = require('../lib/pidRegistry');
+const { discoverPidKeys, invalidatePidKeys } = require('../lib/pidRegistry');
 const ingestBuffer = require('../services/ingestBuffer');
 const { evictSession } = require('./UploadController');
 const {
@@ -216,6 +216,8 @@ class SessionController {
                     name: req.body.name,
                     startLocation: session.startLocation,
                     endLocation: session.endLocation,
+                    notes: session.notes ?? null,
+                    vehicleId: session.vehicleId ?? null,
                     userId: session.userId
                 }, { transaction: t });
                 // Copy logs server-side via INSERT...SELECT (never load rows into Node.js)
@@ -322,10 +324,13 @@ class SessionController {
 
             let joinSession;
             await sequelize.transaction( async (t) => {
-                // create new session
+                // create new session — a join inherits the PRIMARY (first) source
+                // session's vehicle so the result stays visible under that
+                // vehicle filter instead of falling into "Unassigned".
                 joinSession = await Session.create({
                     sessionId: nanoid(),
                     name: name,
+                    vehicleId: sessionOne.vehicleId ?? null,
                     userId: req.user.id
                 }, { transaction: t });
                 // Copy logs from both sessions server-side via INSERT...SELECT
@@ -616,6 +621,11 @@ function decorateWithSummaries(session, summary) {
 
 async function recomputeSummary(sessionId) {
     if (!sessionId) return;
+    // Drop the cached PID key-set BEFORE reading the aggregate: cut/filter can
+    // remove every row, in which case the cache is the most wrong (it still
+    // carries PIDs that no longer exist) and the early return below would skip
+    // invalidation entirely.
+    invalidatePidKeys(sessionId);
     const log = await Log.findOne({
         where: { sessionId },
         attributes: [
@@ -631,8 +641,8 @@ async function recomputeSummary(sessionId) {
         {
             firstTimestamp: log.start || null,
             lastTimestamp: log.end || null,
-            maxRpm: log.maxRpm || null,
-            maxSpeed: log.maxSpeed || null,
+            maxRpm: log.maxRpm ?? null,
+            maxSpeed: log.maxSpeed ?? null,
         },
         { where: { id: sessionId } }
     );

@@ -204,6 +204,63 @@ describe('recomputeSummary — updates Session columns', () => {
     }
   });
 
+  test('stores aggregate 0 as 0, not null (max-0 fidelity)', async () => {
+    let updateArgs = null;
+    const mockModels = makeMockModels({
+      Log: {
+        findOne: async () => ({
+          start: '2026-04-01T00:00:00Z',
+          end: '2026-04-01T02:00:00Z',
+          maxSpeed: 0,
+          maxRpm: 0,
+        }),
+      },
+      Session: {
+        update: async (vals, opts) => { updateArgs = { vals, opts }; return [1]; },
+      },
+    });
+
+    const { restore } = loadWithMocks(mockModels);
+    try {
+      const { recomputeSummary } = require('../controllers/SessionController');
+      await recomputeSummary('s_zero');
+
+      assert.ok(updateArgs, 'Session.update should be called');
+      assert.strictEqual(updateArgs.vals.maxRpm, 0, 'a legitimate max of 0 must be stored as 0');
+      assert.strictEqual(updateArgs.vals.maxSpeed, 0, 'a legitimate max of 0 must be stored as 0');
+    } finally {
+      restore();
+    }
+  });
+
+  test('stores null aggregates as null (empty-session aggregate row)', async () => {
+    let updateArgs = null;
+    const mockModels = makeMockModels({
+      // Postgres aggregate over zero rows returns ONE row with NULL aggregates,
+      // so this row reaches Session.update even though no logs remain.
+      Log: {
+        findOne: async () => ({ start: null, end: null, maxSpeed: null, maxRpm: null }),
+      },
+      Session: {
+        update: async (vals, opts) => { updateArgs = { vals, opts }; return [1]; },
+      },
+    });
+
+    const { restore } = loadWithMocks(mockModels);
+    try {
+      const { recomputeSummary } = require('../controllers/SessionController');
+      await recomputeSummary('s_empty_agg');
+
+      assert.ok(updateArgs, 'Session.update should be called for the aggregate row');
+      assert.strictEqual(updateArgs.vals.maxRpm, null);
+      assert.strictEqual(updateArgs.vals.maxSpeed, null);
+      assert.strictEqual(updateArgs.vals.firstTimestamp, null);
+      assert.strictEqual(updateArgs.vals.lastTimestamp, null);
+    } finally {
+      restore();
+    }
+  });
+
   test('handles empty Log result (no logs)', async () => {
     let updateCalled = false;
     const mockModels = makeMockModels({
