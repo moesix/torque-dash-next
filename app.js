@@ -10,8 +10,10 @@ const app = express();
 // This avoids the unmaintained `csurf` dependency. The js/missing-csrf-protection
 // CodeQL alert is suppressed on the express-session registration below.
 app.set('trust proxy', 1);
-// Security hardening headers via helmet. CSP uses 'unsafe-inline' for scripts
-// and styles because the React SPA uses inline scripts/styles from Vite bundling.
+// Security hardening headers via helmet. CSP applies to the /api JSON surface
+// only; the SPA HTML is served by the nginx edge, which owns its own CSP and
+// framing/MIME/referrer/permissions headers. The 'unsafe-inline' entries below
+// are vestigial (Vite bundles external scripts) and kept for parity.
 const helmet = require('helmet');
 app.use(helmet({
   contentSecurityPolicy: {

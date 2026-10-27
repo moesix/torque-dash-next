@@ -226,9 +226,21 @@ sessions after a password change), `015_normalize_emails.sql` (lowercase fold),
   to all responses: `X-Content-Type-Options: nosniff`, `X-Frame-Options:
   SAMEORIGIN`, `X-XSS-Protection: 0` (modern browsers ignore this, but it's kept
   for safety), `Strict-Transport-Security` (set at the nginx layer), and others.
-- **CSP disabled** — `contentSecurityPolicy: false` is passed to Helmet because
-  the React SPA relies on inline scripts and styles. A future plan should enable
-  CSP via nonces or hashes.
+- **CSP enabled on the API** — Helmet's `contentSecurityPolicy` is active in
+  `app.js` with `'unsafe-inline'` for script and style. That `'unsafe-inline'`
+  is vestigial: the backend serves only `/api` JSON, and the SPA HTML is served
+  by nginx, so no backend response carries an inline script or style.
+- **CSP enabled on the SPA edge** — `apps/frontend/nginx.conf` sets a
+  `Content-Security-Policy` (`default-src 'self'`, `script-src 'self'`,
+  `style-src 'self' 'unsafe-inline' https://fonts.googleapis.com`,
+  `font-src 'self' data: https://fonts.gstatic.com`, `img-src 'self' data: https:`,
+  `connect-src 'self'`, `frame-ancestors 'none'`, `object-src 'none'`,
+  `base-uri 'self'`). The Vite build emits one external module script and no
+  inline script/style, so `script-src` needs no `'unsafe-inline'`.
+- **Edge headers** — the same server block adds `X-Frame-Options: DENY`,
+  `X-Content-Type-Options: nosniff`, `Referrer-Policy:
+  strict-origin-when-cross-origin`, and a `Permissions-Policy` denying
+  geolocation, camera, and microphone.
 - **nginx HSTS** — the frontend nginx config (`apps/frontend/nginx.conf`) adds
   `Strict-Transport-Security: max-age=31536000; includeSubDomains` to enforce
   HTTPS for one year.
