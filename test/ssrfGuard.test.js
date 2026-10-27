@@ -296,3 +296,248 @@ test('isSafeUrl: DNS resolution failure → false (fail-closed)', async () => {
     const result = await isSafeUrl('http://this-hostname-definitely-does-not-exist-12345.example.invalid/path');
     assert.strictEqual(result, false);
 });
+
+// ── isPublicIp ─ extended IPv4 denylist ranges ───────────────────────────
+
+test('isPublicIp: 240.0.0.1 → private (reserved 240.0.0.0/4)', () => {
+    assert.strictEqual(isPublicIp('240.0.0.1'), false);
+});
+
+test('isPublicIp: 255.255.255.255 → private (limited broadcast)', () => {
+    assert.strictEqual(isPublicIp('255.255.255.255'), false);
+});
+
+test('isPublicIp: 192.0.0.1 → private (IETF protocol assignments)', () => {
+    assert.strictEqual(isPublicIp('192.0.0.1'), false);
+});
+
+test('isPublicIp: 192.0.2.1 → public (TEST-NET-1 unaffected)', () => {
+    assert.strictEqual(isPublicIp('192.0.2.1'), true);
+});
+
+test('isPublicIp: 100.64.0.1 → private (CGNAT)', () => {
+    assert.strictEqual(isPublicIp('100.64.0.1'), false);
+});
+
+test('isPublicIp: 100.127.255.255 → private (CGNAT upper bound)', () => {
+    assert.strictEqual(isPublicIp('100.127.255.255'), false);
+});
+
+test('isPublicIp: 100.128.0.0 → public (just above CGNAT)', () => {
+    assert.strictEqual(isPublicIp('100.128.0.0'), true);
+});
+
+test('isPublicIp: 198.18.0.1 → private (benchmarking)', () => {
+    assert.strictEqual(isPublicIp('198.18.0.1'), false);
+});
+
+test('isPublicIp: 198.19.255.255 → private (benchmarking upper bound)', () => {
+    assert.strictEqual(isPublicIp('198.19.255.255'), false);
+});
+
+test('isPublicIp: 198.20.0.0 → public (just above benchmarking)', () => {
+    assert.strictEqual(isPublicIp('198.20.0.0'), true);
+});
+
+// ── isPublicIp ─ extended IPv6 denylist ranges ───────────────────────────
+
+test('isPublicIp: 2001::1 → private (Teredo)', () => {
+    assert.strictEqual(isPublicIp('2001::1'), false);
+});
+
+test('isPublicIp: 2001:0:4136:e378:8000:63bf:3fff:fdd2 → private (Teredo client)', () => {
+    assert.strictEqual(isPublicIp('2001:0:4136:e378:8000:63bf:3fff:fdd2'), false);
+});
+
+test('isPublicIp: 2001:db8::1 → public (documentation, outside 2001::/32)', () => {
+    assert.strictEqual(isPublicIp('2001:db8::1'), true);
+});
+
+test('isPublicIp: 2002::1 → private (6to4)', () => {
+    assert.strictEqual(isPublicIp('2002::1'), false);
+});
+
+test('isPublicIp: 2002:c000:204::1 → private (6to4)', () => {
+    assert.strictEqual(isPublicIp('2002:c000:204::1'), false);
+});
+
+test('isPublicIp: 100::1 → private (discard-only 100::/64)', () => {
+    assert.strictEqual(isPublicIp('100::1'), false);
+});
+
+test('isPublicIp: 100:: → private (discard-only base)', () => {
+    assert.strictEqual(isPublicIp('100::'), false);
+});
+
+test('isPublicIp: 100:0:0:1::1 → public (outside 100::/64)', () => {
+    assert.strictEqual(isPublicIp('100:0:0:1::1'), true);
+});
+
+// ── isPublicIp ─ IPv4-translated / IPv4-compatible forms ─────────────────
+
+test('isPublicIp: ::ffff:0:169.254.169.254 → private (translated metadata)', () => {
+    assert.strictEqual(isPublicIp('::ffff:0:169.254.169.254'), false);
+});
+
+test('isPublicIp: ::ffff:0:10.0.0.1 → private (translated private)', () => {
+    assert.strictEqual(isPublicIp('::ffff:0:10.0.0.1'), false);
+});
+
+test('isPublicIp: ::ffff:0:8.8.8.8 → public (translated public)', () => {
+    assert.strictEqual(isPublicIp('::ffff:0:8.8.8.8'), true);
+});
+
+test('isPublicIp: ::10.0.0.1 → private (IPv4-compatible private)', () => {
+    assert.strictEqual(isPublicIp('::10.0.0.1'), false);
+});
+
+test('isPublicIp: ::169.254.169.254 → private (IPv4-compatible metadata)', () => {
+    assert.strictEqual(isPublicIp('::169.254.169.254'), false);
+});
+
+test('isPublicIp: ::8.8.8.8 → public (IPv4-compatible public)', () => {
+    assert.strictEqual(isPublicIp('::8.8.8.8'), true);
+});
+
+// ── safeFetch ─ credential containment across redirect hops ──────────────
+
+test('safeFetch: cross-origin redirect drops Authorization and x-api-key', async (t) => {
+    const calls = [];
+    t.mock.method(globalThis, 'fetch', async (url, init) => {
+        calls.push({ url, init });
+        if (calls.length === 1) {
+            return new Response(null, { status: 302, headers: { Location: 'https://1.1.1.1/next' } });
+        }
+        return new Response('ok', { status: 200 });
+    });
+
+    const res = await safeFetch('https://8.8.8.8/start', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer fake-token',
+            'X-Api-Key': 'fake-key',
+            'anthropic-version': '2023-06-01',
+        },
+        body: '{}',
+    });
+
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(calls.length, 2);
+    assert.strictEqual(calls[0].init.headers.Authorization, 'Bearer fake-token');
+    assert.strictEqual(calls[0].init.headers['X-Api-Key'], 'fake-key');
+
+    const hopHeaders = calls[1].init.headers;
+    assert.deepStrictEqual(hopHeaders, {
+        'Content-Type': 'application/json',
+        'anthropic-version': '2023-06-01',
+    });
+    assert.strictEqual(calls[1].init.body, '{}', 'body survives the hop');
+    assert.strictEqual(calls[1].init.redirect, 'manual');
+    assert.strictEqual(calls[1].init.allowLoopback, undefined, 'flag is not forwarded to fetch');
+});
+
+test('safeFetch: same-origin redirect keeps credentials', async (t) => {
+    const calls = [];
+    t.mock.method(globalThis, 'fetch', async (url, init) => {
+        calls.push({ url, init });
+        if (calls.length === 1) {
+            return new Response(null, { status: 307, headers: { Location: '/next' } });
+        }
+        return new Response('ok', { status: 200 });
+    });
+
+    await safeFetch('https://8.8.8.8/start', {
+        headers: { Authorization: 'Bearer fake-token', 'x-api-key': 'fake-key' },
+    });
+
+    assert.strictEqual(calls.length, 2);
+    assert.strictEqual(calls[1].init.headers.Authorization, 'Bearer fake-token');
+    assert.strictEqual(calls[1].init.headers['x-api-key'], 'fake-key');
+});
+
+// ── safeFetch ─ scoped loopback allowance (Ollama) ───────────────────────
+
+test('safeFetch: allowLoopback passes literal localhost without DNS resolution', async (t) => {
+    const dns = require('node:dns');
+    t.mock.method(dns.promises, 'lookup', async () => {
+        throw new Error('DNS must not be consulted for the loopback allowance');
+    });
+
+    const calls = [];
+    t.mock.method(globalThis, 'fetch', async (url, init) => {
+        calls.push({ url, init });
+        return new Response('ok', { status: 200 });
+    });
+
+    const res = await safeFetch('http://localhost:11434/v1/chat/completions', {
+        method: 'POST',
+        allowLoopback: true,
+        headers: { Authorization: 'Bearer fake-local' },
+    });
+
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(calls.length, 1);
+    assert.strictEqual(calls[0].url, 'http://localhost:11434/v1/chat/completions');
+    assert.strictEqual(calls[0].init.allowLoopback, undefined);
+    assert.strictEqual(calls[0].init.headers.Authorization, 'Bearer fake-local');
+});
+
+test('safeFetch: allowLoopback accepts 127.* and ::1 literals', async (t) => {
+    let count = 0;
+    t.mock.method(globalThis, 'fetch', async () => {
+        count++;
+        return new Response('ok', { status: 200 });
+    });
+
+    const urls = [
+        'http://127.0.0.1:11434/v1',
+        'http://127.9.9.9:11434/v1',
+        'http://[::1]:11434/v1',
+    ];
+    for (const url of urls) {
+        const res = await safeFetch(url, { allowLoopback: true });
+        assert.strictEqual(res.status, 200, url);
+    }
+    assert.strictEqual(count, urls.length);
+});
+
+test('safeFetch: allowLoopback still rejects private LAN endpoints', async (t) => {
+    t.mock.method(globalThis, 'fetch', async () => {
+        throw new Error('fetch must not run for an unsafe endpoint');
+    });
+
+    await assert.rejects(
+        () => safeFetch('http://10.1.2.3:11434/v1/chat/completions', { allowLoopback: true }),
+        /Unsafe URL blocked/
+    );
+    await assert.rejects(
+        () => safeFetch('http://192.168.1.50:11434/v1/chat/completions', { allowLoopback: true }),
+        /Unsafe URL blocked/
+    );
+});
+
+test('safeFetch: allowLoopback refuses redirects, including to public hosts', async (t) => {
+    t.mock.method(globalThis, 'fetch', async () =>
+        new Response(null, { status: 302, headers: { Location: 'https://8.8.8.8/collect' } })
+    );
+
+    await assert.rejects(
+        () => safeFetch('http://localhost:11434/v1/chat/completions', { allowLoopback: true }),
+        /Redirect refused/i
+    );
+});
+
+test('safeFetch: localhost without allowLoopback still throws (other providers)', async (t) => {
+    const dns = require('node:dns');
+    t.mock.method(dns.promises, 'lookup', async () => [{ address: '127.0.0.1', family: 4 }]);
+    t.mock.method(globalThis, 'fetch', async () => {
+        throw new Error('fetch must not run for a loopback URL');
+    });
+
+    await assert.rejects(
+        () => safeFetch('http://localhost:11434/v1/chat/completions'),
+        /Unsafe URL blocked/
+    );
+});
+
