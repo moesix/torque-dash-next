@@ -5,23 +5,27 @@
   "main": "app.js",
   "scripts": {
     "start": "node app.js",
+    "dev": "node --watch app.js",
     "lint": "eslint .",
-    "test": "node --test 'test/*.test.js' && node scripts/checkMirrors.js && node scripts/checkTestIntegrity.js",
-    "test:coverage": "c8 node --test 'test/*.test.js' && node scripts/checkMirrors.js && node scripts/checkTestIntegrity.js",
+    "test": "node --test test/*.test.js",
+    "test:coverage": "c8 node --test test/*.test.js && node scripts/checkMirrors.js && node scripts/checkTestIntegrity.js",
+    "test:integration": "node --test --test-concurrency=1 --test-force-exit integration/*.test.js",
     "verify": "npm test && npm run lint && cd apps/frontend && npm test && npx tsc --noEmit",
     "prepare": "husky || true"
   },
   "keywords": [],
   "author": "",
   "license": "MIT",
+  "engines": {
+    "node": ">=20.19"
+  },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "c8": "^12.0.0",
     "eslint": "^10.8.0",
     "globals": "^17.9.0",
     "husky": "^9.1.7",
-    "lint-staged": "^17.3.0",
-    "nodemon": "^3.1.14"
+    "lint-staged": "^17.3.0"
   },
   "dependencies": {
     "bcrypt": "^6.0.0",
@@ -42,6 +46,9 @@
     "*.js": [
       "eslint --fix",
       "node -c"
+    ],
+    "apps/frontend/**/*.{ts,tsx}": [
+      "bash -c 'cd apps/frontend && npx --no-install tsc --noEmit'"
     ]
   },
   "overrides": {

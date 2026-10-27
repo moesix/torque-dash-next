@@ -1,0 +1,47 @@
+# Local contributor stack: TimescaleDB on 5433 + the backend under `node --watch`.
+#
+#   docker compose -f docker-compose.dev.yml up -d
+#   docker compose -f docker-compose.dev.yml exec backend node scripts/seed-demo.js
+#
+# The backend command runs `node scripts/migrate.js` before the watcher, so a
+# fresh volume is schema-complete on first boot (the dev equivalent of the
+# production CMD's migrate step). The bind mount gives live reload; the
+# anonymous /app/node_modules volume keeps the image's installed dependencies
+# instead of the host's.
+services:
+  db:
+    image: timescale/timescaledb:2.29.1-pg16
+    environment:
+      POSTGRES_USER: tdn
+      POSTGRES_PASSWORD: tdn
+      POSTGRES_DB: tdn
+    ports:
+      - '5433:5432'
+    volumes:
+      - dev-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U tdn -d tdn']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  backend:
+    build: .
+    command: sh -c "node scripts/migrate.js && node --watch app.js"
+    environment:
+      DATABASE_URL: postgres://tdn:tdn@db:5432/tdn
+      # Dev-only secret; production deployments must supply their own.
+      SESSION_KEYS: dev-only-session-key-not-for-production
+      COOKIE_SECURE: 'false'
+      PORT: '3000'
+    ports:
+      - '3000:3000'
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - .:/app
+      - /app/node_modules
+
+volumes:
+  dev-pgdata:

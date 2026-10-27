@@ -89,8 +89,10 @@ describe('aggregateSummaries — reads from Session columns', () => {
       { id: 's1', firstTimestamp: '2026-01-01T00:00:00Z', lastTimestamp: '2026-01-01T01:00:00Z', maxRpm: 5000, maxSpeed: 120 },
       { id: 's2', firstTimestamp: '2026-02-01T00:00:00Z', lastTimestamp: '2026-02-01T02:00:00Z', maxRpm: 6000, maxSpeed: 150 },
     ];
+    let logCalls = 0;
     const mockModels = makeMockModels({
       Session: { findAll: async () => mockSessions },
+      Log: { findAll: async () => { logCalls++; return []; } },
     });
 
     const { restore } = loadWithMocks(mockModels);
@@ -104,6 +106,8 @@ describe('aggregateSummaries — reads from Session columns', () => {
       assert.strictEqual(map.get('s1').maxSpeed, 120);
       assert.strictEqual(map.get('s2').maxRpm, 6000);
       assert.strictEqual(map.get('s2').maxSpeed, 150);
+      assert.strictEqual(logCalls, 0,
+        'fast path must not scan Logs when every denormalized column is present');
     } finally {
       restore();
     }
@@ -313,18 +317,14 @@ describe('Migration 016 — idempotent SQL', () => {
   });
 });
 
-describe('ingestBuffer — has LEAST/GREATEST summary merge', () => {
-  test('ingestBuffer.js uses LEAST and GREATEST for summary updates', () => {
+describe('ingestBuffer — summary merge shape guards', () => {
+  test('merges in JS with bound parameters — no SQL literal fragments', () => {
     const fs = require('fs');
     const path = require('path');
     const bufSrc = fs.readFileSync(
       path.resolve(__dirname, '../services/ingestBuffer.js'),
       'utf8'
     );
-    assert.ok(bufSrc.includes('LEAST'), 'ingestBuffer should use LEAST for firstTimestamp merge');
-    assert.ok(bufSrc.includes('GREATEST'), 'ingestBuffer should use GREATEST for lastTimestamp/maxRpm/maxSpeed merge');
-    assert.ok(bufSrc.includes('COALESCE'), 'ingestBuffer should use COALESCE to handle NULL existing values');
-    assert.ok(bufSrc.includes('Session.update'), 'ingestBuffer should call Session.update');
     // Regression guards for plan 073: the old literal-SQL block referenced a
     // nonexistent "sub" alias and silently failed every flush. The merge must
     // stay in JS with plain bound parameters — no SQL literal fragments.
@@ -431,6 +431,35 @@ describe('flush — real-path summary merge through ingestBuffer', () => {
         maxSpeed: 95,        // COALESCE(NULL, 95)       -> 95
       }, 'NULL columns must be replaced by batch stats verbatim');
       assert.deepStrictEqual(updateCalls[0].opts, { where: { id: 8 } });
+    } finally {
+      restore();
+    }
+  });
+
+  test('two frames collapse to min/max bounds regardless of ingest order', async () => {
+    const earlier = new Date('2026-06-02T07:00:00Z');
+    const later = new Date('2026-06-02T08:30:00Z');
+
+    const { mockModels, updateCalls } = makeFlushMocks({
+      // Existing row already holds the later bound; the batch adds the earlier
+      // frame and repeats the later one.
+      findByPkResult: { id: 9, firstTimestamp: later, lastTimestamp: later, maxRpm: null, maxSpeed: null },
+    });
+
+    const { restore } = loadWithMocks(mockModels);
+    try {
+      const { ingest, flush } = require('../services/ingestBuffer');
+
+      ingest({ userId: 1, sessionId: 9, time: later, lon: 0, lat: 0, values: {}, engineRpm: 1200, vehicleSpeed: 45 });
+      ingest({ userId: 1, sessionId: 9, time: earlier, lon: 0, lat: 0, values: {}, engineRpm: 2100, vehicleSpeed: 70 });
+
+      await flush();
+
+      assert.strictEqual(updateCalls.length, 1, 'Session.update called exactly ONCE');
+      assert.strictEqual(updateCalls[0].vals.firstTimestamp, earlier,
+        'firstTimestamp must collapse to the earliest frame, not the first ingested');
+      assert.strictEqual(updateCalls[0].vals.lastTimestamp, later,
+        'lastTimestamp must collapse to the latest frame');
     } finally {
       restore();
     }

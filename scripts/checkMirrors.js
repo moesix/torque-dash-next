@@ -73,17 +73,46 @@ const backendProviders = extractMap(
 const aiCardSrc = fs.readFileSync(
     path.join(__dirname, '..', 'apps', 'frontend', 'src', 'features', 'settings', 'AiProviderCard.tsx'), 'utf8'
 );
-const providerMatch = /const PROVIDERS\s*=\s*\[([\s\S]*?)\];/.exec(aiCardSrc);
-if (providerMatch && backendProviders) {
+const providerMatch = /\bPROVIDERS\s*[:=]\s*\[([\s\S]*?)\]\s*(?:as const)?;/.exec(aiCardSrc);
+if (!backendProviders || !providerMatch) {
+    // Fail closed: a regex miss means provider parity is UNCHECKED, not in sync.
+    console.error(
+        `[checkMirrors] Could not extract LLM provider lists ` +
+        `(backend=${backendProviders ? 'ok' : 'miss'}, frontend=${providerMatch ? 'ok' : 'miss'})`
+    );
+    exitCode = 1;
+} else {
+    // Light normalization: accept single- or double-quoted keys, and tolerate a
+    // trailing `as const`. Anything else that stops an entry parsing is caught
+    // by the entry-count guard below.
     const frontendProviders = {};
-    const provRe = /value:\s*'(\w+)'.*?models:\s*\[([^\]]*)\]/g;
+    const provRe = /value:\s*['"](\w+)['"]/g;
     let p;
     while ((p = provRe.exec(providerMatch[1]))) {
-        frontendProviders[p[1]] = p[2];
+        frontendProviders[p[1]] = true;
     }
+
+    const declaredCount = (providerMatch[1].match(/\bvalue\s*:/g) || []).length;
+    const parsedCount = Object.keys(frontendProviders).length;
+    if (declaredCount !== parsedCount) {
+        console.error(
+            `[checkMirrors] Provider list: parsed ${parsedCount} of ${declaredCount} ` +
+            `entries — the frontend shape is not understood, so parity cannot be trusted`
+        );
+        exitCode = 1;
+    }
+
+    // Bidirectional: both a backend provider the frontend cannot offer and a
+    // frontend provider the backend cannot serve are drift.
     for (const key of Object.keys(backendProviders)) {
         if (!Object.prototype.hasOwnProperty.call(frontendProviders, key)) {
             console.error(`[checkMirrors] Provider ${key} in backend but not frontend`);
+            exitCode = 1;
+        }
+    }
+    for (const key of Object.keys(frontendProviders)) {
+        if (!Object.prototype.hasOwnProperty.call(backendProviders, key)) {
+            console.error(`[checkMirrors] Provider ${key} in frontend but not backend`);
             exitCode = 1;
         }
     }

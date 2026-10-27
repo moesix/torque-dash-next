@@ -138,7 +138,7 @@ which enforces ownership and returns
   onto each session via `decorateWithSummaries()`, eliminating the N+1 query
   pattern that previously loaded full Log associations per session.
 
-### 2.4 TimescaleDB (`infra/timescale/log_hypertable.sql`)
+### 2.4 TimescaleDB (`infra/timescale/001_log_hypertable.sql`)
 - **Hypertable** `Logs` partitioned by `timestamp` (`chunk_time_interval = 1 day`).
 - **PK restructured** to `("sessionId", timestamp)` (required by TimescaleDB);
   `id` kept globally unique via a unique index for id-based `filter`/`cut`/`join`

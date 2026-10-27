@@ -16,9 +16,78 @@ concurrency:
 jobs:
   backend-checks:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ['20.19', '22']
     env:
       DATABASE_URL: postgres://ci:ci@localhost:5432/ci
       SESSION_KEYS: ci-test-key-for-config-loading
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      - name: Install backend dependencies
+        run: npm ci
+
+      - name: Run backend tests (coverage gate)
+        run: npm run test:coverage
+
+      - name: Publish coverage summary
+        if: always()
+        run: |
+          if [ ! -f coverage/coverage-summary.json ]; then
+            echo "No coverage summary produced." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          node -e '
+          const fs = require("fs");
+          const { total } = JSON.parse(fs.readFileSync("coverage/coverage-summary.json", "utf8"));
+          const rows = ["lines", "statements", "functions", "branches"].map(
+            (k) => `| ${k} | ${total[k].pct}% | ${total[k].covered}/${total[k].total} |`
+          );
+          fs.appendFileSync(
+            process.env.GITHUB_STEP_SUMMARY,
+            ["| Metric | % | Covered |", "| --- | --- | --- |", ...rows, ""].join("\n")
+          );
+          '
+
+      - name: Upload coverage report
+        if: always() && matrix.node-version == '22'
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage
+          path: coverage/
+          retention-days: 7
+
+      - name: Run ESLint
+        run: npm run lint
+
+  migrate-checks:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgres://tdn:tdn@localhost:5432/tdn
+      SESSION_KEYS: ci-test-key-for-migration-runner
+    services:
+      timescaledb:
+        image: timescale/timescaledb:2.29.1-pg16
+        env:
+          POSTGRES_USER: tdn
+          POSTGRES_PASSWORD: tdn
+          POSTGRES_DB: tdn
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U tdn -d tdn"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -32,14 +101,118 @@ jobs:
       - name: Install backend dependencies
         run: npm ci
 
-      - name: Run backend tests
-        run: npm test
+      # Guard for the fresh-install path: migrations only (no sequelize.sync),
+      # against an empty TimescaleDB. The second run proves the tracker and the
+      # IF NOT EXISTS / benign-skip logic make a re-run a no-op.
+      - name: Migrate empty database
+        run: node scripts/migrate.js
 
-      - name: Test coverage
-        run: npm run test:coverage
+      - name: Migrate again (idempotent re-run)
+        run: node scripts/migrate.js
 
-      - name: Run ESLint
-        run: npm run lint
+      # Schema contract, not just "the migrations exited 0": the fresh-install
+      # shape must carry the cascade FK and the DOUBLE PRECISION max columns the
+      # models rely on, and must not resurrect the retired Users.shareId.
+      - name: Assert migrated schema
+        run: |
+          node <<'NODE'
+          const { Client } = require('pg');
+
+          const failures = [];
+
+          (async () => {
+            const client = new Client({ connectionString: process.env.DATABASE_URL });
+            await client.connect();
+            try {
+              const fk = await client.query(
+                "SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conname = 'Logs_sessionId_fkey'"
+              );
+              if (fk.rowCount !== 1) {
+                failures.push(`Logs_sessionId_fkey: expected 1 constraint, found ${fk.rowCount}`);
+              } else if (!/ON DELETE CASCADE/.test(fk.rows[0].def)) {
+                failures.push(`Logs_sessionId_fkey: missing ON DELETE CASCADE (${fk.rows[0].def})`);
+              }
+
+              const maxCols = await client.query(
+                `SELECT column_name, data_type FROM information_schema.columns
+                  WHERE table_schema = 'public' AND table_name = 'Sessions'
+                    AND column_name IN ('maxRpm', 'maxSpeed')`
+              );
+              for (const name of ['maxRpm', 'maxSpeed']) {
+                const found = maxCols.rows.find((row) => row.column_name === name);
+                if (!found) {
+                  failures.push(`Sessions.${name}: column missing`);
+                } else if (found.data_type !== 'double precision') {
+                  failures.push(`Sessions.${name}: expected double precision, found ${found.data_type}`);
+                }
+              }
+
+              const shareId = await client.query(
+                `SELECT 1 FROM information_schema.columns
+                  WHERE table_schema = 'public' AND table_name = 'Users' AND column_name = 'shareId'`
+              );
+              if (shareId.rowCount !== 0) {
+                failures.push('Users.shareId: column still present');
+              }
+            } finally {
+              await client.end();
+            }
+
+            if (failures.length > 0) {
+              console.error('[schema-assert] FAILED:\n- ' + failures.join('\n- '));
+              process.exit(1);
+            }
+            console.log('[schema-assert] OK: Logs FK cascades, Sessions.maxRpm/maxSpeed are double precision, Users has no shareId');
+          })().catch((err) => {
+            console.error('[schema-assert] ERROR:', err.message);
+            process.exit(1);
+          });
+          NODE
+
+  # Real-database integration suite (plan 016). Separate job because Actions
+  # jobs do not share service containers; this one owns its TimescaleDB and
+  # boots the stack migrations-only (`node scripts/migrate.js`) — app.js is
+  # imported for its router, never for bootstrap(), so sequelize.sync() never
+  # runs here.
+  integration-checks:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgres://tdn:tdn@localhost:5432/tdn
+      SESSION_KEYS: ci-integration-session-key
+    services:
+      timescaledb:
+        image: timescale/timescaledb:2.29.1-pg16
+        env:
+          POSTGRES_USER: tdn
+          POSTGRES_PASSWORD: tdn
+          POSTGRES_DB: tdn
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U tdn -d tdn"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install backend dependencies
+        run: npm ci
+
+      # Boot suite migrates twice (fresh + idempotent re-run) and asserts the
+      # schema/hypertable; ingest suite drives upload → drain → sessions →
+      # telemetry → CSV → rename → delete(cascade) → re-upload over HTTP.
+      - name: Run integration suite
+        run: npm run test:integration
+        env:
+          NODE_ENV: test
 
   frontend-checks:
     runs-on: ubuntu-latest

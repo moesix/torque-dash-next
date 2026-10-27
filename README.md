@@ -53,7 +53,7 @@ docker compose up -d
 
 Then open **http://localhost:8080**.
 
-> The app **will not start** without `DATABASE_URL` and `SESSION_KEYS`. Generate them with `openssl rand -base64 24` and `openssl rand -hex 24` respectively. As of 2026, `UPLOAD_API_TOKEN` is the required security baseline for uploads: generate it with `openssl rand -hex 24` and set it in `.env`, or generate one from the Settings page after first login. See the full config reference below.
+> The app **will not start** without `DATABASE_URL` and `SESSION_KEYS`. In the compose recipe `DATABASE_URL` is composed by `docker-compose.yml` from `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` — set the password with `openssl rand -base64 24`. For a manual (non-compose) run, set `DATABASE_URL` yourself. Generate `SESSION_KEYS` with `openssl rand -hex 24`. As of 2026, `UPLOAD_API_TOKEN` is the required security baseline for uploads: generate it with `openssl rand -hex 24` and set it in `.env`, or generate one from the Settings page after first login. See the full config reference below.
 
 ## Connect Torque Pro
 
@@ -182,7 +182,7 @@ After creating all user accounts, disable public registration via the Settings U
 | `POSTGRES_PASSWORD` | **REQUIRED** | Database password for Docker deployments. Generate with `openssl rand -base64 24`. |
 | `SESSION_KEYS` | **REQUIRED** | Comma-separated express-session secrets. App crashes on startup if missing. |
 | `PORT` | `3000` | Backend HTTP port. |
-| `NODE_ENV` | _(unset)_ | Optional. `production` skips the app-internal `sequelize.sync()` in `app.js`. The Docker image CMD still runs an idempotent `sequelize.sync()` bootstrap before `scripts/migrate.js` on every boot, regardless of NODE_ENV; migrations remain the source of truth for TimescaleDB DDL. |
+| `NODE_ENV` | _(unset)_ | Optional. `production` skips the app-internal `sequelize.sync()` in `app.js`. The Docker image CMD still runs an idempotent `sequelize.sync()` bootstrap before `scripts/migrate.js` on every boot, regardless of NODE_ENV; migrations are the source of truth for TimescaleDB DDL and also create an empty database's baseline tables, so they work sync-first and sync-less. |
 | `COOKIE_SECURE` | `false` | `true` to set `Secure` on session cookies (requires HTTPS). `SameSite` is derived from it in `app.js` (`none` when true, else `lax`) — there is no separate `COOKIE_SAMESITE` variable. |
 | `CORS_ORIGINS` | _(empty)_ | Comma-separated allowed origins for cross-origin API access. Also serves as the CSRF trust list. |
 | `PUBLIC_ORIGIN` | _(unset)_ | Overrides the expected CSRF origin. Set when nginx terminates HTTPS but forwards HTTP to the backend. |
