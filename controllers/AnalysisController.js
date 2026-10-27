@@ -6,13 +6,83 @@ const Vehicle = require('../models').Vehicle;
 const Settings = require('../models').Settings;
 const sequelize = require('../models').sequelize;
 const { analyze, streamEvents } = require('../lib/llmProviders');
-const { buildAnalysisPrompt, formatSessionDuration, detectBackfillGaps, buildDataQualityNote } = require('../lib/llmPrompt');
+const { buildAnalysisPrompt, formatSessionDuration, buildDataQualityNote, GAP_ANALYSIS } = require('../lib/llmPrompt');
 const { discoverPidKeys } = require('../lib/pidRegistry');
 const { classifyAnalysisError } = require('../lib/analysisErrors');
 const { isInt4Id } = require('../lib/validators');
 const { requireAdmin } = require('./UserController');
 
 class AnalysisController {
+  // Gap/peak stats in one round trip (plans/014). Reference semantics:
+  // detectBackfillGaps() in lib/llmPrompt.js. That function reports every
+  // interval >= GAP_ANALYSIS.MIN_GAP_SECONDS as {startIso, endIso, seconds}
+  // (seconds rounded), sorted longest-first and capped at MAX_REPORTED_GAPS,
+  // plus maxRowsInMinute from per-minute row counts (0 for an empty session).
+  static async computeGapSummary(sessionId) {
+    const rows = await sequelize.query(`
+      WITH ordered AS (
+        SELECT "timestamp" AS curr_ts,
+               LAG("timestamp") OVER (ORDER BY "timestamp") AS prev_ts
+        FROM "Logs" WHERE "sessionId" = :sessionId
+      ), gap_rows AS (
+        SELECT prev_ts AS gap_start, curr_ts AS gap_end,
+               EXTRACT(EPOCH FROM curr_ts - prev_ts)::float AS seconds
+        FROM ordered
+        WHERE prev_ts IS NOT NULL
+          AND EXTRACT(EPOCH FROM curr_ts - prev_ts) >= :minGapSeconds
+      ), minute_counts AS (
+        SELECT date_trunc('minute', "timestamp") AS bucket, COUNT(*) AS cnt
+        FROM "Logs" WHERE "sessionId" = :sessionId
+        GROUP BY 1
+      )
+      SELECT 'gap' AS kind, gap_start, gap_end, seconds, NULL::bigint AS cnt FROM gap_rows
+      UNION ALL
+      SELECT 'peak', NULL::timestamptz, NULL::timestamptz, NULL::float, MAX(cnt) FROM minute_counts
+      ORDER BY gap_start NULLS LAST
+    `, {
+      replacements: { sessionId, minGapSeconds: GAP_ANALYSIS.MIN_GAP_SECONDS },
+      type: sequelize.QueryTypes.SELECT,
+    });
+
+    // Chronological gap order in, then the stable desc sort reproduces the
+    // pure function's tie order before the cap.
+    const gaps = rows
+      .filter(r => r.kind === 'gap')
+      .map(r => ({
+        startIso: new Date(r.gap_start).toISOString(),
+        endIso: new Date(r.gap_end).toISOString(),
+        seconds: Math.round(Number(r.seconds)),
+      }))
+      .sort((a, b) => b.seconds - a.seconds)
+      .slice(0, GAP_ANALYSIS.MAX_REPORTED_GAPS);
+
+    const peak = rows.find(r => r.kind === 'peak');
+    return { gaps, maxRowsInMinute: peak && peak.cnt != null ? Number(peak.cnt) : 0 };
+  }
+
+  // Evenly spaced middle ids for large sessions (plans/014). Same selection
+  // as the pre-SQL JS loop: target = min(100, total), stride = max(1,
+  // floor(total / target)), every stride-th id in id order until target is
+  // reached. LIMIT bounds the transfer instead of shipping every id.
+  static async selectEvenIds(sessionId, totalCount) {
+    const target = Math.min(100, totalCount);
+    if (target <= 0) return [];
+    const stride = Math.max(1, Math.floor(totalCount / target));
+    const rows = await sequelize.query(`
+      SELECT "id" FROM (
+        SELECT "id", ROW_NUMBER() OVER (ORDER BY "id") AS rn
+        FROM "Logs" WHERE "sessionId" = :sessionId
+      ) ranked
+      WHERE (rn - 1) % :stride = 0
+      ORDER BY "id"
+      LIMIT :target
+    `, {
+      replacements: { sessionId, stride, target },
+      type: sequelize.QueryTypes.SELECT,
+    });
+    return rows.map(r => r.id);
+  }
+
   static async analyzeSession(req, res) {
     // Hoisted to function scope (NOT the try block): the catch below reads it,
     // and a block-scoped declaration inside try would be lexically invisible
@@ -49,19 +119,15 @@ class AnalysisController {
       const durationStr = formatSessionDuration(startTs, endTs);
 
       // 4. Fetch telemetry sample (first 50 + last 50 + evenly-spaced 100 for large sessions).
-      //    The 4b timestamp scan is kicked off in the SAME Promise.all: it does not
-      //    depend on the sample, and running it alongside the count keeps the
-      //    full-session timestamp transfer off the serial critical path.
-      const [countResult, tsRows] = await Promise.all([
+      //    4b's gap/peak query runs in the SAME Promise.all: it does not depend
+      //    on the sample, so the second round trip overlaps the count instead
+      //    of serializing behind it.
+      const [countResult, gapSummary] = await Promise.all([
         sequelize.query(
           `SELECT COUNT(*) AS cnt FROM "Logs" WHERE "sessionId" = :sessionId`,
           { replacements: { sessionId: session.id } }
         ),
-        // detectBackfillGaps() sorts internally — no ORDER BY needed here.
-        sequelize.query(
-          `SELECT timestamp FROM "Logs" WHERE "sessionId" = :sessionId`,
-          { replacements: { sessionId: session.id }, type: sequelize.QueryTypes.SELECT }
-        ),
+        AnalysisController.computeGapSummary(session.id),
       ]);
       const totalCount = parseInt(countResult[0]?.cnt || '0', 10);
 
@@ -93,19 +159,10 @@ class AnalysisController {
           }),
         ]);
 
-        // Deterministic even coverage across the whole session: index-only id scan,
-        // evenly-spaced pick in JS, then one primary-key fetch for the sampled rows.
-        const idRows = await sequelize.query(
-          `SELECT id FROM "Logs" WHERE "sessionId" = :sessionId ORDER BY id`,
-          { replacements: { sessionId: session.id }, type: sequelize.QueryTypes.SELECT }
-        );
-        const ids = idRows.map(r => r.id);
-        const target = Math.min(100, ids.length);
-        const step = Math.max(1, Math.floor(ids.length / target));
-        const sampledIds = [];
-        for (let i = 0; i < ids.length && sampledIds.length < target; i += step) {
-          sampledIds.push(ids[i]);
-        }
+        // Deterministic even coverage across the whole session: the id list is
+        // produced by the SQL stride selector above (bounded by LIMIT), then one
+        // primary-key fetch loads the sampled rows.
+        const sampledIds = await AnalysisController.selectEvenIds(session.id, totalCount);
         let randomBatch = [];
         if (sampledIds.length > 0) {
           randomBatch = await sequelize.query(
@@ -121,10 +178,10 @@ class AnalysisController {
       // model reads a real time series.
       sample.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
 
-      // 4b. Connectivity-gap detection from the full-resolution timestamps fetched
-      // in parallel with the count above (detectBackfillGaps sorts internally).
-      const gapResult = detectBackfillGaps(tsRows.map(r => r.timestamp));
-      const dataQualityNote = buildDataQualityNote(gapResult);
+      // 4b. Connectivity-gap detection came from the full-resolution timestamp
+      // fetch; it now runs in SQL (plans/014). detectBackfillGaps() stays the
+      // reference semantics for both outputs.
+      const dataQualityNote = buildDataQualityNote(gapSummary);
 
       // 5. Build prompt with computed duration
       const prompt = buildAnalysisPrompt(
