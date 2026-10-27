@@ -31,7 +31,7 @@ npm install
 ```
 Installs Express 4, Sequelize 6, `pg`, Passport, Joi, bcrypt, express-session,
 connect-pg-simple, cors, helmet, nanoid, plus dev tooling
-(eslint, @eslint/js, globals, husky, lint-staged, nodemon).
+(eslint, @eslint/js, globals, husky, lint-staged).
 
 ### Frontend (`apps/frontend/`)
 ```sh
@@ -192,7 +192,12 @@ must exist). For large existing datasets, run in a maintenance window
 ```sh
 node app.js
 # or: npm start
+# or: npm run dev   (Node built-in --watch; restarts on backend edits)
 ```
+
+`npm run dev` uses `node --watch app.js` (Node ≥18.11), the same watcher the
+dev compose stack runs. There is no `nodemon` dependency: the watcher is
+built into Node, so local dev and the container behave identically.
 
 - In non-production, the server runs its own `sequelize.sync()` then listens on `PORT`.
 - In production (`NODE_ENV=production`), the server skips its own `sequelize.sync()`.

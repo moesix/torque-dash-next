@@ -5,6 +5,7 @@
   "main": "app.js",
   "scripts": {
     "start": "node app.js",
+    "dev": "node --watch app.js",
     "lint": "eslint .",
     "test": "node --test test/ && node scripts/checkMirrors.js && node scripts/checkTestIntegrity.js",
     "test:coverage": "c8 node --test test/ && node scripts/checkMirrors.js && node scripts/checkTestIntegrity.js",
@@ -24,8 +25,7 @@
     "eslint": "^10.8.0",
     "globals": "^17.9.0",
     "husky": "^9.1.7",
-    "lint-staged": "^17.3.0",
-    "nodemon": "^3.1.14"
+    "lint-staged": "^17.3.0"
   },
   "dependencies": {
     "bcrypt": "^6.0.0",
