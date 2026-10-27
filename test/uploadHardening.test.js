@@ -247,6 +247,18 @@ describe('Upload hardening – UTC trip naming via processUpload', () => {
         }), res);
         assert.strictEqual(sessionUpdateCalls.length, 0);
     });
+
+    test('new session without time still gets a default Trip name', async () => {
+        stubHappyPath({ createsSession: true, timezoneOffset: 0 });
+        const { res, calls } = makeRes();
+        await UploadController.processUpload(makeReq({
+            eml: 'user@x.com', session: 'abc-123',
+        }), res);
+        assert.strictEqual(calls.statusCode, 200);
+        assert.strictEqual(sessionUpdateCalls.length, 1,
+            'absent time must not skip default naming — tsDate already carries server-now');
+        assert.match(sessionUpdateCalls[0].name, /^Trip \d{8} \d{1,2}:\d{2}(AM|PM)$/);
+    });
 });
 
 // ── resolveUser — exported module-private helper, tested directly ──────
@@ -489,5 +501,201 @@ describe('Upload hardening – bearer-token gate', () => {
         } finally {
             spy.restore();
         }
+    });
+});
+
+// ── Upload `time` contract — through the REAL processUpload ────────────
+// DECIDED contract: a `time` that is PRESENT but unparseable is rejected with
+// 400; an ABSENT `time` falls back to server-now and still answers 200 (a 400
+// would make the Torque device retry the frame forever). An Invalid Date row
+// would instead poison the whole ingest buffer, which is why present-but-bad
+// values can no longer pass through.
+
+describe('Upload hardening – time parameter contract', () => {
+    function lastIngestedRow() {
+        assert.strictEqual(ingestCalls.length, 1, 'exactly one row buffered');
+        return ingestCalls[0];
+    }
+
+    test('unparseable time returns 400 before any DB access', async () => {
+        stubHappyPath();
+        const { res, calls } = makeRes();
+        await UploadController.processUpload(makeReq({
+            eml: 'user@x.com', session: 'abc-123', time: 'abc',
+        }), res);
+        assert.strictEqual(calls.statusCode, 400);
+        assert.deepStrictEqual(calls.body, { error: 'Invalid time parameter.' });
+        assert.strictEqual(findOneCalls.length, 0, 'resolveUser must not hit the DB');
+        assert.strictEqual(ingestCalls.length, 0, 'nothing is buffered');
+    });
+
+    test('non-numeric time string (NaN-producing) returns 400', async () => {
+        stubHappyPath();
+        const { res, calls } = makeRes();
+        await UploadController.processUpload(makeReq({
+            eml: 'user@x.com', session: 'abc-123', time: 'not-a-number',
+        }), res);
+        assert.strictEqual(calls.statusCode, 400);
+        assert.deepStrictEqual(calls.body, { error: 'Invalid time parameter.' });
+    });
+
+    test('missing time falls back to server-now and answers 200 OK!', async () => {
+        stubHappyPath();
+        const before = Date.now();
+        const { res, calls } = makeRes();
+        await UploadController.processUpload(makeReq({
+            eml: 'user@x.com', session: 'abc-123',
+        }), res);
+        const after = Date.now();
+
+        assert.strictEqual(calls.statusCode, 200);
+        assert.strictEqual(calls.body, 'OK!');
+        const row = lastIngestedRow();
+        assert.ok(row.time instanceof Date, 'buffered timestamp is a Date');
+        assert.ok(row.time.getTime() >= before && row.time.getTime() <= after,
+            'absent time uses the server clock');
+    });
+
+    test('empty-string time is treated as absent (server-now fallback)', async () => {
+        stubHappyPath();
+        const { res, calls } = makeRes();
+        await UploadController.processUpload(makeReq({
+            eml: 'user@x.com', session: 'abc-123', time: '',
+        }), res);
+        assert.strictEqual(calls.statusCode, 200);
+        assert.ok(lastIngestedRow().time instanceof Date);
+    });
+
+    // `Number(' ')` is 0, so a whitespace-only stamp must be normalized to
+    // "absent" first — otherwise it is stored as the Unix epoch.
+    test('whitespace-only time is treated as absent, never epoch 0', async () => {
+        stubHappyPath();
+        const before = Date.now();
+        const { res, calls } = makeRes();
+        await UploadController.processUpload(makeReq({
+            eml: 'user@x.com', session: 'abc-123', time: '   ',
+        }), res);
+        const after = Date.now();
+        assert.strictEqual(calls.statusCode, 200);
+        assert.strictEqual(calls.body, 'OK!');
+        const row = lastIngestedRow();
+        assert.ok(row.time instanceof Date);
+        assert.notStrictEqual(row.time.getTime(), 0, 'whitespace must not become epoch 0');
+        assert.ok(row.time.getTime() >= before && row.time.getTime() <= after,
+            'whitespace-only time uses the server clock');
+    });
+
+    test('valid time is stored verbatim and still answers 200 OK!', async () => {
+        stubHappyPath();
+        const ts = Date.parse('2026-08-25T14:30:00Z');
+        const { res, calls } = makeRes();
+        await UploadController.processUpload(makeReq({
+            eml: 'user@x.com', session: 'abc-123', time: String(ts),
+        }), res);
+        assert.strictEqual(calls.statusCode, 200);
+        assert.strictEqual(calls.body, 'OK!');
+        assert.strictEqual(lastIngestedRow().time.getTime(), ts);
+    });
+
+    test('repeated time params (array) use the first value', async () => {
+        stubHappyPath();
+        const ts = Date.parse('2026-08-25T14:30:00Z');
+        const { res, calls } = makeRes();
+        await UploadController.processUpload(makeReq({
+            eml: 'user@x.com', session: 'abc-123', time: [String(ts), String(ts + 5000)],
+        }), res);
+        assert.strictEqual(calls.statusCode, 200);
+        assert.strictEqual(lastIngestedRow().time.getTime(), ts);
+    });
+
+    test('repeated empty time params fall back to server-now, never epoch 0', async () => {
+        stubHappyPath();
+        const before = Date.now();
+        const { res, calls } = makeRes();
+        await UploadController.processUpload(makeReq({
+            eml: 'user@x.com', session: 'abc-123', time: ['', ''],
+        }), res);
+        const after = Date.now();
+        assert.strictEqual(calls.statusCode, 200);
+        const ts = lastIngestedRow().time;
+        assert.ok(ts instanceof Date);
+        assert.ok(ts.getTime() >= before && ts.getTime() <= after,
+            'scalarize BEFORE the emptiness check — Number("") === 0 would pin 1970');
+    });
+});
+
+// ── Duplicated numeric params — scalarized, never arrays ───────────────
+
+describe('Upload hardening – repeated numeric params', () => {
+    test('repeated kc params store the first value as a scalar number', async () => {
+        stubHappyPath();
+        const { res, calls } = makeRes();
+        await UploadController.processUpload(makeReq({
+            eml: 'user@x.com', session: 'abc-123', time: String(Date.now()),
+            kc: ['100', '200'], kd: ['10', '20'],
+        }), res);
+
+        assert.strictEqual(calls.statusCode, 200);
+        assert.strictEqual(calls.body, 'OK!');
+        const row = ingestCalls[0];
+        assert.strictEqual(row.engineRpm, 100, 'kc array is coalesced to its first value');
+        assert.strictEqual(row.vehicleSpeed, 10, 'kd array is coalesced to its first value');
+        assert.ok(!Array.isArray(row.engineRpm), 'engine_rpm column never receives an array');
+        assert.ok(!Array.isArray(row.vehicleSpeed), 'vehicle_speed column never receives an array');
+    });
+
+    test('repeated kff1005/kff1006 params store the first value as a scalar', async () => {
+        stubHappyPath();
+        const { res, calls } = makeRes();
+        await UploadController.processUpload(makeReq({
+            eml: 'user@x.com', session: 'abc-123', time: String(Date.now()),
+            kff1005: ['12.5', '99.9'], kff1006: ['-7.25', '1.1'],
+        }), res);
+
+        assert.strictEqual(calls.statusCode, 200);
+        assert.strictEqual(ingestCalls[0].lon, 12.5);
+        assert.strictEqual(ingestCalls[0].lat, -7.25);
+    });
+});
+
+// ── Session-cache eviction on delete — exported evictSession seam ──────
+
+describe('Upload hardening – evictSession drops the cached session FK', () => {
+    test('after eviction the next upload re-resolves the session instead of reusing the cache', async () => {
+        stubHappyPath({ user: { id: 1 } });
+
+        let findOrCreateCalls = 0;
+        const baseFindOrCreate = mockModels.Session.findOrCreate;
+        mockModels.Session.findOrCreate = async (args) => {
+            findOrCreateCalls += 1;
+            return baseFindOrCreate(args);
+        };
+
+        const query = { eml: 'user@x.com', session: 'dev-abc', time: String(Date.now()) };
+
+        // First upload populates s:1:dev-abc; the second is served from cache.
+        await UploadController.processUpload(makeReq(query), makeRes().res);
+        await UploadController.processUpload(makeReq(query), makeRes().res);
+        assert.strictEqual(findOrCreateCalls, 1, 'second upload hits the positive session cache');
+        assert.ok(mockUserCache.store.has('s:1:dev-abc'), 'cache key is s:<userId>:<session>');
+
+        UploadController.evictSession('dev-abc', 1);
+
+        assert.strictEqual(mockUserCache.store.has('s:1:dev-abc'), false,
+            'evictSession deletes the per-user session key');
+
+        await UploadController.processUpload(makeReq(query), makeRes().res);
+        assert.strictEqual(findOrCreateCalls, 2, 'next upload re-resolves after eviction');
+    });
+
+    test('evictSession ignores missing arguments and does not touch other users\' keys', async () => {
+        stubHappyPath({ user: { id: 1 } });
+        mockUserCache.store.set('s:2:dev-abc', { id: 99 });
+
+        UploadController.evictSession(null, 1);
+        UploadController.evictSession('dev-abc', undefined);
+        UploadController.evictSession('dev-abc', 1);
+
+        assert.ok(mockUserCache.store.has('s:2:dev-abc'), 'other users are unaffected');
     });
 });

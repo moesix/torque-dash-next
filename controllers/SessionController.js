@@ -6,6 +6,8 @@ const sequelize = require('../models').sequelize;
 const Op = require('../models').Sequelize.Op;
 const { nanoid } = require('nanoid');
 const { discoverPidKeys } = require('../lib/pidRegistry');
+const ingestBuffer = require('../services/ingestBuffer');
+const { evictSession } = require('./UploadController');
 const {
   renameSchema,
   notesSchema,
@@ -19,10 +21,20 @@ const {
 class SessionController {
     static async delete(req, res) {
         try{
+            // quiesce pending ingest rows before mutating Logs so buffered
+            // frames can't resurrect deleted ranges
+            await drainIngest();
             let userId = req.user.id;
             let sessionId = req.params.sessionId
-            let session = await Session.destroy({ where: {id: sessionId, userId: userId } });
-            if(!session) return res.status(404).json({ error: 'Session not found' });
+            // Read the device sessionId BEFORE the destroy — it is the cache key
+            // for the upload hot path and is gone once the row is deleted.
+            const row = await Session.findOne({
+                where: { id: sessionId, userId },
+                attributes: ['id', 'sessionId'],
+            });
+            if(!row) return res.status(404).json({ error: 'Session not found' });
+            await Session.destroy({ where: { id: sessionId, userId: userId } });
+            evictSession(row.sessionId, userId);
             res.sendStatus(200);
         }
         catch (err) {
@@ -174,6 +186,7 @@ class SessionController {
     }
     static async copy(req, res) {
         try {
+            await drainIngest();
             const { error: valErr } = copySchema.validate(req.body);
             if (valErr) {
                 return res.status(400).json({ error: valErr.details[0].message });
@@ -214,6 +227,7 @@ class SessionController {
     }
     static async filter(req, res) {
         try {
+            await drainIngest();
             const { error: valErr } = filterSchema.validate(req.body);
             if (valErr) {
                 return res.status(400).json({ error: valErr.details[0].message });
@@ -253,6 +267,7 @@ class SessionController {
     }
     static async cut(req, res) {
         try {
+            await drainIngest();
             const { error: valErr } = cutSchema.validate(req.body);
             if (valErr) {
                 return res.status(400).json({ error: valErr.details[0].message });
@@ -282,6 +297,7 @@ class SessionController {
     }
     static async join(req, res) {
         try {
+            await drainIngest();
             const { error: valErr } = joinSchema.validate(req.body);
             if (valErr) {
                 return res.status(400).json({ error: valErr.details[0].message });
@@ -563,6 +579,13 @@ module.exports.aggregateSummaries = aggregateSummaries;
 module.exports.recomputeSummary = recomputeSummary;
 
 // ── Shared helpers ──────────────────────────────────────────────────────────
+
+// Quiesce pending ingest rows before a Log mutation. A buffered frame that
+// flushed after a cut/filter/delete would resurrect the range it just removed;
+// copy/join would snapshot a Logs table that is still receiving rows.
+async function drainIngest() {
+    await ingestBuffer.drain();
+}
 
 async function loadOwnedSession(sessionId, userId) {
     return Session.findOne({ where: { id: sessionId, userId } });

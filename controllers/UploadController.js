@@ -14,6 +14,11 @@ const UserCacheClass = userCache.UserCache || null;
 const vehicleCache = UserCacheClass ? new UserCacheClass({ ttl: 300_000, max: 1000 }) : userCache;
 const sessionCache = UserCacheClass ? new UserCacheClass({ ttl: 60_000, max: 5000 }) : userCache;
 
+// Express turns repeated query params (`kc=100&kc=200`) into arrays. Scalar
+// fields that are coerced or stored as single values take the first element,
+// matching the device's intent (a repeated param is a retry artefact).
+const scalar = (v) => (Array.isArray(v) ? v[0] : v);
+
 // Resolve an email to a User, using the positive + negative TTL cache.
 // Returns the user, or null if unknown (unknown emails are cached as negatives).
 async function resolveUser(eml) {
@@ -51,6 +56,7 @@ class UploadController {
             // ── END AUTHENTICATION ─────────────────────────────────────────
 
             let { eml, v, session, id, time, kff1005, kff1006, ...values } = req.query;
+            eml = scalar(eml);
 
             // Validate `session` BEFORE any DB access — a missing/garbage value
             // must never reach Sequelize (it would throw → 500 → device retry storm).
@@ -60,12 +66,24 @@ class UploadController {
                 });
             }
 
-            let lon = kff1005;
-            let lat = kff1006;
+            // `time` contract: PRESENT but unparseable → 400. ABSENT (including
+            // a whitespace-only value, which devices can send as an empty
+            // placeholder) → server-now fallback. Rejecting absent `time` would
+            // 400 older/edge clients and trigger a device retry storm; an
+            // Invalid Date row, by contrast, would poison the whole ingest
+            // buffer, so that is rejected here. Trimming first matters because
+            // `Number(' ')` is 0 — a whitespace-only stamp would otherwise be
+            // silently stored as the Unix epoch.
+            let t = scalar(time);
+            if (typeof t === 'string' && t.trim() === '') t = undefined;
+            const rawTs = t == null ? Date.now() : Number(t);
+            const tsDate = new Date(rawTs);
+            if (!Number.isFinite(rawTs) || !Number.isFinite(tsDate.getTime())) {
+                return res.status(400).json({ error: 'Invalid time parameter.' });
+            }
 
-            // Torque may send repeated query params as arrays
-            if (Array.isArray(lon)) lon = lon[0];
-            if (Array.isArray(lat)) lat = lat[0];
+            let lon = scalar(kff1005);
+            let lat = scalar(kff1006);
 
             // Resolve user (positive + negative cache). Keep the 403 gate:
             // unknown emails are NEVER buffered or forwarded.
@@ -119,11 +137,11 @@ class UploadController {
             }
 
             // After findOrCreate, if this is a new session, give it a default name
-            if (wasCreated && time) {
+            if (wasCreated) {
                 // Fetch the user's timezone offset (minutes from UTC, e.g. 480 for UTC+8)
                 const settings = await Settings.getSingleton();
                 const offsetMinutes = settings?.timezoneOffset ?? 0;
-                const d = new Date(Number(time));
+                const d = tsDate;
                 const ts = new Date(d.getTime() + offsetMinutes * 60000);
                 const pad = (n) => String(n).padStart(2, '0');
                 // UTC getters on the shifted timestamp: the shift makes UTC
@@ -134,15 +152,20 @@ class UploadController {
             }
 
             // Buffer the row (resolved numeric FKs only) and let it flush async.
+            // Only the promoted numeric columns are scalarized; the rest of the
+            // JSONB `values` bag keeps its raw shape (unknown PIDs may hold
+            // string payloads).
+            const kc = scalar(values.kc);
+            const kd = scalar(values.kd);
             ingestBuffer.ingest({
                 userId: user.id,
                 sessionId: sess.id,
-                time: new Date(Number(time)),
+                time: tsDate,
                 lon: lon != null ? Number(lon) : null,
                 lat: lat != null ? Number(lat) : null,
                 values: values,
-                engineRpm: values.kc != null ? Number(values.kc) : null,
-                vehicleSpeed: values.kd != null ? Number(values.kd) : null
+                engineRpm: kc != null ? Number(kc) : null,
+                vehicleSpeed: kd != null ? Number(kd) : null
             });
 
             // Respond immediately — do NOT await the DB flush.
@@ -157,3 +180,12 @@ class UploadController {
 module.exports = UploadController;
 // Exported for direct unit testing of the module-private resolver.
 module.exports.resolveUser = resolveUser;
+
+// Drop the cached device-session → numeric FK mapping for one session. Called
+// after a session row is deleted so the next upload re-resolves (and recreates)
+// it instead of buffering frames against a nonexistent FK.
+function evictSession(sessionKey, userId) {
+    if (sessionKey == null || userId == null) return;
+    sessionCache.del(`s:${userId}:${sessionKey}`);
+}
+module.exports.evictSession = evictSession;
