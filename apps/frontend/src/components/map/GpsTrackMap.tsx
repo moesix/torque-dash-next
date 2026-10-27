@@ -239,6 +239,54 @@ export function resolveFrameAtCursor(
   return f;
 }
 
+/**
+ * Evenly decimate a position list for static rendering: keeps at most `max`
+ * vertices, ALWAYS including the first and last, so the drawn track starts and
+ * ends exactly where the recording did. Returns the input untouched when it is
+ * already within budget. Pure — the played-back marker keeps using the full
+ * frames array.
+ */
+export function decimatePositions(
+  positions: [number, number][],
+  max = 4000,
+): [number, number][] {
+  const n = positions.length;
+  if (n <= max || max < 2) return positions;
+  const step = (n - 1) / (max - 1);
+  const out: [number, number][] = new Array(max);
+  for (let i = 0; i < max; i++) {
+    out[i] = positions[Math.round(i * step)];
+  }
+  out[max - 1] = positions[n - 1];
+  return out;
+}
+
+/**
+ * Split a position list wherever consecutive longitudes jump across the
+ * antimeridian (|Δlon| > 180°): Leaflet would otherwise join the two points
+ * with a full-width streak. Longitudes are left unnormalized — the map
+ * renders the original coordinates, just as separate polylines.
+ */
+export function splitAntimeridian(
+  positions: [number, number][],
+): [number, number][][] {
+  if (positions.length === 0) return [];
+  const segments: [number, number][][] = [];
+  let current: [number, number][] = [positions[0]];
+  for (let i = 1; i < positions.length; i++) {
+    const prev = positions[i - 1];
+    const next = positions[i];
+    if (Math.abs(next[1] - prev[1]) > 180) {
+      segments.push(current);
+      current = [next];
+    } else {
+      current.push(next);
+    }
+  }
+  segments.push(current);
+  return segments;
+}
+
 interface Props {
   frames: TelemetryFrame[];
   /** Tailwind height classes for the MapContainer. */
@@ -341,6 +389,14 @@ export default function GpsTrackMap({ frames, className }: Props) {
     [frames],
   );
 
+  // Static route rendering: one leaflet polyline per antimeridian-safe
+  // segment, decimated to a bounded vertex count. Marker playback below stays
+  // bound to the full `frames` (exact positions on every cursor tick).
+  const routeSegments = useMemo<[number, number][][]>(
+    () => splitAntimeridian(decimatePositions(positions)),
+    [positions],
+  );
+
   const theme: TileTheme = isDark ? 'dark' : 'light';
   // Settings-driven effective target ({theme} resolved, key appended).
   // OSM while settings are absent (loading/failed) — the map never blocks on
@@ -418,7 +474,13 @@ export default function GpsTrackMap({ frames, className }: Props) {
             providerId === 'carto' ? { tileerror: handleTileError } : {}
           }
         />
-        <Polyline positions={positions} pathOptions={{ color: ACCENT, weight: 3 }} />
+        {routeSegments.map((segment, i) => (
+          <Polyline
+            key={i}
+            positions={segment}
+            pathOptions={{ color: ACCENT, weight: 3 }}
+          />
+        ))}
         {positions.length > 0 ? (
           <Marker ref={markerRef} position={center} icon={pinIcon} />
         ) : null}

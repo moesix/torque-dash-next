@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { coerceScalar, getAvailableSeries, computeStats, findNearestFrameIndex } from '../pidDecode';
+import { coerceScalar, getAvailableSeries, getSeriesData, computeTotalTrim, precomputeEpochs, computeStats, findNearestFrameIndex } from '../pidDecode';
 
 describe('coerceScalar', () => {
     it('returns null for null/undefined', () => {
@@ -159,6 +159,35 @@ describe('computeStats', () => {
             [2000, null],
         ];
         expect(computeStats(data)).toBeNull();
+    });
+});
+
+describe('epochs plumbing (shared precomputed timestamps)', () => {
+    const frames = [
+        { timestamp: '2026-01-01T00:00:00Z', lon: null, lat: null, values: { k6: 1, k7: 2 }, engineRpm: 900, vehicleSpeed: 0 },
+        { timestamp: '2026-01-01T00:00:01Z', lon: null, lat: null, values: { k6: '3', k7: 4 }, engineRpm: 1000, vehicleSpeed: 10 },
+        { timestamp: '2026-01-01T00:00:02Z', lon: null, lat: null, values: {}, engineRpm: null, vehicleSpeed: null },
+    ];
+
+    it('precomputeEpochs matches the per-frame Date semantics', () => {
+        expect(precomputeEpochs(frames)).toEqual(frames.map((f) => new Date(f.timestamp).getTime()));
+    });
+
+    it('uses supplied epochs instead of recomputing them', () => {
+        const epochs = [10, 20, 30];
+        const series = getSeriesData(frames, { pid: 'engineRpm', full: '', short: '', unit: '', source: 'column', field: 'engineRpm' }, epochs);
+        expect(series.map(([t]) => t)).toEqual(epochs);
+        const trim = computeTotalTrim(frames, epochs);
+        expect(trim.map(([t]) => t)).toEqual(epochs);
+        expect(trim.map(([, v]) => v)).toEqual([3, 7, null]);
+    });
+
+    // Internal call sites only: a length mismatch means epochs came from a
+    // different frames array, which would silently shift every timestamp.
+    it('throws when epochs length does not match frames', () => {
+        expect(() => getSeriesData(frames, { pid: 'engineRpm', full: '', short: '', unit: '', source: 'column', field: 'engineRpm' }, [1, 2]))
+            .toThrow('epochs length mismatch');
+        expect(() => computeTotalTrim(frames, [1, 2])).toThrow('epochs length mismatch');
     });
 });
 

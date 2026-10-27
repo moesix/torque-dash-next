@@ -185,9 +185,9 @@ export interface Analysis {
   model: string;
   response: string;
   reasoning?: string | null;
-  /** Token accounting from the provider. The analysis-list/one endpoints do not
-   *  select this column (controllers/AnalysisController.js), so it is absent
-   *  at runtime — optional here to reflect that. */
+  /** Token accounting from the provider. `getAnalysis` selects it; the list
+   *  endpoints do not, so it is only present on expanded rows. `aborted: true`
+   *  marks an analysis cut off mid-stream (partial answer kept). */
   tokenUsage?: Record<string, unknown> | null;
   createdAt: string;
 }

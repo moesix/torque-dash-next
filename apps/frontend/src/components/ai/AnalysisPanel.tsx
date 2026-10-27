@@ -12,6 +12,9 @@ import { stripMarkdown } from '@/lib/utils';
 
 export interface AnalysisPanelHandle {
   triggerAnalysis: () => void;
+  /** Read by ReplayDashboard's confirm dialog so its buttons stay disabled
+   *  while a run is in flight (display-only hint, no contract change). */
+  isAnalyzing: () => boolean;
 }
 
 interface Props {
@@ -47,6 +50,9 @@ export default function AnalysisPanel({ sessionId, ref, printMode = false }: Pro
     const panelRef = useRef<HTMLDivElement>(null);
 
     const doAnalyze = useCallback(async () => {
+      // Single-flight: a second trigger while a run is live would pay for a
+      // duplicate analysis. `analyzing` clears on error and in handleDone.
+      if (analyzing) return;
       setAnalyzing(true);
       setError(null);
       setBudgetWarning(null);
@@ -58,9 +64,12 @@ export default function AnalysisPanel({ sessionId, ref, printMode = false }: Pro
         setError(err instanceof Error ? err.message : 'Analysis failed');
         setAnalyzing(false);
       }
-    }, [sessionId]);
+    }, [sessionId, analyzing]);
 
-    useImperativeHandle(ref, () => ({ triggerAnalysis: doAnalyze }), [doAnalyze]);
+    useImperativeHandle(ref, () => ({
+      triggerAnalysis: doAnalyze,
+      isAnalyzing: () => analyzing,
+    }), [doAnalyze, analyzing]);
 
     useEffect(() => {
       getFullSettings()
