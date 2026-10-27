@@ -15,11 +15,8 @@
 
 import React, { useState, useMemo, useCallback, useRef } from 'react';
 import { useParams, Link } from 'react-router';
-import { exportSessionCsv, getVehicles, reassignSessionVehicle } from '@/lib/api';
 import type { AnalysisPanelHandle } from '@/components/ai/AnalysisPanel';
-import type { Session, Vehicle } from '@/lib/types';
 import VehicleReassignDialog from '@/components/vehicles/VehicleReassignDialog';
-import { queryClient } from '@/app/queryClient';
 import Skeleton from '@/components/ui/Skeleton';
 import ErrorAlert from '@/components/ui/ErrorAlert';
 import Badge from '@/components/ui/Badge';
@@ -34,6 +31,9 @@ import DecodedMetricsTable from '@/components/telemetry/DecodedMetricsTable';
 import { getAvailableSeries, getSeriesData, precomputeEpochs, coerceScalar } from '@/lib/pidDecode';
 import { useSessionTelemetry } from './hooks/useSessionTelemetry';
 import { usePidSelection } from './hooks/usePidSelection';
+import { usePrintMode } from './hooks/usePrintMode';
+import { useVehicleReassign } from './hooks/useVehicleReassign';
+import { useSessionExport } from './hooks/useSessionExport';
 import NotesCard from '@/components/NotesCard';
 import AnalysisConfirmDialog from '@/components/AnalysisConfirmDialog';
 
@@ -86,32 +86,29 @@ export default function ReplayDashboard() {
   const { session, frames, isLoading, error, truncated } = useSessionTelemetry(id);
 
   // ── State ──────────────────────────────────────────────────────────
-  const [isExporting, setIsExporting] = useState(false);
-  const [exportError, setExportError] = useState<string | null>(null);
   const dialogRef = useRef<HTMLDialogElement | null>(null);
   const analysisPanelRef = useRef<AnalysisPanelHandle>(null);
   const [showAnalysisConfirm, setShowAnalysisConfirm] = useState(false);
-  const [showReassign, setShowReassign] = useState(false);
-  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
-  // Error surfacing for the vehicle-reassign flow: a failed vehicle-list load
-  // shows inline next to the button; a failed reassignment is rendered inside
-  // the dialog (which stays open) and mirrored here for the parent.
-  const [reassignError, setReassignError] = useState<string | null>(null);
   // View mode: 'dash' is the default landing view; 'map' shows the
   // GPS track near-fullscreen with the playback transport beneath it.
   const [viewMode, setViewMode] = useState<'dash' | 'map'>('dash');
-  // Print mode: force-expands diagnostic panels so charts initialize before
-  // window.print(); cleared again after the print dialog closes.
-  const [printMode, setPrintMode] = useState(false);
-  const [isPrinting, setIsPrinting] = useState(false);
-  // Ids of the in-flight double-rAF chain that calls window.print(). Stored so
-  // a navigating/unmounting component can cancel the chain — window.print()
-  // must never fire on a page the user has already left.
-  const printRafRef = useRef<number[]>([]);
-  // True only between the moment window.print() is actually invoked and the
-  // reset that follows. Gates the reset effect's timeout fallback so a
-  // backgrounded tab (rAF stalled) cannot collapse the report pre-print.
-  const printInvokedRef = useRef(false);
+
+  // Feature state machines, each self-contained in ./hooks (plans/017).
+  // Print-to-PDF: force-expand panels → double-rAF → window.print(), reset on
+  // afterprint (regression net: __tests__/printFlow.test.tsx).
+  const { printMode, isPrinting, handlePrint } = usePrintMode();
+  // CSV download: isExporting spinner + inline exportError.
+  const { isExporting, exportError, handleExport } = useSessionExport(id);
+  // Vehicle reassign: vehicles list, dialog visibility, inline error.
+  const {
+    showReassign,
+    vehicles,
+    reassignError,
+    setReassignError,
+    openReassign,
+    reassign,
+    closeReassign,
+  } = useVehicleReassign(id);
 
   // ── Computed values ────────────────────────────────────────────────
   const available = useMemo(
@@ -187,76 +184,6 @@ export default function ReplayDashboard() {
     const el = document.getElementById('ai-analysis-panel');
     el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
-
-  /**
-   * Print the session report / save as PDF.
-   *
-   * Sets printMode so the diagnostic panels force-expand (charts lazy-init),
-   * then waits two frames for React to commit the expanded panels and for
-   * ECharts' lazy init to render before opening the print dialog (a single
-   * rAF raced the charts on some engines — notably Safari). printMode is kept
-   * on until the dialog closes: the reset happens via the `afterprint` event
-   * (see the effect below), with a timeout fallback for engines that never
-   * fire it. Note: the latest AI analysis body is fetched asynchronously on
-   * printMode — if it was never expanded before, the first print may omit its
-   * body (one-print latency); the analysis is usually already expanded when
-   * the owner prints after reading.
-   */
-  function handlePrint() {
-    setIsPrinting(true);
-    setPrintMode(true);
-    // Double rAF so React commits the expanded panels AND ECharts' lazy init
-    // gets a frame to render before the print dialog opens. Ids are stored so a
-    // navigating/unmounting component can cancel the chain — window.print()
-    // must never fire on a page the user has already left.
-    const raf1 = requestAnimationFrame(() => {
-      const raf2 = requestAnimationFrame(() => {
-        printInvokedRef.current = true;
-        window.print();
-      });
-      printRafRef.current.push(raf2);
-    });
-    printRafRef.current.push(raf1);
-  }
-
-  // Reset print mode AFTER printing completes. `afterprint` is not fired by
-  // every engine (older Safari), so fall back to a ~500ms timeout. Keeps
-  // isPrinting true (spinner visible) until the dialog actually closes.
-  React.useEffect(() => {
-    if (!isPrinting) return;
-    // Armed when isPrinting flips true — BEFORE handlePrint's rAF chain runs
-    // and sets it true. This keeps the ordering deterministic.
-    printInvokedRef.current = false;
-    const finishPrint = () => {
-      printInvokedRef.current = false;
-      setPrintMode(false);
-      setIsPrinting(false);
-    };
-    window.addEventListener('afterprint', finishPrint);
-    // Fallback ONLY for engines where afterprint never fires — and only once
-    // window.print() has actually been invoked (a backgrounded tab stalls
-    // rAF; without this gate the fallback would reset printMode before the
-    // print, degrading the report).
-    const fallback = window.setTimeout(() => {
-      if (printInvokedRef.current) finishPrint();
-    }, 500);
-    return () => {
-      window.removeEventListener('afterprint', finishPrint);
-      window.clearTimeout(fallback);
-      printRafRef.current.forEach((id) => cancelAnimationFrame(id));
-      printRafRef.current = [];
-    };
-  }, [isPrinting]);
-
-  // Unmount-only cleanup: navigation away mid-chain cancels the pending
-  // window.print() so it can never fire on whatever page mounts next.
-  React.useEffect(
-    () => () => {
-      printRafRef.current.forEach((id) => cancelAnimationFrame(id));
-      printRafRef.current = [];
-    },
-    [],
-  );
 
   // Reset playback cursor when switching sessions.
   React.useEffect(() => {
@@ -396,18 +323,7 @@ export default function ReplayDashboard() {
             </button>
             <button
               type="button"
-              onClick={async () => {
-                if (!id) return;
-                setIsExporting(true);
-                setExportError(null);
-                try {
-                  await exportSessionCsv(id);
-                } catch (err) {
-                  setExportError(err instanceof Error ? err.message : 'Download failed');
-                } finally {
-                  setIsExporting(false);
-                }
-              }}
+              onClick={handleExport}
               disabled={isExporting}
               className="whitespace-nowrap rounded p-2.5 min-w-[44px] min-h-[44px] text-xs font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200 disabled:opacity-50"
               title="Download session data as CSV"
@@ -447,19 +363,7 @@ export default function ReplayDashboard() {
             )}
             <button
               type="button"
-              onClick={async () => {
-                if (!id) return;
-                setReassignError(null);
-                try {
-                  const v = await getVehicles();
-                  setVehicles(v ?? []);
-                  setShowReassign(true);
-                } catch (err) {
-                  setReassignError(
-                    err instanceof Error ? err.message : 'Failed to load vehicles.',
-                  );
-                }
-              }}
+              onClick={openReassign}
               className="whitespace-nowrap rounded p-2.5 min-w-[44px] min-h-[44px] text-xs font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
               title="Reassign to a different vehicle"
             >
@@ -596,35 +500,9 @@ export default function ReplayDashboard() {
         <VehicleReassignDialog
           vehicles={vehicles}
           currentVehicleId={session.vehicleId}
-          onReassign={async (vehicleId) => {
-            if (!id) return;
-            try {
-              await reassignSessionVehicle(id, vehicleId);
-              // Patch the session query cache BEFORE the dialog closes so the
-              // banner's vehicle chip reflects the assignment immediately.
-              // Query key mirrors useSessionTelemetry (['session', id]).
-              queryClient.setQueryData<Session | undefined>(['session', id], (old) => {
-                if (!old) return old;
-                const assigned = vehicles.find((v) => v.id === vehicleId);
-                return {
-                  ...old,
-                  vehicleId,
-                  vehicleName: assigned ? assigned.name : null,
-                };
-              });
-            } catch (err) {
-              // Rethrow so the dialog renders the error and stays open — it
-              // awaits onReassign and only closes after this resolves.
-              throw err instanceof Error
-                ? err
-                : new Error('Failed to reassign vehicle.');
-            }
-          }}
+          onReassign={reassign}
           onError={setReassignError}
-          onClose={() => {
-            setReassignError(null);
-            setShowReassign(false);
-          }}
+          onClose={closeReassign}
         />
       )}
 
