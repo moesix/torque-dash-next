@@ -177,7 +177,7 @@ beforeEach(() => {
 
 // ── Tests ───────────────────────────────────────────────────────────
 
-describe('GET /api/sessions/:id/telemetry — TelemetryController.range', { skip: apiRouter ? false : 'routes/api.js could not load' }, () => {
+describe('GET /api/sessions/:sessionId/telemetry — TelemetryController.range', { skip: apiRouter ? false : 'routes/api.js could not load' }, () => {
     test('missing from or to returns 400 before any DB access', async () => {
         for (const qs of ['', 'from=2026-08-25T00:00:00.000Z', 'to=2026-08-25T00:00:00.000Z']) {
             const calls = installDbMocks();
@@ -336,7 +336,7 @@ describe('TelemetryController.range — direct call without req.user', () => {
 
         await TelemetryController.range({
             query: { from: '2026-01-01T00:00:00Z', to: '2026-01-02T00:00:00Z' },
-            params: { id: '7' },
+            params: { sessionId: '7' },
         }, res);
 
         assert.strictEqual(out.status, 401);

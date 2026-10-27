@@ -218,6 +218,52 @@ describe('listAllAnalyses', () => {
     assert.strictEqual(calls.body.limit, 50);
     assert.strictEqual(calls.body.offset, 0);
   });
+
+  test('clamps limit and offset like the session list', async () => {
+    const cases = [
+      { query: 'limit=-1', limit: 1, offset: 0 },
+      { query: 'limit=0', limit: 50, offset: 0 }, // deliberate: 0 → default, not 1
+      { query: 'limit=9999', limit: 200, offset: 0 },
+      { query: 'offset=-5', limit: 50, offset: 0 },
+      { query: 'offset=abc', limit: 50, offset: 0 },
+    ];
+
+    for (const c of cases) {
+      const captured = [];
+      mockModels.Analysis.findAll = async (opts) => { captured.push(opts); return []; };
+      mockModels.Analysis.count = async () => 0;
+
+      const req = makeStubReq({ query: Object.fromEntries(new URLSearchParams(c.query)) });
+      const { res, calls } = makeStubRes();
+      await AnalysisController.listAllAnalyses(req, res);
+
+      assert.strictEqual(calls.body.limit, c.limit, `${c.query} → limit`);
+      assert.strictEqual(calls.body.offset, c.offset, `${c.query} → offset`);
+      assert.strictEqual(captured[0].limit, c.limit, `${c.query} → findAll limit`);
+      assert.strictEqual(captured[0].offset, c.offset, `${c.query} → findAll offset`);
+    }
+  });
+
+  test('rejects a non-int4 vehicleId with 400 before any DB access', async () => {
+    for (const vehicleId of ['abc', '1.5']) {
+      let touched = false;
+      mockModels.Session.findAll = async () => { touched = true; return []; };
+      mockModels.Analysis.findAll = async () => { touched = true; return []; };
+      mockModels.Analysis.count = async () => { touched = true; return 0; };
+
+      const req = makeStubReq({ query: { vehicleId } });
+      const { res, calls } = makeStubRes();
+      await AnalysisController.listAllAnalyses(req, res);
+
+      assert.strictEqual(calls.statusCode, 400, `vehicleId=${vehicleId}`);
+      assert.deepStrictEqual(calls.body, { error: 'Invalid vehicleId.' });
+      assert.strictEqual(touched, false, 'the gate must run before the DB');
+    }
+
+    mockModels.Session.findAll = async () => [];
+    mockModels.Analysis.findAll = async () => [];
+    mockModels.Analysis.count = async () => 0;
+  });
 });
 
 describe('getAnalysis', () => {

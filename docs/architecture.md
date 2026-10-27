@@ -33,7 +33,7 @@ flowchart LR
     TC --> DB
     USR --> UDB[(PostgreSQL: Users/Sessions)]
 
-    BR -.->|GET /api/sessions/:id/telemetry| TC
+    BR -.->|GET /api/sessions/:sessionId/telemetry| TC
 ```
 
 ```
@@ -58,7 +58,7 @@ resolve user (cached) → `findOrCreate` session (resolved numeric FK) →
 ### Read path
 `Browser SPA` → `CORS` + `express-session` → `/api/*` → `authenticate`
 middleware → controller. Telemetry is served via
-`GET /api/sessions/:id/telemetry?from&to&limit` (`TelemetryController.range`),
+`GET /api/sessions/:sessionId/telemetry?from&to&limit` (`TelemetryController.range`),
 which enforces ownership and returns
 **paged** frames from the `Logs` hypertable.
 
@@ -122,7 +122,7 @@ which enforces ownership and returns
   re-queued failed batch could be flushed simultaneously with a fresh batch.
 
 ### 2.3 `TelemetryController.range` (`controllers/TelemetryController.js`)
-- `GET /api/sessions/:id/telemetry?from&to&limit`.
+- `GET /api/sessions/:sessionId/telemetry?from&to&limit`.
 - Enforces ownership (`req.user.id`).
 - `Log.findAll` with `timestamp BETWEEN from AND to`, capped `limit`
   (`min(limit||5000, 10000)`), ordered ASC, **limited attributes**
@@ -951,7 +951,7 @@ See `docs/deployment.md` for the full deployment guide.
 | `GET /api/version` | none | returns `{ version: string }` from package.json |
 | `GET /api/sessions?limit&offset` | cookie | list sessions (paginated: `{ sessions, total, limit, offset }`) |
 | `GET /api/sessions/:id` | cookie + owner | session metadata (no full logs) |
-| `GET /api/sessions/:id/telemetry?from&to&limit` | cookie + owner | paged telemetry frames |
+| `GET /api/sessions/:sessionId/telemetry?from&to&limit` | cookie + owner | paged telemetry frames |
 | `GET /api/sessions/:id/export/csv` | cookie + owner | stream all telemetry as CSV with dynamic PID column discovery |
 | `PATCH /api/sessions/rename/:id` | cookie + owner | rename session (body: `{ name }`) |
 | `PATCH /api/sessions/addlocation/:sessionId` | cookie + owner | set start/end location labels (body: `{ locations: { start, end } }`) |

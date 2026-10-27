@@ -9,6 +9,7 @@ const { analyze, streamEvents } = require('../lib/llmProviders');
 const { buildAnalysisPrompt, formatSessionDuration, detectBackfillGaps, buildDataQualityNote } = require('../lib/llmPrompt');
 const { discoverPidKeys } = require('../lib/pidRegistry');
 const { classifyAnalysisError } = require('../lib/analysisErrors');
+const { isInt4Id } = require('../lib/validators');
 
 class AnalysisController {
   static async analyzeSession(req, res) {
@@ -250,9 +251,21 @@ class AnalysisController {
 
   static async listAllAnalyses(req, res) {
     try {
+      // Clamp pagination to limit [1,200] (default 50) and offset >= 0.
+      // limit=0 → 50 is deliberate: 0 parses falsy and falls back to the
+      // default rather than being clamped up to 1 (pinned by tests).
       const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200);
       const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
-      const vehicleId = req.query.vehicleId ? Number(req.query.vehicleId) : null;
+
+      // Optional vehicle filter: absent/''/'none' = no vehicle filter,
+      // otherwise it must be an int4 id. Gate BEFORE Number() so junk can't
+      // reach Sequelize's Session lookup as a Postgres 22P02/22003 500.
+      const rawVehicleId = req.query.vehicleId;
+      if (rawVehicleId !== undefined && rawVehicleId !== '' && rawVehicleId !== 'none'
+          && !isInt4Id(rawVehicleId)) {
+        return res.status(400).json({ error: 'Invalid vehicleId.' });
+      }
+      const vehicleId = rawVehicleId ? Number(rawVehicleId) : null;
 
       // Build where clause
       const where = { userId: req.user.id };

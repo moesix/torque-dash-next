@@ -115,7 +115,7 @@ router.delete('/sessions/:sessionId', validateIds('sessionId'), authenticate, Se
 router.get('/sessions/:sessionId/export/csv', validateIds('sessionId'), exportLimiter, authenticate, SessionController.exportCsv);
 
 // Paged telemetry frames (ownership enforced inside the controller)
-router.get('/sessions/:id/telemetry', validateIds('id'), authenticate, TelemetryController.range);
+router.get('/sessions/:sessionId/telemetry', validateIds('sessionId'), authenticate, TelemetryController.range);
 
 router.patch('/sessions/rename/:sessionId', validateIds('sessionId'), authenticate, SessionController.rename);
 router.patch('/sessions/addlocation/:sessionId', validateIds('sessionId'), authenticate, SessionController.addLocation);

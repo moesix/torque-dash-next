@@ -317,6 +317,19 @@ describe('vehicleCreateSchema', () => {
     assert.ifError(error);
     assert.strictEqual(value.engineCc, 2000);
   });
+
+  it('accepts the SPA blank-vehicle payload (null make/model/year/engineCc)', () => {
+    // VehicleManager always sends engineCc, null when the input is blank —
+    // this exact body used to 400 on engineCc.
+    const { error } = vehicleCreateSchema.validate({
+      name: 'Tow Rig',
+      make: null,
+      model: null,
+      year: null,
+      engineCc: null,
+    });
+    assert.ifError(error);
+  });
 });
 
 describe('vehicleUpdateSchema', () => {
@@ -627,6 +640,21 @@ describe('validateIds', () => {
     assert.strictEqual(nextCalled, true);
   });
 
+  it('accepts the largest int4 id', () => {
+    const { calls, nextCalled } = run({ sessionId: '2147483647' });
+    assert.strictEqual(calls.statusCode, null);
+    assert.strictEqual(nextCalled, true);
+  });
+
+  for (const bad of ['2147483648', '9'.repeat(20)]) {
+    it(`rejects int4 overflow ${bad} with 400`, () => {
+      const { calls, nextCalled } = run({ sessionId: bad });
+      assert.strictEqual(calls.statusCode, 400);
+      assert.deepStrictEqual(calls.body, { error: 'Invalid sessionId.' });
+      assert.strictEqual(nextCalled, false);
+    });
+  }
+
   it('checks every named param', () => {
     const { calls, nextCalled } = run({ sessionId: '1', analysisId: 'nope' }, ['sessionId', 'analysisId']);
     assert.strictEqual(calls.statusCode, 400);
@@ -674,6 +702,53 @@ describe('list pagination clamps', () => {
   });
 });
 
+describe('SessionController vehicleId query gate', () => {
+  function run(query) {
+    const req = makeStubReq({ params: {}, query });
+    const { res, calls } = makeStubRes();
+    return { req, res, calls };
+  }
+
+  for (const bad of ['abc', '1.5', '0', '-1', '2147483648', '9'.repeat(20)]) {
+    it(`returns 400 for vehicleId=${bad} before any DB access`, async () => {
+      let userLookedUp = false;
+      mockModels.User.findOne = async () => { userLookedUp = true; return { id: 1 }; };
+      try {
+        const { req, res, calls } = run({ vehicleId: bad });
+        await SessionController.getAll(req, res);
+        assert.strictEqual(calls.statusCode, 400);
+        assert.deepStrictEqual(calls.body, { error: 'Invalid vehicleId.' });
+        assert.strictEqual(userLookedUp, false, 'the gate must run before the DB');
+      } finally {
+        mockModels.User.findOne = async () => null;
+      }
+    });
+  }
+
+  it('passes none, a valid int4 id and an absent filter through', async () => {
+    const wheres = [];
+    mockModels.User.findOne = async () => ({ id: 1 });
+    mockModels.Session.findAll = async (opts) => { wheres.push(opts.where); return []; };
+    mockModels.Session.count = async () => 0;
+    try {
+      for (const query of [{ vehicleId: 'none' }, { vehicleId: '42' }, {}]) {
+        const { req, res, calls } = run(query);
+        await SessionController.getAll(req, res);
+        assert.notStrictEqual(calls.statusCode, 400, JSON.stringify(query));
+      }
+    } finally {
+      mockModels.User.findOne = async () => null;
+      mockModels.Session.findAll = async () => [];
+      mockModels.Session.count = async () => 0;
+    }
+    assert.deepStrictEqual(wheres, [
+      { userId: 1, vehicleId: null },
+      { userId: 1, vehicleId: 42 },
+      { userId: 1 },
+    ]);
+  });
+});
+
 describe('VehicleController body validation', () => {
   it('rejects create with a non-integer year as 400 JSON', async () => {
     const req = makeStubReq({ params: {}, body: { name: 'Car', year: 'abc' } });
@@ -693,12 +768,21 @@ describe('VehicleController body validation', () => {
 });
 
 describe('route wiring — id params', () => {
-  it('gates every id-bearing /api route with validateIds', () => {
+  it('gates every id-bearing /api route with validateIds for its own :params', () => {
     const src = fs.readFileSync(path.join(__dirname, '..', 'routes', 'api.js'), 'utf8');
     const idRoutes = src.split('\n').filter((line) => /^router\.\w+\(.*:\w+/.test(line));
     assert.strictEqual(idRoutes.length, 21);
     for (const line of idRoutes) {
       assert.match(line, /validateIds\(/, `missing validateIds: ${line.trim()}`);
+      // The guard must cover exactly the route's declared path params, in
+      // order — otherwise a renamed param (e.g. :id → :sessionId) silently
+      // validates a key that is always undefined and 400s every request.
+      const pathMatch = line.match(/^router\.\w+\(\s*'([^']+)'/);
+      assert.ok(pathMatch, `unparsable route path: ${line.trim()}`);
+      const paramNames = [...pathMatch[1].matchAll(/:(\w+)/g)].map((m) => m[1]);
+      const argsMatch = line.match(/validateIds\(([^)]*)\)/);
+      const args = [...argsMatch[1].matchAll(/'(\w+)'/g)].map((m) => m[1]);
+      assert.deepStrictEqual(args, paramNames, `validateIds args must match route params: ${line.trim()}`);
     }
   });
 });

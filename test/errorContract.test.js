@@ -179,6 +179,28 @@ describe('Error contract — backend response shapes', () => {
     }
   });
 
+  test('GET /api/sessions/42 passes the id gate (is not a 400)', async () => {
+    // Positive control for the test above: a valid id must reach the
+    // controller. The mocked Session.findOne returns null, so the visible
+    // answer is a downstream 404 — the point is only that the gate passed.
+    const app = express();
+    app.use('/api', (req, _res, next) => { req.user = { id: 1 }; req.isAuthenticated = () => true; next(); });
+    app.use('/api', apiRouter);
+    const server = app.listen(0);
+    try {
+      await new Promise((resolve) => server.once('listening', resolve));
+      const { port } = server.address();
+      const res = await fetch(`http://127.0.0.1:${port}/api/sessions/42`);
+      assert.notStrictEqual(res.status, 400);
+      const body = await res.json();
+      assert.notDeepStrictEqual(body, { error: 'Invalid sessionId.' });
+      assert.strictEqual(res.status, 404);
+      assert.deepStrictEqual(body, { error: 'Session not found' });
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
   test('cut validation error returns 400 JSON', async () => {
     const req = makeStubReq({ body: {} });
     const { res, calls } = makeStubRes();

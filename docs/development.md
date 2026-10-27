@@ -273,6 +273,7 @@ if (valErr) {
 | `vehicleCreateSchema` | `VehicleController.create` | Vehicle fields: `name` required, `make`/`model`/`year`/`engineCc` optional |
 | `vehicleUpdateSchema` | `VehicleController.update` | Same as create, all optional, `min(1)` — at least one field required |
 | `telemetryRangeSchema` | `TelemetryController.range` | `{ from, to }` ISO dates + `limit` (1–10000, default 5000) — wired so a malformed range returns `400`, not a `500`. Cursor-based: no `offset` |
+| `validateIds(...params)` | route middleware in `routes/api.js` | Not a body schema: gates the named path params (`:sessionId`, `:vehicleId`, `:analysisId`) to a positive int4 (≤ 2147483647) before Sequelize, returning `400 { error: 'Invalid <param>.' }` instead of a Postgres `22P02`/`22003` 500 |
 
 **Pure validation helpers** (used by `UserController.updateSettings`):
 
@@ -622,7 +623,7 @@ blockers are resolved and re-reviewed as PASS:
   shared variants) no longer `include` the full `Log` array. They call the new
   `aggregateSummaries()` (one `GROUP BY` per request) and return lightweight
   `startDate`/`endDate`/`duration`/`maxSpeed`/`maxRpm`. Paged telemetry stays
-  on `GET /api/sessions/:id/telemetry`.
+  on `GET /api/sessions/:sessionId/telemetry`.
 - ✅ **CSRF protection added:** `middleware/csrfGuard.js` validates the `Origin`
   header on all state-changing `/api` requests against the expected origin and
   the `CORS_ORIGINS` allowlist (OWASP-recommended for JSON SPAs). The `publicOrigin`
