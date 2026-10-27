@@ -26,13 +26,6 @@ function makeLimiter({ windowMs, max, skip }) {
     });
 }
 
-// Dedicated rate limiter for unauthenticated shared session endpoints.
-// Stricter than global to prevent shareId enumeration.
-const sharedLimiter = makeLimiter({
-    windowMs: 60000,  // 1 minute
-    max: 30,          // 30 requests per minute per IP
-});
-
 // Torque sends data through a GET request rather than POST. Ingestion is
 // unauthenticated (email-gated) so we throttle per client IP. The cap is env-
 // tunable because a single Torque device can burst well above 60/min when it
@@ -113,13 +106,9 @@ router.use(makeLimiter(rateLimits.global));
 router.post('/users/register', authLimiter, UserController.register);
 router.post('/users/login', authLimiter, UserController.login);
 router.post('/users/logout', UserController.logout);
-router.get('/users/shareid', authenticate, UserController.getShareId);
 router.post('/users/change-password', writeLimiter, authenticate, UserController.changePassword);
-router.patch('/users/shareid', authenticate, UserController.toggleShareId);
 
 router.get('/sessions', authenticate, SessionController.getAll);
-router.get('/sessions/shared/:shareId', sharedLimiter, SessionController.getAllShared);
-router.get('/sessions/shared/:shareId/:sessionId', sharedLimiter, SessionController.getOneShared);
 router.get('/sessions/:sessionId', authenticate, SessionController.getOne);
 router.delete('/sessions/:sessionId', authenticate, SessionController.delete);
 router.get('/sessions/:sessionId/export/csv', exportLimiter, authenticate, SessionController.exportCsv);

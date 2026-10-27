@@ -59,7 +59,7 @@ resolve user (cached) → `findOrCreate` session (resolved numeric FK) →
 `Browser SPA` → `CORS` + `express-session` → `/api/*` → `authenticate`
 middleware → controller. Telemetry is served via
 `GET /api/sessions/:id/telemetry?from&to&limit` (`TelemetryController.range`),
-which enforces ownership (or `?shareId=` for shared sessions) and returns
+which enforces ownership and returns
 **paged** frames from the `Logs` hypertable.
 
 ---
@@ -112,8 +112,8 @@ which enforces ownership (or `?shareId=` for shared sessions) and returns
   simultaneously with a fresh batch.
 
 ### 2.3 `TelemetryController.range` (`controllers/TelemetryController.js`)
-- `GET /api/sessions/:id/telemetry?from&to&limit[&shareId]`.
-- Enforces ownership (`req.user.id`) or shared access (`?shareId=`).
+- `GET /api/sessions/:id/telemetry?from&to&limit`.
+- Enforces ownership (`req.user.id`).
 - `Log.findAll` with `timestamp BETWEEN from AND to`, capped `limit`
   (`min(limit||5000, 10000)`), ordered ASC, **limited attributes**
   (`timestamp, lon, lat, values, engine_rpm, vehicle_speed`).
@@ -938,8 +938,6 @@ See `docs/deployment.md` for the full deployment guide.
 | `POST /api/users/login` | none | login (sets cookie) |
 | `POST /api/users/change-password` | cookie | change password (requires currentPassword + newPassword; regenerates session) |
 | `POST /api/users/logout` | cookie | logout |
-| `GET /api/users/shareid` | cookie | get the user's shareId (empty until sharing is enabled) |
-| `PATCH /api/users/shareid` | cookie | toggle sharing on/off — enable generates a shareId, disable clears it |
 | `GET /api/version` | none | returns `{ version: string }` from package.json |
 | `GET /api/sessions?limit&offset` | cookie | list sessions (paginated: `{ sessions, total, limit, offset }`) |
 | `GET /api/sessions/:id` | cookie + owner | session metadata (no full logs) |
@@ -954,8 +952,6 @@ See `docs/deployment.md` for the full deployment guide.
 | `DELETE /api/sessions/:id` | cookie + owner | delete a session |
 | `POST /api/sessions/copy/:sessionId` | cookie + owner | duplicate a session and its telemetry under a new name (body: `{ name }`) |
 | `POST /api/sessions/join/:sessionId` | cookie + owner | merge this session and another into a new session (body: `{ joinSessionId, name }`) |
-| `GET /api/sessions/shared/:shareId` | shareId | list a user's shareable sessions (sanitized — no logs; paginated: `{ sessions, total, limit, offset }`) |
-| `GET /api/sessions/shared/:shareId/:sessionId` | shareId | get one shared session (sanitized metadata — no logs) |
 | `POST /api/sessions/:id/analyze` | cookie + owner | trigger AI analysis for a session (SSE stream) |
 | `GET /api/sessions/:id/analyses` | cookie + owner | list cached analyses for a session |
 | `GET /api/sessions/:id/analyses/:analysisId` | cookie + owner | get a single analysis (full response + reasoning) |

@@ -4,7 +4,7 @@ const path = require('path');
 const { listMigrationFiles, isBenignError } = require('../scripts/migrate');
 
 describe('migration loader', () => {
-    it('returns files in strict lexicographic path order 001–021 then migrations/', () => {
+    it('returns files in strict lexicographic path order 001–022 then migrations/', () => {
         const files = listMigrationFiles();
         const expected = [
             '001_log_hypertable.sql',
@@ -28,6 +28,7 @@ describe('migration loader', () => {
             '019_analysis_retention.sql',
             '020_analyses_created_id_unique.sql',
             '021_add_map_tile_settings.sql',
+            '022_remove_share_surface.sql',
             'migrations/001_add_upload_token.sql',
             'migrations/002_backfill_pid_columns.sql',
         ];

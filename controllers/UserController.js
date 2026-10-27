@@ -2,7 +2,6 @@ const User = require('../models').User;
 const Settings = require('../models').Settings;
 const sequelize = require('../models').sequelize;
 const passport = require('passport');
-const { nanoid } = require('nanoid');
 const crypto = require('crypto');
 const runtime = require('../config/runtime');
 const { userByIdCache } = require('../config/passport');
@@ -96,38 +95,6 @@ class UserController {
 
         } catch (err) {
             console.error('Error:', err.message);
-            res.status(500).json({ error: 'Internal server error' });
-        }
-    }
-    static async getShareId(req, res) {
-        try{
-            let user = await User.findOne({
-                where: { id: req.user.id }
-            });
-            let shareId = user.shareId;
-            res.status(200).send(shareId);
-        }
-        catch(err) {
-            console.error(err.message || err);
-            res.status(500).json({ error: 'Internal server error' });
-        }
-    }
-    static async toggleShareId(req, res) {
-        try{
-            let user = await User.findOne({
-                where: { id: req.user.id }
-            });
-            let shareId = user.shareId;
-            if(!shareId){
-                await user.update({ shareId: nanoid() });
-            }
-            else {
-                await user.update({ shareId: null });
-            }
-            res.sendStatus(200);
-        }
-        catch(err) {
-            console.error(err.message || err);
             res.status(500).json({ error: 'Internal server error' });
         }
     }

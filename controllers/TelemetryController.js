@@ -1,12 +1,11 @@
 const Session = require('../models').Session;
-const User = require('../models').User;
 const Log = require('../models').Log;
 const Op = require('../models').Sequelize.Op;
 const { telemetryRangeSchema } = require('../lib/validators');
 
 class TelemetryController {
-    // GET /api/sessions/:id/telemetry?from&to&limit[&shareId]
-    // Enforces ownership (or shared access via ?shareId) and returns paged frames.
+    // GET /api/sessions/:id/telemetry?from&to&limit
+    // Enforces ownership and returns paged frames.
     static async range(req, res) {
         try {
             const { from, to } = req.query;
@@ -22,7 +21,7 @@ class TelemetryController {
             //    endpoint's contract CLAMPS oversized ones (999999 -> 10000,
             //    pinned by telemetryAccess tests); pre-clamp so Joi sees an
             //    in-range integer and the schema default (5000) still applies.
-            //  * shareId is not a schema key, so unknown keys are allowed.
+            //  * Unknown query keys are tolerated (allowUnknown).
             const query = { ...req.query };
             const limitNum = Number(query.limit);
             if (query.limit !== undefined && Number.isFinite(limitNum) && limitNum > 10000) {
@@ -32,17 +31,9 @@ class TelemetryController {
             if (error) {
                 return res.status(400).json({ error: error.message });
             }
-            const { shareId, limit } = value;
-
-            let session;
-            if (shareId) {
-                const user = await User.findOne({ where: { shareId } });
-                if (!user) return res.status(404).json({ error: 'Not found' });
-                session = await Session.findOne({ where: { userId: user.id, id: req.params.id } });
-            } else {
-                if (!req.user) return res.status(401).json({ error: 'Unauthorized' });
-                session = await Session.findOne({ where: { userId: req.user.id, id: req.params.id } });
-            }
+            const { limit } = value;
+            if (!req.user) return res.status(401).json({ error: 'Unauthorized' });
+            const session = await Session.findOne({ where: { userId: req.user.id, id: req.params.id } });
             if (!session) return res.status(404).json({ error: 'Not found' });
 
             const rows = await Log.findAll({
