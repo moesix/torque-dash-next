@@ -53,7 +53,7 @@ docker compose up -d
 
 Then open **http://localhost:8080**.
 
-> The app **will not start** without `DATABASE_URL` and `SESSION_KEYS`. Generate them with `openssl rand -base64 24` and `openssl rand -hex 24` respectively. As of 2026, `UPLOAD_API_TOKEN` is the required security baseline for uploads: generate it with `openssl rand -hex 24` and set it in `.env`, or generate one from the Settings page after first login. See the full config reference below.
+> The app **will not start** without `DATABASE_URL` and `SESSION_KEYS`. In the compose recipe `DATABASE_URL` is composed by `docker-compose.yml` from `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` — set the password with `openssl rand -base64 24`. For a manual (non-compose) run, set `DATABASE_URL` yourself. Generate `SESSION_KEYS` with `openssl rand -hex 24`. As of 2026, `UPLOAD_API_TOKEN` is the required security baseline for uploads: generate it with `openssl rand -hex 24` and set it in `.env`, or generate one from the Settings page after first login. See the full config reference below.
 
 ## Connect Torque Pro
 

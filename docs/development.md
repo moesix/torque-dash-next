@@ -303,7 +303,7 @@ if (valErr) {
 | `addLocationSchema` | `SessionController.addLocation` | `{ locations: { start, end } }` strings |
 | `vehicleCreateSchema` | `VehicleController.create` | Vehicle fields: `name` required, `make`/`model`/`year`/`engineCc` optional |
 | `vehicleUpdateSchema` | `VehicleController.update` | Same as create, all optional, `min(1)` — at least one field required |
-| `telemetryRangeSchema` | `TelemetryController.range` | `{ from, to }` ISO dates + `limit` (1–10000, default 5000) — wired so a malformed range returns `400`, not a `500`. Cursor-based: no `offset` |
+| `telemetryRangeSchema` | `TelemetryController.range` | `{ from, to }` ISO dates + `limit` (1–10000, default 5000; an explicit `limit=0` is a `400` — omit `limit` to get 5000) — wired so a malformed range returns `400`, not a `500`. Cursor-based: no `offset` |
 | `validateIds(...params)` | route middleware in `routes/api.js` | Not a body schema: gates the named path params (`:sessionId`, `:vehicleId`, `:analysisId`) to a positive int4 (≤ 2147483647) before Sequelize, returning `400 { error: 'Invalid <param>.' }` instead of a Postgres `22P02`/`22003` 500 |
 
 **Pure validation helpers** (used by `UserController.updateSettings`):
@@ -780,7 +780,7 @@ blockers are resolved and re-reviewed as PASS:
   The exemption is keyed on a secret token, not a spoofable query param.
 - **Registration can be disabled.** Two layers: the env var `DISABLE_REGISTRATION`
   (`'true'`) is a hard kill-switch, and the runtime `Settings` singleton row
-  (`disableRegistration` boolean, created by `infra/timescale/settings.sql`) is
+  (`disableRegistration` boolean, created by `infra/timescale/002_settings.sql`) is
   togglable by the **admin** via `PUT /api/settings` (Plan 099 — see
   "Admin model & analysis retention" below). `GET /api/settings` ORs in the env
   value so the SPA hides the signup form correctly when the env switch is

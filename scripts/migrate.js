@@ -62,9 +62,10 @@ function stripComments(sql) {
 }
 
 // Load every *.sql file under the migration directory tree, in lexicographic
-// order so e.g. `log_hypertable.sql` (TimescaleDB setup) runs before
-// `settings.sql`, and top-level files run before `migrations/*.sql` (paths are
-// relative to SQL_DIR, so `migrations/...` sorts after every `0NN_...` file).
+// order so e.g. `001_log_hypertable.sql` (TimescaleDB setup) runs before
+// `002_settings.sql`, and top-level files run before `migrations/*.sql` (paths
+// are relative to SQL_DIR, so `migrations/...` sorts after every `0NN_...`
+// file).
 function loadStatements() {
     const files = listMigrationFiles();
     const all = [];
