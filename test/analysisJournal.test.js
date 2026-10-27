@@ -641,9 +641,10 @@ describe('GET /api/analyses/:id route registration', { skip: apiRouter ? false :
     assert.ok(exportHandlers, '/api/analyses/export route must be registered');
 
     // exportLimiter is the SAME middleware instance the session CSV export
-    // uses, placed FIRST (before authenticate) exactly like routes/api.js:108.
-    assert.strictEqual(exportHandlers[0], csvHandlers[0], 'exportLimiter must be the first middleware');
-    assert.strictEqual(exportHandlers[1], csvHandlers[1], 'authenticate must follow the limiter');
+    // uses. The CSV route carries a path id, so validateIds is wired first and
+    // the limiter/auth shift one slot; /analyses/export has no id gate.
+    assert.strictEqual(exportHandlers[0], csvHandlers[1], 'exportLimiter must be the same instance');
+    assert.strictEqual(exportHandlers[1], csvHandlers[2], 'authenticate must follow the limiter');
     assert.strictEqual(exportHandlers[2], AnalysisController.exportAnalyses);
   });
 });

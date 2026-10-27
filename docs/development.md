@@ -231,10 +231,14 @@ on the module):
   // ── Vehicle CRUD ──
   router.get('/vehicles', authenticate, VehicleController.getAll);
   router.post('/vehicles', writeLimiter, authenticate, VehicleController.create);
-  router.put('/vehicles/:vehicleId', writeLimiter, authenticate, VehicleController.update);
-  router.delete('/vehicles/:vehicleId', writeLimiter, authenticate, VehicleController.delete);
-  router.patch('/vehicles/:vehicleId/default', authenticate, VehicleController.setDefault);
+  router.put('/vehicles/:vehicleId', validateIds('vehicleId'), writeLimiter, authenticate, VehicleController.update);
+  router.delete('/vehicles/:vehicleId', validateIds('vehicleId'), writeLimiter, authenticate, VehicleController.delete);
+  router.patch('/vehicles/:vehicleId/default', validateIds('vehicleId'), authenticate, VehicleController.setDefault);
   ```
+- Every route with an id path param (`:sessionId`, `:id`, `:vehicleId`,
+  `:analysisId`) must be wrapped in `validateIds(...)` immediately after the
+  path. It 400s a non-positive-integer segment before it can reach Sequelize
+  and surface as a Postgres `22P02` 500.
 - Write operations use `writeLimiter` rate limiter; reads use `authenticate` only.
 
 ### 6.4 Migration SQL (`infra/timescale/009_add_vehicles.sql`)
@@ -266,9 +270,9 @@ if (valErr) {
 | `copySchema` | `SessionController.copy` | `{ name: string, required }` |
 | `joinSchema` | `SessionController.join` | `{ joinSessionId: positive int, name: string }` |
 | `addLocationSchema` | `SessionController.addLocation` | `{ locations: { start, end } }` strings |
-| `vehicleCreateSchema` | `VehicleController.create` | Vehicle fields: `name` required, `make`/`model`/`year`/`engineCc`/`vin` optional |
+| `vehicleCreateSchema` | `VehicleController.create` | Vehicle fields: `name` required, `make`/`model`/`year`/`engineCc` optional |
 | `vehicleUpdateSchema` | `VehicleController.update` | Same as create, all optional, `min(1)` — at least one field required |
-| `telemetryRangeSchema` | `TelemetryController.range` | `{ from, to }` ISO dates + `limit` (1–10000, default 5000) + `offset` (≥0) — wired so a malformed range returns `400`, not a `500` |
+| `telemetryRangeSchema` | `TelemetryController.range` | `{ from, to }` ISO dates + `limit` (1–10000, default 5000) — wired so a malformed range returns `400`, not a `500`. Cursor-based: no `offset` |
 
 **Pure validation helpers** (used by `UserController.updateSettings`):
 

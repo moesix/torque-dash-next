@@ -1,5 +1,6 @@
 const Vehicle = require('../models').Vehicle;
 const Session = require('../models').Session;
+const { vehicleCreateSchema, vehicleUpdateSchema } = require('../lib/validators');
 
 class VehicleController {
     /** List all vehicles for the authenticated user. */
@@ -33,6 +34,9 @@ class VehicleController {
     /** Create a new vehicle. */
     static async create(req, res) {
         try {
+            const { error } = vehicleCreateSchema.validate(req.body);
+            if (error) return res.status(400).json({ error: error.details[0].message });
+
             const { name, make, model, year, engineCc } = req.body;
             if (!name || typeof name !== 'string' || name.trim().length === 0) {
                 return res.status(400).json({ error: 'Vehicle name is required.' });
@@ -55,6 +59,9 @@ class VehicleController {
     /** Update a vehicle. */
     static async update(req, res) {
         try {
+            const { error } = vehicleUpdateSchema.validate(req.body);
+            if (error) return res.status(400).json({ error: error.details[0].message });
+
             const vehicle = await Vehicle.findOne({
                 where: { id: req.params.vehicleId, userId: req.user.id },
             });

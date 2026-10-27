@@ -145,9 +145,19 @@ describe('VehicleController (with mocked models)', () => {
             const { res, calls: out } = makeStubRes();
             await VehicleController.create(req, res);
             assert.strictEqual(out.statusCode, 400, `name=${JSON.stringify(name)}`);
-            assert.deepStrictEqual(out.body, { error: 'Vehicle name is required.' });
+            assert.strictEqual(typeof out.body.error, 'string', `name=${JSON.stringify(name)}`);
         }
         assert.strictEqual(calls.vehicleCreate.length, 0, 'no insert for invalid names');
+    });
+
+    test('create with an invalid year returns 400 before any insert', async () => {
+        const calls = install();
+        const req = makeStubReq({ body: { name: 'Car', year: 'abc' } });
+        const { res, calls: out } = makeStubRes();
+        await VehicleController.create(req, res);
+        assert.strictEqual(out.statusCode, 400);
+        assert.strictEqual(typeof out.body.error, 'string');
+        assert.strictEqual(calls.vehicleCreate.length, 0, 'no insert for an invalid year');
     });
 
     test('update mutates and saves an owned vehicle', async () => {

@@ -47,6 +47,19 @@ const SessionController = require('../controllers/SessionController');
 const UploadController = require('../controllers/UploadController');
 const runtime = require('../config/runtime');
 
+// Boot the real /api router for shape-level assertions. The auth middleware is
+// stubbed to a pass-through so invalid-id requests reach the id gate instead of
+// being short-circuited with a 401 (auth ordering is covered elsewhere).
+const authPath = require.resolve('../middleware/auth');
+require.cache[authPath] = {
+  id: authPath,
+  filename: authPath,
+  loaded: true,
+  exports: (req, res, next) => next(),
+};
+const express = require('express');
+const apiRouter = require('../routes/api');
+
 // ── Helpers ─────────────────────────────────────────────────────────
 
 function makeStubReq(overrides = {}) {
@@ -150,6 +163,21 @@ describe('Error contract — backend response shapes', () => {
   });
 
   // ── Validation errors are already JSON (regression) ────────────
+
+  test('GET /api/sessions/foo returns 400 JSON, not 500', async () => {
+    const app = express();
+    app.use('/api', apiRouter);
+    const server = app.listen(0);
+    try {
+      await new Promise((resolve) => server.once('listening', resolve));
+      const { port } = server.address();
+      const res = await fetch(`http://127.0.0.1:${port}/api/sessions/foo`);
+      assert.strictEqual(res.status, 400);
+      assert.deepStrictEqual(await res.json(), { error: 'Invalid sessionId.' });
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
 
   test('cut validation error returns 400 JSON', async () => {
     const req = makeStubReq({ body: {} });

@@ -74,8 +74,8 @@ class SessionController {
     }
     static async getAll(req, res) {
         try {
-            const limit = Math.min(parseInt(req.query.limit, 10) || 50, 200);
-            const offset = parseInt(req.query.offset, 10) || 0;
+            const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200);
+            const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
             const vehicleId = req.query.vehicleId ? Number(req.query.vehicleId) : null;
 
             // Check if user exists
