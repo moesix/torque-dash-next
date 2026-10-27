@@ -566,6 +566,25 @@ describe('Upload hardening – time parameter contract', () => {
         assert.ok(lastIngestedRow().time instanceof Date);
     });
 
+    // `Number(' ')` is 0, so a whitespace-only stamp must be normalized to
+    // "absent" first — otherwise it is stored as the Unix epoch.
+    test('whitespace-only time is treated as absent, never epoch 0', async () => {
+        stubHappyPath();
+        const before = Date.now();
+        const { res, calls } = makeRes();
+        await UploadController.processUpload(makeReq({
+            eml: 'user@x.com', session: 'abc-123', time: '   ',
+        }), res);
+        const after = Date.now();
+        assert.strictEqual(calls.statusCode, 200);
+        assert.strictEqual(calls.body, 'OK!');
+        const row = lastIngestedRow();
+        assert.ok(row.time instanceof Date);
+        assert.notStrictEqual(row.time.getTime(), 0, 'whitespace must not become epoch 0');
+        assert.ok(row.time.getTime() >= before && row.time.getTime() <= after,
+            'whitespace-only time uses the server clock');
+    });
+
     test('valid time is stored verbatim and still answers 200 OK!', async () => {
         stubHappyPath();
         const ts = Date.parse('2026-08-25T14:30:00Z');

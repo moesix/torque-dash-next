@@ -27,11 +27,12 @@ const FLUSH_MS = 1000;
 const MAX_RETRIES = 3;
 const MAX_BUFFER_SIZE = 50000; // drop oldest rows if exceeded
 // Upper bound on the bulkCreate calls ONE flush may spend isolating failing
-// rows. Without it a wholesale DB outage — every chunk failing again after its
-// first retry, so every chunk eligible for bisection — would turn one flush
-// into thousands of doomed queries. The budget is global per flush (not per
-// chunk): once it is spent, the rest of that pass re-queues wholesale with the
-// attempt counters advanced normally. It resets on the next pass, so isolation
+// rows (both bisection halves are counted, so the pass never exceeds this).
+// Without it a wholesale DB outage — every chunk failing again after its first
+// retry, so every chunk eligible for bisection — would turn one flush into
+// thousands of doomed queries. The budget is global per flush (not per chunk):
+// once it is spent, the rest of that pass re-queues wholesale with the attempt
+// counters advanced normally. It resets on the next pass, so isolation
 // self-heals across flushes — later chunks simply wait for a later pass.
 const MAX_ISOLATION_ATTEMPTS = 64;
 
@@ -86,7 +87,7 @@ async function writeBatch(items) {
 // is the only one that keeps advancing its counter.
 async function requeueOrBisect(items, written, state) {
     const retried = items.some((item) => (item.__attempts || 0) >= 1);
-    if (items.length > 1 && retried && state.isolationAttempts < MAX_ISOLATION_ATTEMPTS) {
+    if (items.length > 1 && retried && state.isolationAttempts + 2 <= MAX_ISOLATION_ATTEMPTS) {
         state.isolationAttempts += 2; // the two halves about to be attempted
         const mid = Math.ceil(items.length / 2);
         await writeSubset(items.slice(0, mid), written, state);
@@ -198,19 +199,28 @@ function flush() {
 }
 
 /**
- * Quiesces concurrent ingest passes. Resolves once the in-flight pass settles
- * and one forced pass completes. This is NOT a guarantee that every buffered
- * row was written: rows that could not be written stay queued for the normal
- * retry window (≤ MAX_RETRIES flushes) or are dropped once that window is
- * spent. Fulfills even on failure — callers must not treat a drained buffer as
- * a write success, only as "no pass is still holding rows in flight".
+ * Quiesces ingest passes that THIS drain knows about. Drains are serialized
+ * through a promise chain, so sibling drain bodies never interleave and no
+ * drain resolves while a pass it observed still holds rows in flight.
+ *
+ * That is the whole contract — it is NOT a write-success signal: rows that
+ * could not be written stay queued for the normal retry window (≤ MAX_RETRIES
+ * flushes) or are dropped once that window is spent, and an ingest that
+ * arrives after this drain returns can start a new pass of its own. Fulfills
+ * even on failure — callers must not treat a drained buffer as "everything is
+ * in the DB", only as "the passes this drain knew about have settled".
  */
-async function drain() {
-    // Wait out any in-flight pass — including one another drain just started
-    // — then take one pass of our own, then wait out passes that overlapped us.
-    while (flushing && currentFlushPromise) await currentFlushPromise;
-    if (buffer.length > 0) await flush();
-    while (flushing && currentFlushPromise) await currentFlushPromise;
+let drainChain = Promise.resolve();
+function drain() {
+    // Sibling drains execute one at a time. Never call drain() from inside a
+    // drain body (self-await) and never from inside flush().
+    const run = drainChain.then(async () => {
+        while (flushing && currentFlushPromise) await currentFlushPromise;
+        if (buffer.length > 0) await flush();
+        while (flushing && currentFlushPromise) await currentFlushPromise;
+    });
+    drainChain = run.then(() => {}, () => {});
+    return run;
 }
 
 const timer = setInterval(flush, FLUSH_MS);

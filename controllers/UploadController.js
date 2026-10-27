@@ -66,12 +66,17 @@ class UploadController {
                 });
             }
 
-            // `time` contract: PRESENT but unparseable → 400. ABSENT → server-now
-            // fallback. Rejecting absent `time` would 400 older/edge clients and
-            // trigger a device retry storm; an Invalid Date row, by contrast,
-            // would poison the whole ingest buffer, so that is rejected here.
-            const t = scalar(time);
-            const rawTs = t == null || t === '' ? Date.now() : Number(t);
+            // `time` contract: PRESENT but unparseable → 400. ABSENT (including
+            // a whitespace-only value, which devices can send as an empty
+            // placeholder) → server-now fallback. Rejecting absent `time` would
+            // 400 older/edge clients and trigger a device retry storm; an
+            // Invalid Date row, by contrast, would poison the whole ingest
+            // buffer, so that is rejected here. Trimming first matters because
+            // `Number(' ')` is 0 — a whitespace-only stamp would otherwise be
+            // silently stored as the Unix epoch.
+            let t = scalar(time);
+            if (typeof t === 'string' && t.trim() === '') t = undefined;
+            const rawTs = t == null ? Date.now() : Number(t);
             const tsDate = new Date(rawTs);
             if (!Number.isFinite(rawTs) || !Number.isFinite(tsDate.getTime())) {
                 return res.status(400).json({ error: 'Invalid time parameter.' });

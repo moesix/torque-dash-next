@@ -108,11 +108,13 @@ which enforces ownership and returns
   `MAX_RETRIES = 3`, after which they are dropped and an error is logged. This
   bounds memory at the cost of possible telemetry loss on a persistently failing
   DB.
-- **Drain before Log mutations:** `drain()` serializes overlapping passes and is
-  awaited by every Log-mutating handler (session delete/cut/filter/copy/join) so
-  buffered frames cannot resurrect a deleted range or be missed by a snapshot. It
-  resolves once the in-flight pass settles and one forced pass completes — rows
-  that still cannot be written stay queued for the retry window or are dropped.
+- **Drain before Log mutations:** `drain()` serializes sibling drains with a
+  promise chain and is awaited by every Log-mutating handler (session
+  delete/cut/filter/copy/join) so buffered frames cannot resurrect a deleted
+  range or be missed by a snapshot. It resolves once the passes it knew about
+  have settled and one forced pass completes — rows that still cannot be written
+  stay queued for the retry window or are dropped, and an ingest arriving after
+  it returns can start a new pass.
 - **Buffer cap:** the live buffer is hard-capped at `MAX_BUFFER_SIZE = 50000`
   rows. If the buffer exceeds the cap the oldest rows are dropped (backpressure).
 - **Flush mutex:** a `flushing` boolean plus the tracked in-flight promise

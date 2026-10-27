@@ -647,6 +647,89 @@ describe('ingestBuffer.drain — quiesce before Log mutations', () => {
       restore();
     }
   });
+
+  // Regression: sibling drains must serialize their WHOLE bodies, including the
+  // forced pass. The previous two-loop drain could settle the earlier drain
+  // while a later sibling's pass was already holding rows in flight — its
+  // caller (a Log mutation) would then write under an in-flight pass. Here the
+  // first pass awaits a gate and then fails (transient), re-queueing all 30
+  // rows; the second pass awaits its own gate so it is observably in flight
+  // while d1's settlement is checked.
+  test('overlapping drains serialize: no drain settles while a sibling pass holds rows', async () => {
+    let passesInFlight = 0;
+    let bulkCreateCalls = 0;
+    let writtenRows = 0;
+    let releaseFirstPass;
+    let releaseSecondPass;
+    const firstPassGate = new Promise((resolve) => { releaseFirstPass = resolve; });
+    const secondPassGate = new Promise((resolve) => { releaseSecondPass = resolve; });
+
+    const events = [];
+    const { ingestBuffer, restore } = loadHarness(async (rows) => {
+      const call = ++bulkCreateCalls;
+      passesInFlight += 1;
+      events.push(`pass${call}-start`);
+      try {
+        if (call === 1) {
+          await firstPassGate; // held open while both drains start
+          throw new Error('transient DB failure');
+        }
+        if (call === 2) await secondPassGate; // hold d2's pass in flight
+        writtenRows += rows.length;
+        return rows;
+      } finally {
+        passesInFlight -= 1;
+      }
+    });
+
+    try {
+      for (let i = 0; i < 30; i++) {
+        ingestBuffer.ingest({
+          userId: 1, sessionId: 'drain-overlap', time: new Date(1700000000000 + i),
+          lon: 0, lat: 0, values: {}, engineRpm: null, vehicleSpeed: null,
+        });
+      }
+
+      const settledWhileInFlight = [];
+      const observe = (tag) => () => {
+        events.push(`${tag}-settled`);
+        if (passesInFlight > 0) settledWhileInFlight.push(tag);
+      };
+
+      const d1 = ingestBuffer.drain().then(observe('d1'));
+      await new Promise((r) => setImmediate(r)); // d1's pass is now in flight
+      const d2 = ingestBuffer.drain().then(observe('d2'));
+      await new Promise((r) => setImmediate(r));
+
+      assert.strictEqual(passesInFlight, 1, 'the first pass is held open');
+      assert.strictEqual(bulkCreateCalls, 1, 'only the first pass has started');
+
+      releaseFirstPass(); // pass 1 fails; its 30 rows are re-queued
+      await new Promise((r) => setImmediate(r));
+      await new Promise((r) => setImmediate(r));
+      await new Promise((r) => setImmediate(r));
+
+      // d1 is done, d2's forced pass is running and blocked on its gate.
+      assert.strictEqual(passesInFlight, 1, 'the second pass holds rows in flight');
+      assert.deepStrictEqual(settledWhileInFlight, [],
+        'no drain may settle while a pass holds rows in flight');
+      assert.ok(events.indexOf('d1-settled') !== -1 &&
+        events.indexOf('d1-settled') < events.indexOf('pass2-start'),
+        `d2's pass must start only after d1 settled (${events.join(', ')})`);
+
+      releaseSecondPass();
+      await Promise.all([d1, d2]);
+
+      assert.strictEqual(passesInFlight, 0, 'every pass completed');
+      assert.strictEqual(ingestBuffer.size(), 0, 'the re-queued rows were written');
+      assert.strictEqual(writtenRows, 30, 'all 30 rows reached the DB exactly once');
+      assert.strictEqual(bulkCreateCalls, 2, 'one failed pass + one successful pass');
+      assert.deepStrictEqual(settledWhileInFlight, [],
+        'neither drain resolved while a pass held rows in flight');
+    } finally {
+      restore();
+    }
+  });
 });
 
 // ── 7. deleted session mid-buffer — poison rows are isolated per session ──
@@ -836,28 +919,38 @@ describe('SessionController.delete — drain and evictSession wiring', () => {
 
     const scPath = require.resolve('../controllers/SessionController');
     const originalSCCache = require.cache[scPath];
-    delete require.cache[scPath];
 
-    return {
-      SessionController: require('../controllers/SessionController'),
-      events,
-      restore() {
-        if (originalModelsCache) require.cache[modelsPath] = originalModelsCache;
-        else delete require.cache[modelsPath];
-        if (originalIBCache) require.cache[ibPath] = originalIBCache;
-        else delete require.cache[ibPath];
-        if (originalUploadCache) require.cache[uploadPath] = originalUploadCache;
-        else delete require.cache[uploadPath];
-        if (originalSCCache) require.cache[scPath] = originalSCCache;
-        else delete require.cache[scPath];
-      },
-    };
+    function restore() {
+      if (originalModelsCache) require.cache[modelsPath] = originalModelsCache;
+      else delete require.cache[modelsPath];
+      if (originalIBCache) require.cache[ibPath] = originalIBCache;
+      else delete require.cache[ibPath];
+      if (originalUploadCache) require.cache[uploadPath] = originalUploadCache;
+      else delete require.cache[uploadPath];
+      if (originalSCCache) require.cache[scPath] = originalSCCache;
+      else delete require.cache[scPath];
+    }
+
+    try {
+      delete require.cache[scPath];
+      return {
+        SessionController: require('../controllers/SessionController'),
+        events,
+        restore,
+      };
+    } catch (err) {
+      // A throw while loading must not leave the stubbed cache entries in place.
+      restore();
+      throw err;
+    }
   }
 
   test('delete drains, then destroys, then evicts the deleted session key', async () => {
-    const { SessionController, events, restore } =
-      loadDeleteHarness({ id: 's1', sessionId: 'device-session-1' });
+    let restore;
     try {
+      const harness = loadDeleteHarness({ id: 's1', sessionId: 'device-session-1' });
+      restore = harness.restore;
+      const { SessionController, events } = harness;
       const res = makeRes();
       await SessionController.delete(
         { user: { id: 7 }, params: { sessionId: 's1' } },
@@ -872,13 +965,16 @@ describe('SessionController.delete — drain and evictSession wiring', () => {
         ['evict', 'device-session-1', 7],
       ], 'order must be drain → findOne → destroy → evict(sessionId, userId)');
     } finally {
-      restore();
+      if (restore) restore();
     }
   });
 
   test('404 path destroys and evicts nothing', async () => {
-    const { SessionController, events, restore } = loadDeleteHarness(null);
+    let restore;
     try {
+      const harness = loadDeleteHarness(null);
+      restore = harness.restore;
+      const { SessionController, events } = harness;
       const res = makeRes();
       await SessionController.delete(
         { user: { id: 7 }, params: { sessionId: 'missing' } },
@@ -890,7 +986,7 @@ describe('SessionController.delete — drain and evictSession wiring', () => {
       assert.deepStrictEqual(events, ['drain', 'findOne'],
         'a missing session must not be destroyed or evicted');
     } finally {
-      restore();
+      if (restore) restore();
     }
   });
 });
