@@ -252,7 +252,11 @@ describe('login timing equalization (config/passport.js)', () => {
         assert.deepStrictEqual(args[2], { message: 'Incorrect username or password.' });
         assert.strictEqual(compareCalls.length, 1, 'unknown email must still pay one bcrypt compare');
         assert.strictEqual(compareCalls[0][0], 'password123');
-        assert.match(compareCalls[0][1], /^\$2[aby]\$10\$/, 'dummy hash is a cost-10 bcrypt hash');
+        // Cost parity, not hash-format parity: the dummy must be as expensive
+        // as a real stored hash, whatever bcrypt's salt prefix looks like.
+        const referenceHash = bcrypt.hashSync('reference-not-a-credential', 10);
+        assert.strictEqual(bcrypt.getRounds(compareCalls[0][1]), bcrypt.getRounds(referenceHash),
+            'dummy hash uses the same cost factor as real password hashes');
         assert.notStrictEqual(compareCalls[0][1], 'password123', 'dummy is a hash, not the password');
     });
 
@@ -269,6 +273,9 @@ describe('login timing equalization (config/passport.js)', () => {
         assert.strictEqual(args[1], userFindOneResult);
         assert.strictEqual(compareCalls.length, 1, 'known email compares exactly once');
         assert.strictEqual(compareCalls[0][0], 'password123');
+        assert.strictEqual(compareCalls[0][1], hash, 'known path compares against the stored hash');
+        assert.strictEqual(bcrypt.getRounds(compareCalls[0][1]), bcrypt.getRounds(hash),
+            'cost factor is taken from the stored hash, not a hard-coded value');
     });
 });
 

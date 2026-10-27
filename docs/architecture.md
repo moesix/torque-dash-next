@@ -973,7 +973,7 @@ See `docs/deployment.md` for the full deployment guide.
 | `GET /api/settings/full` | cookie | full settings for the settings UI (disableRegistration, hasUploadApiToken, tokenFromEnv, isAdmin, LLM provider/model/endpoint, hasLlmApiKey, llmMaxTokens, llmThinkingMode, llmReasoningEffort, timezoneOffset, retentionEnabled, retentionDays, analysisRetentionDays, tileProvider (always, default `osm`), cartoApiKey (only when `tileProvider === 'carto'` — the browser embeds it in tile URLs), vehicle fields) |
 | `PUT /api/settings` | cookie + **admin** | admin-only settings update (disableRegistration, uploadApiToken, llmProvider, llmApiKey, llmModel, llmEndpoint, llmThinkingMode, llmReasoningEffort, llmMaxTokens, retentionEnabled, retentionDays, analysisRetentionDays, tileProvider (`osm`\|`carto`), cartoApiKey (string ≤255, trimmed, `''` clears), vehicle fields, timezoneOffset); 403 for non-admins; response includes `retentionPolicyApplied` |
 | `POST /api/settings/upload-token` | cookie + **admin** | admin-only — generate a new upload API token (shown once); 403 for non-admins |
-| `POST /api/settings/test-llm` | cookie | test LLM connection (returns streaming response) |
+| `POST /api/settings/test-llm` | cookie + **admin** | admin-only — test LLM connection (returns streaming response); 403 for non-admins |
 | `GET /api/vehicles` | cookie | list all vehicles for authenticated user |
 | `GET /api/vehicles/:vehicleId` | cookie | get a single vehicle |
 | `POST /api/vehicles` | cookie | create a new vehicle (body: `{ name, make?, model?, year?, engineCc? }`) |

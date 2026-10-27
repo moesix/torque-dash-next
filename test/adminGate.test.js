@@ -382,6 +382,26 @@ describe('POST /api/settings/test-llm — admin-only gate', { skip: apiRouter ? 
     });
 });
 
+describe('POST /api/sessions/:id/analyze — NOT admin-gated', { skip: apiRouter ? false : 'routes/api.js could not load' }, () => {
+    test('authenticated non-admin passes the gate (no 403 admin rejection)', async () => {
+        settingsRow.llmProvider = 'openai';
+        settingsRow.llmApiKeyEnc = 'enc-key';
+
+        const { status, body } = await withServer(NON_ADMIN, (base) =>
+            sendJson(base, '/api/sessions/1/analyze', 'POST')
+        );
+
+        assert.notStrictEqual(status, 403, 'analysis must stay available to every authenticated user');
+        // The mocked Session.findOne returns null, so the only acceptable shape
+        // here is a downstream failure, never an admin rejection.
+        assert.ok(
+            [400, 404, 502].includes(status),
+            `expected a downstream status, got ${status} (${JSON.stringify(body)})`
+        );
+        assert.notDeepStrictEqual(body, { error: 'Admin access required.' });
+    });
+});
+
 describe('GET /api/settings — public shape and session-derived isAdmin', { skip: apiRouter ? false : 'routes/api.js could not load' }, () => {
     test('unauthenticated response keeps the exact two-field public shape (no crash without req.user)', async () => {
         const { status, body } = await withServer(null, (base) => getJson(base, '/api/settings'));
