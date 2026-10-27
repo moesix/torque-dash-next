@@ -10,6 +10,7 @@ const { buildAnalysisPrompt, formatSessionDuration, detectBackfillGaps, buildDat
 const { discoverPidKeys } = require('../lib/pidRegistry');
 const { classifyAnalysisError } = require('../lib/analysisErrors');
 const { isInt4Id } = require('../lib/validators');
+const { requireAdmin } = require('./UserController');
 
 class AnalysisController {
   static async analyzeSession(req, res) {
@@ -378,6 +379,9 @@ class AnalysisController {
   }
 
   static async testConnection(req, res) {
+    // Testing the connection spends the admin's provider key, so it is an
+    // admin-only control exactly like the Settings mutations.
+    if (!requireAdmin(req, res)) return;
     try {
       const settings = await Settings.getSingleton();
       if (!settings.llmProvider || !settings.llmApiKeyEnc) {

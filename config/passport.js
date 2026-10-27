@@ -1,6 +1,12 @@
 const LocalStrategy = require('passport-local');
+const bcrypt = require('bcrypt');
 const User = require('../models').User;
 const { UserCache } = require('../lib/userCache');
+
+// Hashed once at module load. The unknown-email login path compares against
+// this so it costs the same bcrypt work as the known-email path; it is not
+// derived from any real account and never matches.
+const DUMMY_HASH = bcrypt.hashSync('timing-equalizer-not-a-credential', 10);
 
 // TTL cache for deserializeUser's DB hit. Kept SHORT (60s) so credential
 // changes bound staleness even before explicit invalidation. Negative
@@ -18,6 +24,10 @@ module.exports = function(passport){
             try{
                 user = await User.findOne({ where: { email: email.toLowerCase() }})
                 if(!user){
+                    // Equal-work path: without this compare, a missing account
+                    // returns faster than a wrong password and the unified
+                    // message would not hide which emails are registered.
+                    await bcrypt.compare(password, DUMMY_HASH);
                     return done(null, false, { message: 'Incorrect username or password.' });
                 }
                 
