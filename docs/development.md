@@ -623,6 +623,11 @@ blockers are resolved and re-reviewed as PASS:
 - ✅ **`ingestBuffer` concurrency race + unbounded live buffer resolved.** A
   `flushing` boolean mutex prevents concurrent flush executions, and a
   `MAX_BUFFER_SIZE = 50000` hard cap drops oldest rows when exceeded (backpressure).
+  Failures are isolated per chunk — a chunk that fails again is bisected so one
+  bad row cannot discard its healthy chunk-mates — and only the session ids whose
+  rows actually landed get summary merges / PID-cache invalidation. `drain()`
+  quiesces the buffer before any Log mutation: session delete/cut/filter/copy/join
+  already await it, and future bulk-import / retention-sweep paths MUST too.
   See `services/ingestBuffer.js`.
 - **Torque PID keys `kc`/`kd` are hardcoded.** `UploadController` promotes
   `values.kc` → `engine_rpm` and `values.kd` → `vehicle_speed`, but PIDs are

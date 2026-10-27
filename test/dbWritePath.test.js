@@ -347,3 +347,379 @@ describe('SessionController exportCsv — HEAD short-circuit', () => {
     }
   });
 });
+
+// ── 5. ingestBuffer flush — per-chunk / per-row failure isolation ─────
+// These drive the REAL flush() against mocked models (require.cache pattern
+// from the chunking suite above). Every harness load gets a fresh module, so
+// the buffer starts empty and attempt counters start at 0.
+
+describe('ingestBuffer.flush — failure isolation', () => {
+  // Build a fresh ingestBuffer whose Log.bulkCreate delegates to `impl`
+  // (throw to fail a write) and whose Session summary merge is recorded.
+  function loadFlushHarness({ bulkCreate, findByPk, update }) {
+    const calls = { bulkCreate: [], findByPk: [], update: [] };
+    const mockModels = {
+      Log: {
+        async bulkCreate(rows, opts) {
+          calls.bulkCreate.push({ rows, opts });
+          return bulkCreate(rows, opts);
+        },
+      },
+      Session: {
+        async findByPk(id, opts) {
+          calls.findByPk.push({ id, opts });
+          return findByPk ? findByPk(id, opts) : null;
+        },
+        async update(vals, opts) {
+          calls.update.push({ vals, opts });
+          return update ? update(vals, opts) : [1];
+        },
+      },
+    };
+
+    const modelsPath = require.resolve('../models');
+    const originalModelsCache = require.cache[modelsPath];
+    require.cache[modelsPath] = {
+      id: modelsPath,
+      filename: modelsPath,
+      loaded: true,
+      exports: mockModels,
+    };
+
+    const ibPath = require.resolve('../services/ingestBuffer');
+    const originalIBCache = require.cache[ibPath];
+    delete require.cache[ibPath];
+
+    return {
+      ingestBuffer: require('../services/ingestBuffer'),
+      calls,
+      restore() {
+        if (originalModelsCache) {
+          require.cache[modelsPath] = originalModelsCache;
+        } else {
+          delete require.cache[modelsPath];
+        }
+        if (originalIBCache) {
+          require.cache[ibPath] = originalIBCache;
+        } else {
+          delete require.cache[ibPath];
+        }
+      },
+    };
+  }
+
+  function bufferedRow(sessionId, msOffset, values = {}) {
+    return {
+      userId: 1,
+      sessionId,
+      time: new Date(1700000000000 + msOffset),
+      lon: 0,
+      lat: 0,
+      values,
+      engineRpm: 1000,
+      vehicleSpeed: 60,
+    };
+  }
+
+  // Chunk 1 (1000 rows, session A) fails; chunk 2 (500 rows, session B) is
+  // written. Only B may be summarized, and A's rows must be the only ones back
+  // in the buffer.
+  test('a failing chunk does not re-queue or summarize a succeeding chunk', async () => {
+    const SESSION_A = 'iso-chunk-a';
+    const SESSION_B = 'iso-chunk-b';
+    let writtenRowCount = 0;
+
+    const { ingestBuffer, calls, restore } = loadFlushHarness({
+      bulkCreate: async (rows) => {
+        if (rows.some((r) => r.sessionId === SESSION_A)) throw new Error('chunk A rejected');
+        writtenRowCount += rows.length;
+        return rows;
+      },
+      findByPk: async (id) => ({
+        id,
+        firstTimestamp: null,
+        lastTimestamp: null,
+        maxRpm: null,
+        maxSpeed: null,
+      }),
+    });
+
+    try {
+      // 1000 A rows trips BATCH_SIZE, so an auto-flush takes that chunk; the
+      // following 500 B rows stay buffered. drain() settles the in-flight
+      // flush and then forces exactly one more pass, which sees two chunks.
+      for (let i = 0; i < 1000; i++) ingestBuffer.ingest(bufferedRow(SESSION_A, i));
+      for (let i = 0; i < 500; i++) ingestBuffer.ingest(bufferedRow(SESSION_B, 1000 + i));
+
+      await ingestBuffer.drain();
+
+      assert.strictEqual(writtenRowCount, 500,
+        'only the succeeding chunk (500 rows) reached the DB');
+      assert.strictEqual(ingestBuffer.size(), 1000,
+        'exactly the failing chunk is back in the buffer');
+      assert.deepStrictEqual(calls.findByPk.map((c) => c.id), [SESSION_B],
+        'summary merge must run for the written session only');
+      assert.deepStrictEqual(calls.update.map((c) => c.opts.where), [{ id: SESSION_B }],
+        'Session.update must target the written session only');
+    } finally {
+      restore();
+    }
+  });
+
+  // One poisoned row must not take its healthy neighbours down with it: the
+  // first failure re-queues the chunk, the repeat failure bisects down to the
+  // single bad row.
+  test('a single poison row is isolated by bisection; healthy rows persist', async () => {
+    const SESSION = 'bisect-session';
+    let writtenRowCount = 0;
+
+    const { ingestBuffer, calls, restore } = loadFlushHarness({
+      bulkCreate: async (rows) => {
+        if (rows.some((r) => r.values && r.values.poison)) throw new Error('poison row rejected');
+        writtenRowCount += rows.length;
+        return rows;
+      },
+      findByPk: async (id) => ({ id, firstTimestamp: null, lastTimestamp: null }),
+    });
+
+    try {
+      for (let i = 0; i < 5; i++) ingestBuffer.ingest(bufferedRow(SESSION, i));
+      ingestBuffer.ingest(bufferedRow(SESSION, 5, { poison: true })); // last row
+
+      await ingestBuffer.flush(); // first failure: whole chunk re-queued
+      assert.strictEqual(ingestBuffer.size(), 6, 'first failure re-queues the whole chunk');
+      assert.strictEqual(writtenRowCount, 0, 'nothing written on the first failure');
+      assert.strictEqual(calls.findByPk.length, 0, 'no summary merge when nothing was written');
+
+      await ingestBuffer.flush(); // repeat failure: bisect
+      assert.strictEqual(writtenRowCount, 5, 'five healthy rows written');
+      assert.strictEqual(ingestBuffer.size(), 1, 'only the poison row is re-queued');
+      assert.deepStrictEqual(calls.findByPk.map((c) => c.id), [SESSION],
+        'summary merge runs for the written session');
+
+      // The poison row alone advances its attempt counter once per cycle.
+      await ingestBuffer.flush();
+      assert.strictEqual(ingestBuffer.size(), 1, 'still retrying (below MAX_RETRIES)');
+    } finally {
+      restore();
+    }
+  });
+
+  test('a row that keeps failing is dropped after MAX_RETRIES cycles and logged with sessionId/timestamp', async () => {
+    const SESSION = 'drop-session';
+    const { ingestBuffer, restore } = loadFlushHarness({
+      bulkCreate: async () => { throw new Error('always fails'); },
+    });
+
+    const logged = [];
+    const originalError = console.error;
+    console.error = (...args) => { logged.push(args); };
+    try {
+      ingestBuffer.ingest(bufferedRow(SESSION, 0));
+
+      // attempts 1..3 keep the row; the fourth failure exceeds MAX_RETRIES.
+      for (let i = 0; i < 3; i++) {
+        await ingestBuffer.flush();
+        assert.strictEqual(ingestBuffer.size(), 1, `row survives cycle ${i + 1}`);
+      }
+      await ingestBuffer.flush();
+      assert.strictEqual(ingestBuffer.size(), 0, 'row dropped after MAX_RETRIES + 1 failures');
+    } finally {
+      console.error = originalError;
+      restore();
+    }
+
+    const dropLog = logged.find((args) =>
+      typeof args[0] === 'string' && args[0].includes('dropping row after max retries'));
+    assert.ok(dropLog, 'drop must be logged');
+    assert.strictEqual(dropLog[1].sessionId, SESSION);
+    assert.ok(dropLog[1].timestamp instanceof Date, 'drop log keeps the timestamp field');
+  });
+});
+
+// ── 6. ingestBuffer.drain() ──────────────────────────────────────────
+
+describe('ingestBuffer.drain — quiesce before Log mutations', () => {
+  function loadHarness(bulkCreate) {
+    const mockModels = {
+      Log: { bulkCreate },
+      Session: { findByPk: async () => null },
+    };
+    const modelsPath = require.resolve('../models');
+    const originalModelsCache = require.cache[modelsPath];
+    require.cache[modelsPath] = {
+      id: modelsPath,
+      filename: modelsPath,
+      loaded: true,
+      exports: mockModels,
+    };
+    const ibPath = require.resolve('../services/ingestBuffer');
+    const originalIBCache = require.cache[ibPath];
+    delete require.cache[ibPath];
+    return {
+      ingestBuffer: require('../services/ingestBuffer'),
+      restore() {
+        if (originalModelsCache) {
+          require.cache[modelsPath] = originalModelsCache;
+        } else {
+          delete require.cache[modelsPath];
+        }
+        if (originalIBCache) {
+          require.cache[ibPath] = originalIBCache;
+        } else {
+          delete require.cache[ibPath];
+        }
+      },
+    };
+  }
+
+  test('drain writes a non-empty buffer and leaves zero rows', async () => {
+    const { ingestBuffer, restore } = loadHarness(async (rows) => rows);
+    try {
+      for (let i = 0; i < 4; i++) {
+        ingestBuffer.ingest({
+          userId: 1, sessionId: 'drain-1', time: new Date(1700000000000 + i),
+          lon: 0, lat: 0, values: {}, engineRpm: null, vehicleSpeed: null,
+        });
+      }
+      assert.strictEqual(ingestBuffer.size(), 4);
+
+      await ingestBuffer.drain();
+
+      assert.strictEqual(ingestBuffer.size(), 0, 'drain leaves nothing buffered');
+    } finally {
+      restore();
+    }
+  });
+
+  test('drain called during a flush waits for it and then flushes rows ingested meanwhile', async () => {
+    let releaseFirst = null;
+    const firstGate = new Promise((resolve) => { releaseFirst = resolve; });
+    let bulkCreateCalls = 0;
+
+    const { ingestBuffer, restore } = loadHarness(async (rows) => {
+      bulkCreateCalls += 1;
+      if (bulkCreateCalls === 1) await firstGate; // hold the first pass open
+      return rows;
+    });
+
+    try {
+      ingestBuffer.ingest({
+        userId: 1, sessionId: 'drain-2', time: new Date(1700000000000),
+        lon: 0, lat: 0, values: {}, engineRpm: null, vehicleSpeed: null,
+      });
+
+      const firstFlush = ingestBuffer.flush(); // takes the row, blocks on the gate
+
+      let drainResolved = false;
+      const drained = ingestBuffer.drain().then(() => { drainResolved = true; });
+
+      // A row that arrives while the first pass is in flight must be covered
+      // by drain's extra pass.
+      ingestBuffer.ingest({
+        userId: 1, sessionId: 'drain-2', time: new Date(1700000001000),
+        lon: 0, lat: 0, values: {}, engineRpm: null, vehicleSpeed: null,
+      });
+
+      await new Promise((r) => setTimeout(r, 10));
+      assert.strictEqual(drainResolved, false, 'drain must wait for the in-flight flush');
+
+      releaseFirst();
+      await Promise.all([firstFlush, drained]);
+
+      assert.strictEqual(ingestBuffer.size(), 0, 'both passes completed');
+      assert.strictEqual(bulkCreateCalls, 2, 'drain forced one more pass for the late row');
+    } finally {
+      restore();
+    }
+  });
+});
+
+// ── 7. deleted session mid-buffer — poison rows are isolated per session ──
+
+describe('ingestBuffer.flush — deleted session mid-buffer', () => {
+  test('an FK violation for a deleted session only drops that session\'s rows', async () => {
+    const DELETED = 'session-deleted';
+    const HEALTHY = 'session-healthy';
+    let healthyRowsWritten = 0;
+    const summarized = [];
+
+    const calls = [];
+    const mockModels = {
+      Log: {
+        async bulkCreate(rows) {
+          calls.push(rows.length);
+          if (rows.some((r) => r.sessionId === DELETED)) {
+            // Stands in for the sync-created FK violation once the row is gone.
+            throw new Error('insert or update on table "Logs" violates foreign key constraint');
+          }
+          healthyRowsWritten += rows.length;
+          return rows;
+        },
+      },
+      Session: {
+        async findByPk(id) { summarized.push(id); return { id, firstTimestamp: null, lastTimestamp: null }; },
+        async update() { return [1]; },
+      },
+    };
+
+    const modelsPath = require.resolve('../models');
+    const originalModelsCache = require.cache[modelsPath];
+    require.cache[modelsPath] = {
+      id: modelsPath,
+      filename: modelsPath,
+      loaded: true,
+      exports: mockModels,
+    };
+    const ibPath = require.resolve('../services/ingestBuffer');
+    const originalIBCache = require.cache[ibPath];
+    delete require.cache[ibPath];
+
+    try {
+      const { ingest, flush, size } = require('../services/ingestBuffer');
+
+      for (let i = 0; i < 3; i++) {
+        ingest({
+          userId: 1, sessionId: HEALTHY, time: new Date(1700000000000 + i),
+          lon: 0, lat: 0, values: {}, engineRpm: null, vehicleSpeed: null,
+        });
+      }
+      for (let i = 0; i < 3; i++) {
+        ingest({
+          userId: 1, sessionId: DELETED, time: new Date(1700000001000 + i),
+          lon: 0, lat: 0, values: {}, engineRpm: null, vehicleSpeed: null,
+        });
+      }
+
+      // Cycle 1: the mixed chunk fails wholesale (rows had no retry history).
+      await flush();
+      assert.strictEqual(healthyRowsWritten, 0);
+      assert.strictEqual(size(), 6, 'all six rows re-queued');
+
+      // Cycle 2: bisection writes the healthy half, isolates the deleted rows.
+      await flush();
+      assert.strictEqual(healthyRowsWritten, 3, 'healthy session rows written despite the FK failure');
+      assert.strictEqual(size(), 3, 'only the deleted session rows remain');
+      assert.ok(!summarized.includes(DELETED),
+        'a session whose rows never landed must not get a summary merge');
+
+      // Cycles 3 and 4: the orphaned rows advance to MAX_RETRIES and drop.
+      await flush();
+      await flush();
+      assert.strictEqual(size(), 0, 'orphaned rows dropped, healthy rows unaffected');
+      assert.strictEqual(healthyRowsWritten, 3, 'healthy rows are never re-written');
+      assert.ok(calls.length > 0);
+    } finally {
+      if (originalModelsCache) {
+        require.cache[modelsPath] = originalModelsCache;
+      } else {
+        delete require.cache[modelsPath];
+      }
+      if (originalIBCache) {
+        require.cache[ibPath] = originalIBCache;
+      } else {
+        delete require.cache[ibPath];
+      }
+    }
+  });
+});
