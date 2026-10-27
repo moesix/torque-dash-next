@@ -9,6 +9,15 @@
  * This script runs TimescaleDB migrations. In Docker deployments, it is
  * executed automatically at container startup (see Dockerfile CMD). For
  * non-Docker setups, run manually: `node scripts/migrate.js`.
+ *
+ * Applied-migration rule: a file that has already shipped is normally never
+ * edited — add a new numbered file instead. The content hash below makes an
+ * edited file re-run, so an edit is only acceptable when every statement is
+ * idempotent.
+ * Exception: 013 (shareId removal) was edited with owner sign-off because the
+ * column can no longer exist on fresh installs on a sync-first boot. It reruns
+ * safely (every remaining statement is IF NOT EXISTS). Future exceptions must
+ * be added here with the same justification.
  */
 const fs = require('fs');
 const path = require('path');

@@ -8,7 +8,6 @@ CREATE TABLE IF NOT EXISTS "Users" (
     id SERIAL PRIMARY KEY,
     email VARCHAR NOT NULL,
     password VARCHAR NOT NULL,
-    "shareId" VARCHAR,
     "forwardUrls" TEXT[],
     "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
     "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -16,7 +15,6 @@ CREATE TABLE IF NOT EXISTS "Users" (
 
 -- Unique constraints via CREATE INDEX (avoids collisions with sync-created indexes)
 CREATE UNIQUE INDEX IF NOT EXISTS "Users_email_key" ON "Users" (email);
-CREATE UNIQUE INDEX IF NOT EXISTS "Users_shareId_key" ON "Users" ("shareId");
 
 -- Sessions table (matches models/Session.js)
 CREATE TABLE IF NOT EXISTS "Sessions" (

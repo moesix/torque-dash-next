@@ -277,6 +277,8 @@ describe('POST /api/users/register — enumeration prevention', () => {
 
 // Boot the real api router on an ephemeral port with the models above, then
 // let unmatched requests fall through to the same JSON 404 the app installs.
+// The response body is consumed inside the helper so every call site gets the
+// same { status, body } shape and the server can be closed safely.
 function withApiServer(handler) {
   const express = require('express');
   const apiRouter = require('../routes/api');
@@ -299,19 +301,23 @@ function withApiServer(handler) {
 
 describe('removed share-link endpoints — route-gone regression', () => {
   it('GET /api/sessions/shared/<anything> returns the app-level JSON 404', async () => {
-    const res = await withApiServer((base) =>
-      fetch(`${base}/api/sessions/shared/anything`));
+    const { status, body } = await withApiServer(async (base) => {
+      const res = await fetch(`${base}/api/sessions/shared/anything`);
+      return { status: res.status, body: await res.json() };
+    });
 
-    assert.strictEqual(res.status, 404);
-    assert.deepStrictEqual(await res.json(), { error: 'Not found' });
+    assert.strictEqual(status, 404);
+    assert.deepStrictEqual(body, { error: 'Not found' });
   });
 
   it('PATCH /api/users/shareid returns the app-level JSON 404', async () => {
-    const res = await withApiServer((base) =>
-      fetch(`${base}/api/users/shareid`, { method: 'PATCH' }));
+    const { status, body } = await withApiServer(async (base) => {
+      const res = await fetch(`${base}/api/users/shareid`, { method: 'PATCH' });
+      return { status: res.status, body: await res.json() };
+    });
 
-    assert.strictEqual(res.status, 404);
-    assert.deepStrictEqual(await res.json(), { error: 'Not found' });
+    assert.strictEqual(status, 404);
+    assert.deepStrictEqual(body, { error: 'Not found' });
   });
 });
 

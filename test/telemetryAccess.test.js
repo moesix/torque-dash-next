@@ -295,12 +295,12 @@ describe('GET /api/sessions/:id/telemetry — TelemetryController.range', { skip
     test('stray obsolete share parameter is ignored — own data only', async () => {
         // Older clients still append this query key; it is not part of the
         // schema (allowUnknown), so it must not change the ownership scope.
-        const staleShareParam = 'share' + 'Id';
+        // stale client param — must be ignored
         const rows = [{ id: 11, timestamp: FROM, lon: 1.5, lat: 2.5, values: {} }];
         const calls = installDbMocks({ ownedSession: OWNED_SESSION, logRows: rows });
 
         const { status, body } = await withServer({ id: 1 }, (base) =>
-            getJson(base, TELEMETRY_PATH(`${qsFromTo()}&${staleShareParam}=whatever`))
+            getJson(base, TELEMETRY_PATH(`${qsFromTo()}&shareId=whatever`))
         );
 
         assert.strictEqual(status, 200);
@@ -318,5 +318,30 @@ describe('GET /api/sessions/:id/telemetry — TelemetryController.range', { skip
             assert.strictEqual(status, 401);
             assert.deepStrictEqual(body, { error: 'Unauthorized' });
         });
+    });
+});
+
+// Direct controller call (no router, no middleware): pins the 401 guard in
+// TelemetryController.range itself, so it cannot be lost by only exercising
+// the HTTP path where some middleware might answer first.
+describe('TelemetryController.range — direct call without req.user', () => {
+    test('returns 401 Unauthorized and never touches the DB', async () => {
+        const TelemetryController = require('../controllers/TelemetryController');
+        const calls = installDbMocks({ ownedSession: OWNED_SESSION });
+        const out = {};
+        const res = {
+            status(code) { out.status = code; return res; },
+            json(body) { out.body = body; return res; },
+        };
+
+        await TelemetryController.range({
+            query: { from: '2026-01-01T00:00:00Z', to: '2026-01-02T00:00:00Z' },
+            params: { id: '7' },
+        }, res);
+
+        assert.strictEqual(out.status, 401);
+        assert.deepStrictEqual(out.body, { error: 'Unauthorized' });
+        assert.strictEqual(calls.sessionFindOne.length, 0,
+            'unauthenticated request must not reach Session.findOne');
     });
 });

@@ -2,9 +2,12 @@
 -- The share-link surface was removed in code (fork carry-over from upstream;
 -- the SPA never consumed it). Drop the credential column and its index.
 --
--- Fresh-install ordering: 013_users_sessions_baseline.sql still creates
--- "Users" WITH "shareId" and its unique index; this migration then drops both,
--- so a brand-new database ends with the correct schema. 013 is an applied
--- migration and must NOT be edited (see Plan 005's applied-file rule).
+-- Fresh-install ordering: 013_users_sessions_baseline.sql no longer creates
+-- "shareId" (or its unique index) at all — on a brand-new database where
+-- sequelize.sync() built "Users" from the current model, the old index DDL
+-- failed with "column shareId does not exist" and aborted the whole migration
+-- run. So these drops are purely for PRE-EXISTING databases: on a fresh one
+-- they are no-ops (IF EXISTS), on an existing one they clean up the column.
+-- Idempotent either way, which is why re-running 022 is safe.
 DROP INDEX IF EXISTS "Users_shareId_key";
 ALTER TABLE "Users" DROP COLUMN IF EXISTS "shareId";
