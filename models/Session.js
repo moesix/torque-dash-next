@@ -38,12 +38,12 @@ module.exports = (sequelize, DataTypes) => {
             defaultValue: null,
         },
         maxRpm: {
-            type: DataTypes.INTEGER,
+            type: DataTypes.DOUBLE,
             allowNull: true,
             defaultValue: null,
         },
         maxSpeed: {
-            type: DataTypes.INTEGER,
+            type: DataTypes.DOUBLE,
             allowNull: true,
             defaultValue: null,
         }

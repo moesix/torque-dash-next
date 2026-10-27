@@ -28,7 +28,10 @@ USER appuser
 EXPOSE 3000
 
 # Boot sequence:
-#   1) sync() creates the base tables on first boot (idempotent).
-#   2) migrate.js turns "Logs" into a TimescaleDB hypertable + seeds Settings.
+#   1) sync() is belt-and-braces: it creates any missing base tables (idempotent).
+#   2) migrate.js owns the schema its numbered files define (hypertable
+#      conversion, Settings seed, constraints, guards). 000 also creates the
+#      "Logs" baseline, but a fresh sync-less boot is not supported yet: 001
+#      needs an existing "Logs" and 004 references sync-created Sessions/Users.
 #   3) start the API server.
 CMD ["sh", "-c", "node -e \"require('./models').sequelize.sync().then(()=>process.exit(0)).catch(e=>{console.error(e);process.exit(1);})\" && node scripts/migrate.js && node app.js"]

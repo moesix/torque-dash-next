@@ -7,7 +7,9 @@
 CREATE TABLE IF NOT EXISTS "Settings" (
     id integer PRIMARY KEY,
     "disableRegistration" boolean NOT NULL DEFAULT false,
-    "uploadApiToken" text
+    "uploadApiToken" text,
+    "createdAt" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- Seed the singleton row so GET /api/settings never 404s before first toggle.
