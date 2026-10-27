@@ -48,7 +48,7 @@
       "node -c"
     ],
     "apps/frontend/**/*.{ts,tsx}": [
-      "bash -c 'cd apps/frontend && npx tsc --noEmit'"
+      "bash -c 'cd apps/frontend && npx --no-install tsc --noEmit'"
     ]
   },
   "overrides": {

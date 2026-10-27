@@ -73,7 +73,7 @@ const backendProviders = extractMap(
 const aiCardSrc = fs.readFileSync(
     path.join(__dirname, '..', 'apps', 'frontend', 'src', 'features', 'settings', 'AiProviderCard.tsx'), 'utf8'
 );
-const providerMatch = /const PROVIDERS[^=]*=\s*\[([\s\S]*?)\]\s*(?:as const)?;/.exec(aiCardSrc);
+const providerMatch = /\bPROVIDERS\s*[:=]\s*\[([\s\S]*?)\]\s*(?:as const)?;/.exec(aiCardSrc);
 if (!backendProviders || !providerMatch) {
     // Fail closed: a regex miss means provider parity is UNCHECKED, not in sync.
     console.error(

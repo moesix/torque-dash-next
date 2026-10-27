@@ -548,19 +548,30 @@ npm test              # node --test test/ + scripts/checkMirrors.js + scripts/ch
 npm run test:coverage # same suite under c8; enforces the floors in .c8rc.json
 ```
 
+Every file directly under `test/` must be named `*.test.js` — Node 20.19's
+`node --test test/` executes *all* `.js` files in the directory while Node 22+
+runs only `*.test.js`, so a stray helper would silently be a test on one runtime
+and a no-op on the other. `scripts/checkTestIntegrity.js` fails the run if one
+appears.
+
 `c8` runs with `all: true` (unloaded files count as 0%) and `check-coverage:
-true`. Floors are set ~5 points below the measured baseline — lines/statements
-82, branches 80, functions 85 (baseline: 87.35 / 87.35 / 85.76 / 90.36). The
+true`. Floors are set a few points below the measured baseline — lines/statements
+82, branches 80, functions 85 (baseline: 85.29 / 85.29 / 85.76 / 89.82). The
 exclude list is deliberately narrow and each entry is non-runtime code:
 
-- `app.js` — entry point; importing it boots config and a DB connection, which
-  the unit suite must not do. Its wiring is covered by the integration suite.
 - `eslint.config.js` — tooling config, never executed at runtime.
 - `scripts/checkMirrors.js`, `scripts/checkTestIntegrity.js` — gate scripts run
   as standalone `node` processes from `npm test`, outside the instrumented run.
 - `scripts/seed-demo.js` — DB-writing CLI demo seeder.
 - `test/**`, `integration/**`, `apps/frontend/**`, `node_modules/**` — not
   backend runtime code (the SPA has its own Vitest coverage).
+
+`app.js` is **not** excluded. All bootstrap work (config load, DB connect,
+listen, pruner) sits behind `if (require.main === module)`, so importing the
+module is side-effect-free — a plain `require` only returns the wired Express
+app. Keeping it in the gate means the entry point's own lines are measured
+instead of hidden; since the unit suite never imports it, its lines count as 0%
+under `all: true`, which is already priced into the floors above.
 
 **Frontend** (Vitest):
 ```sh
@@ -878,7 +889,7 @@ blockers are resolved and re-reviewed as PASS:
 - **Dependabot fixes (Plan 044)** — `react-router-dom` exact-pinned to 6.30.4 (transitive `react-router` 6.30.4, `@remix-run/router` 1.23.3) and `postcss` 8.5.25, resolving 4 of 6 alerts. The remaining two react-router advisories were then resolved by the v7 migration (Plan 045).
 - **react-router v7 migration (Plan 045)** — `react-router-dom` 6.30.4 replaced with `react-router` 7.18.2 (exact pin); all 8 frontend files now import from `react-router`. Resolves GHSA-wrjc-x8rr-h8h6 and GHSA-337j-9hxr-rhxg. The v8 upgrade was completed in Plan 047.
 - **Configurable Data Retention Policy (Plan 046)** — `retentionEnabled` (BOOLEAN, default false — opt-in) and `retentionDays` (INTEGER, default 365, range 90–365) on the Settings singleton (migration `011_add_retention_settings.sql`). `PUT /api/settings` validates both fields (400 on non-boolean / non-integer / out-of-range) and applies a TimescaleDB `add_retention_policy`/`remove_retention_policy` on the `Logs` hypertable using a remove-then-add idempotent pattern; the response includes `retentionPolicyApplied`. Frontend Settings page gains a "Data Retention" card (enable Switch + 90/120/180/365-day select, local error state, rollback on save failure). Validation mirrored in `test/settingsValidation.test.js` (10 new cases; suite now **61 tests**).
-- **Bleeding-edge dependency upgrade (Plan 047)** — backend (root `package.json`): `joi` 18.2.3, `express-rate-limit` 8.6.2, `pg` 8.22.0, `cors` 2.8.6, `express-session` 1.19.0, `nodemon` 3.1.14, `globals` 17.9.0, `lint-staged` 17.3.0. Frontend: `react`/`react-dom` 19.2.8, `react-router` **8.3.0** (exact pin — replaces `react-router-dom`, resolves GHSA-qwww-vcr4-c8h2), `vite` 8.2.0, `@vitejs/plugin-react` 5.2.0, `typescript` 7.0.2, `tailwindcss` 4.3.3 + `@tailwindcss/vite` 4.3.3, `zustand` 5.0.14, `@tanstack/react-query` 5.101.4, `react-markdown` 10.1.0, `react-leaflet` 5.0.0, `@types/react` 19.2.18, `@types/react-dom` 19.2.4. Infra: both Dockerfiles on `node:22-bookworm-slim`, CI workflows on Node 22, `timescale/timescaledb:2.29.1-pg16` in compose.
+- **Bleeding-edge dependency upgrade (Plan 047)** — backend (root `package.json`): `joi` 18.2.3, `express-rate-limit` 8.6.2, `pg` 8.22.0, `cors` 2.8.6, `express-session` 1.19.0, `nodemon` 3.1.14 (nodemon removed in 015), `globals` 17.9.0, `lint-staged` 17.3.0. Frontend: `react`/`react-dom` 19.2.8, `react-router` **8.3.0** (exact pin — replaces `react-router-dom`, resolves GHSA-qwww-vcr4-c8h2), `vite` 8.2.0, `@vitejs/plugin-react` 5.2.0, `typescript` 7.0.2, `tailwindcss` 4.3.3 + `@tailwindcss/vite` 4.3.3, `zustand` 5.0.14, `@tanstack/react-query` 5.101.4, `react-markdown` 10.1.0, `react-leaflet` 5.0.0, `@types/react` 19.2.18, `@types/react-dom` 19.2.4. Infra: both Dockerfiles on `node:22-bookworm-slim`, CI workflows on Node 22, `timescale/timescaledb:2.29.1-pg16` in compose.
 - **Tremor replaced with native Tailwind (Plan 049)** — the `@tremor/react` dependency was removed; every Tremor component was reimplemented with plain Tailwind utilities, including a new accessible `Toggle` switch (`components/ui/Toggle.tsx`, sr-only label). `index.css` dropped the Tremor safelist directives and typography tokens. Bundle shrunk ~65 kB; all chunks now <400 kB (largest ~380 kB echarts) via Rolldown `codeSplitting` groups in `vite.config.ts`. See `docs/architecture.md` §3.8.
 - **Remaining open issues:** SSRF TOCTOU on the BYOK custom-LLM path (partially
   addressed — the guard validates a resolved-IP snapshot; see section 10 above).

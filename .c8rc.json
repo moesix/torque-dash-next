@@ -12,7 +12,6 @@
     "test/**",
     "integration/**",
     "apps/frontend/**",
-    "app.js",
     "eslint.config.js",
     "scripts/checkMirrors.js",
     "scripts/checkTestIntegrity.js",
