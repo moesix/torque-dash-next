@@ -98,7 +98,9 @@ so `docker compose up -d` applies any pending migrations — no manual step
 needed for Docker deployments. The CMD first runs an idempotent
 `sequelize.sync()` bootstrap **unconditionally** (regardless of NODE_ENV) as
 belt-and-braces; migrations also create the `Logs` baseline themselves
-(`000_baseline_tables.sql`), so that table no longer depends on sync. migrate.js
+(`000_baseline_tables.sql`) and `Users`/`Sessions`
+(`000_users_sessions_baseline.sql`), so an empty database migrates with or
+without that sync. migrate.js
 then applies the TimescaleDB-specific DDL (`Logs` hypertable, continuous
 aggregate) and seeds Settings. A manual run is only required for **non-Docker
 (manual) setups**:
@@ -113,20 +115,39 @@ The script:
 2. Strips SQL comments and splits each file into individual statements on `;`.
 3. Runs each statement via `pg`; duplicate-object errors ("already exists",
    duplicate constraints, "multiple primary keys") are tolerated (idempotent
-   re-runs). `"does not exist"` is **not** tolerated — a missing relation aborts
-   the run, because every base table has an owning migration (`000`–`013`).
-   **Known gap:** that ownership is not yet enough for a fresh install —
-   `004` adds foreign keys to `Sessions` / `Users`, which `013` creates later,
-   and `001` needs an existing `Logs`. So a fresh boot that skips
-   `sequelize.sync()` (and today the sync-first boot too) is **not supported
-   yet**; see the fresh-install follow-up plan for the reordering. A file is
-   marked applied in the tracker only once all its statements succeed.
+   re-runs), as is a TimescaleDB table option applied to a table that is not a
+   hypertable yet (`001` sets compression before converting `Logs`, then sets
+   it again after the conversion). `"does not exist"` is **not** tolerated — a
+   missing relation aborts the run. Every base table has an owning migration
+   (`000_baseline_tables.sql` for `Logs`, `000_users_sessions_baseline.sql` for
+   `Users`/`Sessions`, then `002`/`004`/`009`), and those files sort before the
+   migrations that reference them, so **fresh installs are supported in both
+   boot shapes**: with a preceding `sequelize.sync()` (Docker; the SQL then
+   no-ops) and sync-less (`node scripts/migrate.js` on an empty database). The
+   CI `migrate-checks` job runs the sync-less path twice on every push/PR to
+   `development`. A file is marked applied in the tracker only once all its
+   statements succeed.
 
-**Current migration files** — top-level series `000`–`023` (in execution order):
+**Known model ↔ migration differences (accepted).** These predate this
+ordering baseline and are recorded rather than silently changed:
+
+| Difference | Sync-created database | Migration-created database |
+| --- | --- | --- |
+| `Sessions.userId` foreign key | `ON DELETE SET NULL` (Sequelize `belongsTo` default) | `ON DELETE CASCADE` (`013` / `000_users_sessions_baseline`) |
+| `Sessions.vehicleId` foreign key | present, `ON DELETE SET NULL` (from `Session.belongsTo(Vehicle)` — `009`'s `ADD COLUMN IF NOT EXISTS` then skips) | absent: `009`'s `ADD COLUMN IF NOT EXISTS` skips because the baseline already created the column, so no FK is ever added |
+| `Logs.sessionId` foreign key | `ON DELETE CASCADE ON UPDATE CASCADE` (Sequelize default) | `ON DELETE CASCADE` only (`000_users_sessions_baseline`); no semantic difference, since `Sessions.id` is an immutable `SERIAL` |
+| `Sessions.createdAt` / `updatedAt` nullability | `NOT NULL` | nullable |
+| `Settings.id` default | `DEFAULT 1` (model) | no column default; `002` seeds the singleton row explicitly |
+
+Changing any of these means a new numbered migration (never an edit to `009` /
+`013`); the sync-created shape only exists for dev/test builds.
+
+**Current migration files** — top-level series `000`–`024` (in execution order):
 
 | File | Purpose |
 | --- | --- |
 | `000_baseline_tables.sql` | Creates the base `Logs` table — the only base table with no other owning migration — for sync-less installs (`001` converts it to a hypertable) |
+| `000_users_sessions_baseline.sql` | Creates `Users`/`Sessions` before `001`/`004` need them, and adds the `Logs.sessionId → Sessions(id)` foreign key (`ON DELETE CASCADE`) that sync-created databases already carry |
 | `001_log_hypertable.sql` | Creates the `Logs` hypertable, promoted columns `engine_rpm` / `vehicle_speed`, unique index on `id`, and the `log_1min` continuous aggregate |
 | `002_settings.sql` | Creates the `Settings` table and seeds the singleton row (misc global configuration) |
 | `003_add_llm_settings.sql` | Adds `llmProvider`, `llmModel`, `llmEndpoint`, `llmApiKeyEnc` columns to Settings |
@@ -150,6 +171,7 @@ The script:
 | `021_add_map_tile_settings.sql` | Adds admin-configurable `tileProvider` / `cartoApiKey` columns plus an allowlist CHECK to Settings |
 | `022_remove_share_surface.sql` | Drops the retired `Users.shareId` column and its unique index (pre-existing databases; a no-op on fresh installs) |
 | `023_user_admin_guarded.sql` | Re-runs 017's lowest-id promotion only when no admin exists, so a fresh-install re-run cannot promote a second account |
+| `024_session_max_types.sql` | Retypes `Sessions.maxRpm` / `maxSpeed` to `DOUBLE PRECISION` where an older sync created them as `INTEGER` (`016`'s `ADD COLUMN IF NOT EXISTS` cannot) |
 
 Nested under `migrations/`: `001_add_upload_token.sql` (no-op placeholder) and
 `002_backfill_pid_columns.sql` — the legacy `engine_rpm`/`vehicle_speed`

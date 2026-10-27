@@ -6,8 +6,11 @@
  * transaction. Idempotency comes from the SQL's IF NOT EXISTS guards, not from
  * the runner: only duplicate-object errors ("already exists", duplicate
  * constraints, "multiple primary keys", re-registering a hypertable/compression
- * policy) are treated as benign and skipped. Missing-relation errors are NOT
- * benign — they abort the run.
+ * policy) are treated as benign and skipped. One statement class is benign
+ * before the object exists: a TimescaleDB table option (e.g. compression) on a
+ * table that is not yet a hypertable — see 001_log_hypertable.sql, which sets
+ * the option before converting Logs and sets it again afterwards. Missing-
+ * relation errors are NOT benign — they abort the run.
  *
  * This script runs TimescaleDB migrations. In Docker deployments, it is
  * executed automatically at container startup (see Dockerfile CMD). For
@@ -38,6 +41,7 @@ function isBenignError(err) {
         /multiple primary keys/i.test(msg) ||
         /relation "log_1min" already exists/i.test(msg) ||
         /already a hypertable/i.test(msg) ||
+        /timescaledb table options can only be specified for hypertables/i.test(msg) ||
         /operation not supported on hypertables that have compression enabled/i.test(msg) ||
         /cannot disable compression on hypertable with compressed chunks/i.test(msg)
     );

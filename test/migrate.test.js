@@ -7,10 +7,11 @@ const { listMigrationFiles, isBenignError } = require('../scripts/migrate');
 const SQL_DIR = path.join(__dirname, '..', 'infra', 'timescale');
 
 describe('migration loader', () => {
-    it('returns files in strict lexicographic path order 000–023 then migrations/', () => {
+    it('returns files in strict lexicographic path order 000–024 then migrations/', () => {
         const files = listMigrationFiles();
         const expected = [
             '000_baseline_tables.sql',
+            '000_users_sessions_baseline.sql',
             '001_log_hypertable.sql',
             '002_settings.sql',
             '003_add_llm_settings.sql',
@@ -34,6 +35,7 @@ describe('migration loader', () => {
             '021_add_map_tile_settings.sql',
             '022_remove_share_surface.sql',
             '023_user_admin_guarded.sql',
+            '024_session_max_types.sql',
             'migrations/001_add_upload_token.sql',
             'migrations/002_backfill_pid_columns.sql',
         ];
@@ -107,6 +109,75 @@ describe('baseline schema', () => {
         );
         assert.ok(!/\$\$/.test(sql), 'no dollar-quoted blocks (the runner splits on ;)');
     });
+
+    it('024_session_max_types.sql retypes both summary columns to DOUBLE PRECISION', () => {
+        const sql = fs.readFileSync(path.join(SQL_DIR, '024_session_max_types.sql'), 'utf8');
+        for (const column of ['"maxRpm"', '"maxSpeed"']) {
+            assert.ok(
+                sql.includes(`ALTER TABLE "Sessions" ALTER COLUMN ${column} TYPE DOUBLE PRECISION;`),
+                `024 must retype Sessions.${column}`
+            );
+        }
+        assert.ok(!/\$\$/.test(sql), 'no dollar-quoted blocks (the runner splits on ;)');
+    });
+});
+
+describe('fresh-install ordering baseline (000_users_sessions_baseline.sql)', () => {
+    const readSql = (name) => fs.readFileSync(path.join(SQL_DIR, name), 'utf8');
+
+    // Column lines of a CREATE TABLE block, whitespace-normalized so the
+    // comparison is about DDL meaning, not indentation.
+    function createTableColumns(sql, table) {
+        const match = sql.match(new RegExp(`CREATE TABLE IF NOT EXISTS "${table}" \\(([\\s\\S]*?)\\);`));
+        assert.ok(match, `CREATE TABLE IF NOT EXISTS "${table}" block must exist`);
+        return match[1]
+            .split('\n')
+            .map((line) => line.trim())
+            .filter((line) => line && !line.startsWith('--'));
+    }
+
+    it('sorts after the Logs baseline and before 001 (and 004)', () => {
+        const files = listMigrationFiles();
+        const baseline = files.indexOf('000_users_sessions_baseline.sql');
+        assert.ok(baseline > files.indexOf('000_baseline_tables.sql'));
+        assert.ok(baseline < files.indexOf('001_log_hypertable.sql'));
+        assert.ok(baseline < files.indexOf('004_add_analyses_table.sql'));
+    });
+
+    it('Users DDL matches 013 column for column', () => {
+        assert.deepEqual(
+            createTableColumns(readSql('000_users_sessions_baseline.sql'), 'Users'),
+            createTableColumns(readSql('013_users_sessions_baseline.sql'), 'Users')
+        );
+    });
+
+    it('Sessions DDL matches 013 column for column', () => {
+        assert.deepEqual(
+            createTableColumns(readSql('000_users_sessions_baseline.sql'), 'Sessions'),
+            createTableColumns(readSql('013_users_sessions_baseline.sql'), 'Sessions')
+        );
+    });
+
+    it('carries the same unique indexes as 013', () => {
+        const sql = readSql('000_users_sessions_baseline.sql');
+        for (const index of [
+            'CREATE UNIQUE INDEX IF NOT EXISTS "Users_email_key" ON "Users" (email);',
+            'CREATE UNIQUE INDEX IF NOT EXISTS "Sessions_sessionId_key" ON "Sessions" ("sessionId");',
+        ]) {
+            assert.ok(sql.includes(index), `000_users_sessions_baseline must define ${index}`);
+        }
+    });
+
+    it('adds the Logs -> Sessions foreign key with ON DELETE CASCADE', () => {
+        const sql = readSql('000_users_sessions_baseline.sql').replace(/\s+/g, ' ');
+        assert.ok(
+            sql.includes(
+                'ALTER TABLE "Logs" ADD CONSTRAINT "Logs_sessionId_fkey" FOREIGN KEY ("sessionId") REFERENCES "Sessions"(id) ON DELETE CASCADE;'
+            ),
+            'fresh Logs must cascade-delete telemetry with its session'
+        );
+        assert.ok(!/\$\$/.test(sql), 'no dollar-quoted blocks (the runner splits on ;)');
+    });
 });
 
 describe('isBenignError', () => {
@@ -132,6 +203,18 @@ describe('isBenignError', () => {
 
     it('accepts "already a hypertable"', () => {
         assert.equal(isBenignError({ message: 'table "Logs" is already a hypertable' }), true);
+    });
+
+    it('accepts table options on a not-yet-hypertable (001 compression pre-conversion)', () => {
+        assert.equal(
+            isBenignError({ message: 'timescaledb table options can only be specified for hypertables' }),
+            true
+        );
+    });
+
+    it('still rejects arbitrary errors with a similar shape', () => {
+        assert.equal(isBenignError({ message: 'table options are not supported here' }), false);
+        assert.equal(isBenignError({ message: 'compression is not enabled for this hypertable' }), false);
     });
 
     it('rejects missing table (does not exist)', () => {

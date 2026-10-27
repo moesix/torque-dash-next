@@ -41,6 +41,106 @@ jobs:
       - name: Run ESLint
         run: npm run lint
 
+  migrate-checks:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgres://tdn:tdn@localhost:5432/tdn
+      SESSION_KEYS: ci-test-key-for-migration-runner
+    services:
+      timescaledb:
+        image: timescale/timescaledb:2.29.1-pg16
+        env:
+          POSTGRES_USER: tdn
+          POSTGRES_PASSWORD: tdn
+          POSTGRES_DB: tdn
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U tdn -d tdn"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install backend dependencies
+        run: npm ci
+
+      # Guard for the fresh-install path: migrations only (no sequelize.sync),
+      # against an empty TimescaleDB. The second run proves the tracker and the
+      # IF NOT EXISTS / benign-skip logic make a re-run a no-op.
+      - name: Migrate empty database
+        run: node scripts/migrate.js
+
+      - name: Migrate again (idempotent re-run)
+        run: node scripts/migrate.js
+
+      # Schema contract, not just "the migrations exited 0": the fresh-install
+      # shape must carry the cascade FK and the DOUBLE PRECISION max columns the
+      # models rely on, and must not resurrect the retired Users.shareId.
+      - name: Assert migrated schema
+        run: |
+          node <<'NODE'
+          const { Client } = require('pg');
+
+          const failures = [];
+
+          (async () => {
+            const client = new Client({ connectionString: process.env.DATABASE_URL });
+            await client.connect();
+            try {
+              const fk = await client.query(
+                "SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conname = 'Logs_sessionId_fkey'"
+              );
+              if (fk.rowCount !== 1) {
+                failures.push(`Logs_sessionId_fkey: expected 1 constraint, found ${fk.rowCount}`);
+              } else if (!/ON DELETE CASCADE/.test(fk.rows[0].def)) {
+                failures.push(`Logs_sessionId_fkey: missing ON DELETE CASCADE (${fk.rows[0].def})`);
+              }
+
+              const maxCols = await client.query(
+                `SELECT column_name, data_type FROM information_schema.columns
+                  WHERE table_schema = 'public' AND table_name = 'Sessions'
+                    AND column_name IN ('maxRpm', 'maxSpeed')`
+              );
+              for (const name of ['maxRpm', 'maxSpeed']) {
+                const found = maxCols.rows.find((row) => row.column_name === name);
+                if (!found) {
+                  failures.push(`Sessions.${name}: column missing`);
+                } else if (found.data_type !== 'double precision') {
+                  failures.push(`Sessions.${name}: expected double precision, found ${found.data_type}`);
+                }
+              }
+
+              const shareId = await client.query(
+                `SELECT 1 FROM information_schema.columns
+                  WHERE table_schema = 'public' AND table_name = 'Users' AND column_name = 'shareId'`
+              );
+              if (shareId.rowCount !== 0) {
+                failures.push('Users.shareId: column still present');
+              }
+            } finally {
+              await client.end();
+            }
+
+            if (failures.length > 0) {
+              console.error('[schema-assert] FAILED:\n- ' + failures.join('\n- '));
+              process.exit(1);
+            }
+            console.log('[schema-assert] OK: Logs FK cascades, Sessions.maxRpm/maxSpeed are double precision, Users has no shareId');
+          })().catch((err) => {
+            console.error('[schema-assert] ERROR:', err.message);
+            process.exit(1);
+          });
+          NODE
+
   frontend-checks:
     runs-on: ubuntu-latest
     steps:
