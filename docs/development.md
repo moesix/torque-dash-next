@@ -627,9 +627,11 @@ These are documented issues from code reviews. Severity is assigned per the revi
 `npm run test:integration` (CI job `integration-checks`) boots a real
 TimescaleDB through `node scripts/migrate.js` only — no `sequelize.sync()` — and
 drives upload → ingest → sessions → telemetry → CSV → delete → re-upload over
-the real routers and models. The migrate boot path is covered end-to-end and the
-dev sync path exercises the same model contracts, so the Express 5 migration
-prerequisite is met.
+the real routers and models. The migrate boot path is covered end-to-end and
+sync remains dev-only belt-and-braces (the dev `sequelize.sync()` path exercises
+the same model contracts, so the Express 5 migration prerequisite is met).
+The suite is fail-closed in CI: `CI=true` turns a missing `DATABASE_URL` /
+`SESSION_KEYS` or an unreachable database into a failure instead of a skip.
 
 ### Auth contract (SPA ↔ backend) ✅ RESOLVED
 
@@ -867,9 +869,12 @@ docker compose -f docker-compose.dev.yml exec backend node scripts/seed-demo.js 
   `demo@torquedash.local` / `demo-password`. Those are **fake credentials** and
   the script prints a `DEMO DATA` banner; re-running replaces previous
   `demo-*` sessions. Frames come from `integration/fixtures/torqueFrames.js`,
-  the same generator the integration suite uses.
+  the same generator the integration suite uses. The script **refuses to run**
+  with `NODE_ENV=production` — the credentials are public.
 - Backend: **http://localhost:3000** (`/health` probes it). Frontend:
   `cd apps/frontend && npm run dev` (proxies `/api` to port 3000).
+
+> ⚠️ Running the integration suite? `test:integration` truncates the database it points at (guard: `NODE_ENV=test` or `INTEGRATION_RESET_DB=1`).
 
 ### Build from source
 

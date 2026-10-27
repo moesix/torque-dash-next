@@ -8,7 +8,7 @@
     "lint": "eslint .",
     "test": "node --test 'test/*.test.js' && node scripts/checkMirrors.js && node scripts/checkTestIntegrity.js",
     "test:coverage": "c8 node --test 'test/*.test.js' && node scripts/checkMirrors.js && node scripts/checkTestIntegrity.js",
-    "test:integration": "node --test --test-concurrency=1 integration/*.test.js",
+    "test:integration": "node --test --test-concurrency=1 --test-force-exit integration/*.test.js",
     "verify": "npm test && npm run lint && cd apps/frontend && npm test && npx tsc --noEmit",
     "prepare": "husky || true"
   },

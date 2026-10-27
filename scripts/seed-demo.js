@@ -13,6 +13,17 @@
 // columns and denormalized summaries exactly like production ingest. Sessions
 // are created first because Logs.sessionId is FK-enforced.
 
+// Demo rows are fake by design and the credentials are printed to stdout;
+// seeding a production database would create a working login for anyone who can
+// read the log. Refuse before loading models/config (which requires DATABASE_URL).
+if (process.env.NODE_ENV === 'production') {
+    console.error(
+        '[seed-demo] refusing to seed demo data with NODE_ENV=production: ' +
+        'the demo credentials are public. Unset NODE_ENV or point at a disposable database.'
+    );
+    process.exit(1);
+}
+
 const models = require('../models');
 const ingestBuffer = require('../services/ingestBuffer');
 const { makeSeries, toIngestItem } = require('../integration/fixtures/torqueFrames');

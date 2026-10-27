@@ -7,16 +7,27 @@
 //
 // Env is pinned before the app is required (config.js throws without
 // DATABASE_URL / SESSION_KEYS); when either is missing or the database is
-// unreachable every test skips, so `npm run verify` stays DB-free.
+// unreachable every test skips locally, so `npm run verify` stays DB-free.
+// In CI (`CI=true`) those same conditions FAIL — a green job without a
+// database would be a false pass.
+//
+// This suite OWNS the target database: before() runs the idempotent migrations
+// itself (no dependency on the boot suite's ordering) and resetDatabase()
+// TRUNCATEs the app tables between tests. That destructive reset is guarded —
+// it refuses to run unless NODE_ENV=test or INTEGRATION_RESET_DB=1.
 
 process.env.UPLOAD_API_TOKEN = process.env.UPLOAD_API_TOKEN || 'integration-upload-token';
 
 const { test, before, after } = require('node:test');
 const assert = require('node:assert');
 const http = require('node:http');
+const path = require('node:path');
+const { execFileSync, spawn } = require('node:child_process');
 const { Client } = require('pg');
 const { makeFrame, makeSeries } = require('./fixtures/torqueFrames');
 
+const ROOT = path.join(__dirname, '..');
+const CI = process.env.CI === 'true';
 const UPLOAD_TOKEN = process.env.UPLOAD_API_TOKEN;
 
 let app;
@@ -44,6 +55,38 @@ try {
 
 const state = { skip: null, server: null, base: null };
 
+// "host:port/db" — enough to recognise a database, without the password.
+function resetTarget() {
+    try {
+        const url = new URL(process.env.DATABASE_URL);
+        const db = url.pathname.replace(/^\//, '') || '(default)';
+        return `${url.hostname}${url.port ? `:${url.port}` : ''}/${db}`;
+    } catch {
+        return '(unparseable DATABASE_URL)';
+    }
+}
+
+function missingEnvReason() {
+    if (!process.env.DATABASE_URL) return 'DATABASE_URL not set — no database to ingest into';
+    if (!process.env.SESSION_KEYS) return 'SESSION_KEYS not set — app.js cannot load config';
+    return null;
+}
+
+// CI must not pass without a database; local runs skip so verify stays DB-free.
+function unavailable(reason) {
+    if (CI) assert.fail(`CI requires a reachable integration database: ${reason}`);
+    state.skip = reason;
+}
+
+function migrate() {
+    return execFileSync(process.execPath, ['scripts/migrate.js'], {
+        cwd: ROOT,
+        env: process.env,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+    });
+}
+
 async function databaseReachable() {
     const client = new Client({
         connectionString: process.env.DATABASE_URL,
@@ -61,14 +104,20 @@ async function databaseReachable() {
 }
 
 before(async () => {
+    const envReason = missingEnvReason();
+    if (envReason) return unavailable(envReason);
     if (loadError) {
-        state.skip = `app not loadable: ${loadError.message.split('\n')[0]}`;
-        return;
+        return unavailable(`app not loadable: ${loadError.message.split('\n')[0]}`);
     }
-    if (!(await databaseReachable())) {
-        state.skip = 'database unreachable';
-        return;
-    }
+    if (!(await databaseReachable())) return unavailable('database unreachable');
+
+    // Self-sufficient boot: this suite migrates the target itself instead of
+    // relying on the boot suite having run first (idempotent — a no-op when the
+    // schema is already there). Also keeps `node --test integration/ingest.test.js`
+    // meaningful on its own.
+    const migrated = migrate();
+    assert.match(migrated, /\[migrate\] Done\./, `ingest migrate did not finish:\n${migrated}`);
+
     // app.js's bootstrap() seeds the runtime token holder at boot; importing
     // the module by design does not, so do the one call it would have made.
     await runtime.initUploadApiToken(models);
@@ -84,7 +133,18 @@ after(async () => {
 
 // Settings is a singleton seeded by migration 002. The tracker skips that file
 // on later runs, so a truncate has to restore row id=1 itself.
+//
+// TRUNCATE is destructive: point DATABASE_URL at a disposable database. The
+// opt-in mirrors the usual "do not wipe a database by accident" convention —
+// NODE_ENV=test (CI, docker-compose.dev, local test env) or an explicit
+// INTEGRATION_RESET_DB=1. The error names host/db only, never the password.
 async function resetDatabase() {
+    if (process.env.NODE_ENV !== 'test' && process.env.INTEGRATION_RESET_DB !== '1') {
+        throw new Error(
+            `resetDatabase() refuses to TRUNCATE ${resetTarget()}: ` +
+            'set NODE_ENV=test or INTEGRATION_RESET_DB=1 to confirm this is a disposable database'
+        );
+    }
     await sequelize.query(
         'TRUNCATE TABLE "Logs", "Sessions", "Analyses", "Vehicles", "Users", "Settings" CASCADE'
     );
@@ -265,4 +325,72 @@ test('upload without a bearer token is rejected', async (t) => {
     const res = await request(`/api/upload?${new URLSearchParams(makeFrame({ session: 'no-auth' }))}`);
     assert.strictEqual(res.status, 401);
     assert.match((await res.json()).error, /Authorization header required/);
+});
+
+// Torque retries frames (GPS reconnect, app restart mid-send). The ingest path
+// relies on the hypertable's unique index + bulkCreate(ignoreDuplicates) so a
+// redelivered frame is a silent no-op, not a duplicate row and not a 500.
+test('a duplicate frame is ignored (ON CONFLICT) and still answers OK!', async (t) => {
+    if (state.skip) return t.skip(state.skip);
+    await resetDatabase();
+
+    const { email, cookie } = await registerAndLogin();
+    const sessionKey = 'it-trip-dup';
+    const [frame] = makeSeries({ session: sessionKey, eml: email, count: 1 });
+    await uploadSeries([frame]);
+
+    const session = await Session.findOne({ where: { sessionId: sessionKey } });
+    assert.ok(session, 'first upload must create the session');
+    assert.strictEqual(await Log.count({ where: { sessionId: session.id } }), 1);
+
+    // Same wire frame, byte for byte: same sessionId + timestamp + values.
+    const replay = await uploadFrame(frame);
+    assert.strictEqual(replay.status, 200, 'replaying a frame must not error');
+    assert.strictEqual(await replay.text(), 'OK!');
+    await ingestBuffer.drain();
+
+    assert.strictEqual(
+        await Log.count({ where: { sessionId: session.id } }),
+        1,
+        'a redelivered frame must not create a second row'
+    );
+    const listed = await listSessions(cookie);
+    assert.strictEqual(listed.total, 1);
+    assert.strictEqual(listed.sessions[0].maxRpm, 800, 'duplicate must not skew summaries');
+});
+
+function importAppProcess() {
+    return new Promise((resolve) => {
+        const child = spawn(process.execPath, ['-e', "require('./app')"], {
+            cwd: ROOT,
+            env: process.env,
+            stdio: ['ignore', 'pipe', 'pipe'],
+        });
+        let stdout = '';
+        let stderr = '';
+        const timer = setTimeout(() => {
+            child.kill('SIGKILL');
+            resolve({ code: null, signal: 'SIGKILL', stdout, stderr, timedOut: true });
+        }, 5000);
+        child.stdout.on('data', (chunk) => { stdout += chunk; });
+        child.stderr.on('data', (chunk) => { stderr += chunk; });
+        child.on('close', (code, signal) => {
+            clearTimeout(timer);
+            resolve({ code, signal, stdout, stderr, timedOut: false });
+        });
+    });
+}
+
+// `require('./app')` must only export the wired router: a require.main guard
+// around bootstrap() means importing never syncs, never listens, and never
+// starts background timers — the property both integration files depend on.
+test('importing app.js never listens or syncs', async (t) => {
+    if (state.skip) return t.skip(state.skip);
+
+    const result = await importAppProcess();
+    const output = `${result.stdout}${result.stderr}`;
+    assert.ok(!result.timedOut, `importing app.js did not exit within 5s (output: ${output})`);
+    assert.strictEqual(result.code, 0, `importing app.js exited ${result.code}: ${output}`);
+    assert.doesNotMatch(output, /Listening on port/, 'importing app.js must not start the HTTP listener');
+    assert.doesNotMatch(output, /Connection to database successfully established/, 'importing app.js must not run sequelize.sync()');
 });

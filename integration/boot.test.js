@@ -3,8 +3,10 @@
 // Boot contract for the migrations-only stack: a real TimescaleDB starts
 // empty, `node scripts/migrate.js` alone must produce the schema the models
 // use (no sequelize.sync() anywhere), and a second run must be a no-op.
-// Skips (rather than fails) when no database is reachable — `npm run verify`
-// stays DB-free.
+//
+// Missing env or an unreachable database SKIPS locally (so `npm run verify`
+// stays DB-free) but FAILS in CI (`CI=true`): a green integration job without
+// a database would be a false pass.
 
 const { test } = require('node:test');
 const assert = require('node:assert');
@@ -13,6 +15,7 @@ const path = require('node:path');
 const { Client } = require('pg');
 
 const ROOT = path.join(__dirname, '..');
+const CI = process.env.CI === 'true';
 const APP_TABLES = ['Users', 'Sessions', 'Logs', 'Vehicles', 'Analyses', 'Settings'];
 
 function migrate() {
@@ -52,10 +55,16 @@ function skipReason() {
     return null;
 }
 
+// CI has no legitimate reason to be without a database: fail instead of skip.
+function unavailable(t, reason) {
+    if (CI) assert.fail(`CI requires a bootable database: ${reason}`);
+    return t.skip(reason);
+}
+
 test('migrate.js alone boots a fresh database, twice, idempotently', async (t) => {
     const reason = skipReason();
-    if (reason) return t.skip(reason);
-    if (!(await reachable())) return t.skip('database unreachable');
+    if (reason) return unavailable(t, reason);
+    if (!(await reachable())) return unavailable(t, 'database unreachable');
 
     const first = migrate();
     assert.match(first, /\[migrate\] Done\./, `first migrate did not finish:\n${first}`);
