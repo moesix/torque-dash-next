@@ -1,16 +1,35 @@
 import { useState, useEffect } from 'react';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { getSessions, getVehicles } from '@/lib/api';
-import type { Vehicle } from '@/lib/types';
+import type { PaginatedSessions } from '@/lib/api';
+import type { Session, Vehicle } from '@/lib/types';
 import Skeleton from '@/components/ui/Skeleton';
 import ErrorAlert from '@/components/ui/ErrorAlert';
 import Button from '@/components/ui/Button';
 import SessionTable from '@/components/tables/SessionTable';
 
+/** Flatten accumulated pages, dropping rows already seen so an offset window
+ *  that repeats a session can't produce duplicate React keys (or a drifting
+ *  "N of total" label). First occurrence wins; page order is preserved. */
+function flattenUniqueSessions(pages: Array<PaginatedSessions | undefined>): Session[] {
+  const seen = new Set<string>();
+  const out: Session[] = [];
+  for (const page of pages) {
+    for (const session of page?.sessions ?? []) {
+      if (seen.has(session.id)) continue;
+      seen.add(session.id);
+      out.push(session);
+    }
+  }
+  return out;
+}
+
 export default function SessionBrowser() {
   const limit = 50;
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
-  const [selectedVehicleId, setSelectedVehicleId] = useState<number | 'all'>('all');
+  // 'none' is the Unassigned filter the API understands (vehicleId=none).
+  // It must never be coerced with Number(), which turns it into NaN.
+  const [selectedVehicleId, setSelectedVehicleId] = useState<number | 'all' | 'none'>('all');
 
   useEffect(() => {
     getVehicles().then((v) => setVehicles(v ?? [])).catch(() => {});
@@ -25,18 +44,26 @@ export default function SessionBrowser() {
     queryFn: ({ pageParam }) =>
       getSessions(limit, pageParam, selectedVehicleId === 'all' ? null : selectedVehicleId),
     getNextPageParam: (last, all) => {
+      // Stop when the server returns an empty/duplicate window: documents that
+      // repeat the last offset would otherwise page forever. `got` is the rows
+      // this page actually added over the previously loaded windows.
+      const before = all.slice(0, -1).flatMap((p) => p?.sessions ?? []).length;
       const loaded = all.flatMap((p) => p?.sessions ?? []).length;
-      return (last?.total ?? 0) > loaded ? loaded : undefined;
+      const got = loaded - before;
+      return got > 0 && loaded < (last?.total ?? 0) ? loaded : undefined;
     },
   });
 
   const { isLoading, isError, refetch } = q;
   // refetch drives the error-retry button — no window.location.reload(), which
   // would nuke SPA state just to re-run the query.
-  const sessions = q.data?.pages.flatMap((p) => p?.sessions ?? []) ?? [];
+  const sessions = flattenUniqueSessions(q.data?.pages ?? []);
   const pages = q.data?.pages ?? [];
   const total = pages.length > 0 ? (pages[pages.length - 1]?.total ?? 0) : 0;
   const hasMore = q.hasNextPage;
+  // A failed NEXT page keeps the pages already on screen; only a failure with
+  // no data at all deserves to replace the table with the full error card.
+  const nextPageError = isError && Boolean(q.data);
 
   if (isLoading) {
     return (
@@ -56,7 +83,7 @@ export default function SessionBrowser() {
     );
   }
 
-  if (isError) {
+  if (isError && !q.data) {
     return (
       <div className="card">
         <h3 className="text-lg font-semibold leading-relaxed">Your Sessions</h3>
@@ -83,7 +110,10 @@ export default function SessionBrowser() {
           <select
             id="vehicle-filter"
             value={selectedVehicleId}
-            onChange={(e) => setSelectedVehicleId(e.target.value === 'all' ? 'all' : Number(e.target.value))}
+            onChange={(e) => {
+              const value = e.target.value;
+              setSelectedVehicleId(value === 'all' || value === 'none' ? value : Number(value));
+            }}
             className="rounded border border-border bg-surface-card px-3 py-2.5 min-h-[44px] text-sm text-fg"
           >
             <option value="all">All vehicles</option>
@@ -108,6 +138,21 @@ export default function SessionBrowser() {
               Load More ({sessions.length} of {total})
             </Button>
           )}
+        </div>
+      ) : null}
+      {nextPageError ? (
+        <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md bg-red-50 p-3 dark:bg-red-900/20">
+          <p role="alert" className="text-sm text-red-700 dark:text-red-300">
+            Couldn&apos;t load more sessions.
+          </p>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => void q.fetchNextPage()}
+            disabled={q.isFetchingNextPage}
+          >
+            Retry
+          </Button>
         </div>
       ) : null}
       {!isLoading && total === 0 ? <EmptyState /> : null}

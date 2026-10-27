@@ -36,6 +36,11 @@ class SessionController {
             if(!row) return res.status(404).json({ error: 'Session not found' });
             await Session.destroy({ where: { id: sessionId, userId: userId } });
             evictSession(row.sessionId, userId);
+            // Logs for this session are gone too, so the discovered PID key-set
+            // cached under the integer session id is stale. Delete is a Log
+            // mutation (drainIngest above) and follows the same invalidate rule
+            // as cut/filter/copy/join.
+            invalidatePidKeys(row.id);
             res.sendStatus(200);
         }
         catch (err) {

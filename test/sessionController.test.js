@@ -51,6 +51,7 @@ require.cache[modelsPath] = {
 
 // ── Now safe to require the controller ──────────────────────────────
 const SessionController = require('../controllers/SessionController');
+const { discoverPidKeys } = require('../lib/pidRegistry');
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
@@ -149,6 +150,42 @@ describe('SessionController (with mocked models)', () => {
     await SessionController.delete(req, res);
     assert.strictEqual(calls.statusCode, 404);
     assert.deepStrictEqual(calls.body, { error: 'Session not found' });
+  });
+
+  // Delete removes the session's Logs, so the discovered PID key-set cached
+  // under the integer session id is stale — same rule as every other Log
+  // mutation (cut/filter/copy/join via recomputeSummary).
+  test('delete invalidates the cached PID key-set for the removed session', async () => {
+    const pidQueries = [];
+    const sequelizeSpy = {
+      async query(_sql, opts) {
+        pidQueries.push(opts.replacements.sessionId);
+        return [[{ key: 'k5' }, { key: 'kc' }]];
+      },
+    };
+    const originals = {
+      findOne: mockModels.Session.findOne,
+      destroy: mockModels.Session.destroy,
+    };
+    try {
+      // Prime the cache under the integer session id (the key delete uses).
+      await discoverPidKeys(7007, sequelizeSpy);
+      assert.strictEqual(pidQueries.length, 1);
+
+      mockModels.Session.findOne = async () => ({ id: 7007, sessionId: 'device-7007' });
+      mockModels.Session.destroy = async () => 1;
+
+      const req = makeStubReq({ params: { sessionId: '7007' } });
+      const { res, calls } = makeStubRes();
+      await SessionController.delete(req, res);
+
+      assert.strictEqual(calls.statusCode, 200);
+      await discoverPidKeys(7007, sequelizeSpy);
+      assert.strictEqual(pidQueries.length, 2, 'delete must drop the cached key-set');
+    } finally {
+      mockModels.Session.findOne = originals.findOne;
+      mockModels.Session.destroy = originals.destroy;
+    }
   });
 });
 
@@ -392,6 +429,36 @@ describe('SessionController copy/join (derived-session field preservation)', () 
       assert.strictEqual(createPayloads[0].vehicleId, 7, 'first source session is the primary');
       assert.strictEqual(createPayloads[0].name, 'merged');
       assert.strictEqual(createPayloads[0].userId, 1);
+    } finally {
+      restoreAll();
+    }
+  });
+
+  test('join stores explicit null when the PRIMARY source has no vehicle', async () => {
+    const createPayloads = [];
+    try {
+      mockModels.Session.findOne = async (opts) => {
+        if (opts.where.id === 's1') return { id: 's1', userId: 1, vehicleId: null };
+        if (opts.where.id === 2) return { id: 2, userId: 1, vehicleId: 9 };
+        return null;
+      };
+      mockModels.Session.create = async (payload) => {
+        createPayloads.push(payload);
+        return { id: 100 };
+      };
+      mockModels.Session.update = async () => [1];
+      mockModels.Log.findOne = async () => null;
+
+      const req = makeStubReq({ body: { joinSessionId: 2, name: 'merged-null' } });
+      const { res, calls } = makeStubRes();
+      await SessionController.join(req, res);
+
+      assert.strictEqual(calls.statusCode, 200);
+      assert.strictEqual(createPayloads.length, 1);
+      // The secondary session's vehicle must NOT leak in: an unassigned primary
+      // means the merge is unassigned, stored as null (never undefined).
+      assert.ok(Object.hasOwn(createPayloads[0], 'vehicleId'), 'vehicleId key is always present');
+      assert.strictEqual(createPayloads[0].vehicleId, null);
     } finally {
       restoreAll();
     }

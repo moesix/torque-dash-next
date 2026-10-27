@@ -134,4 +134,96 @@ describe('SessionBrowser pagination (jsdom)', () => {
     expect(lastCall?.[1]).toBe(0);
     expect(lastCall?.[2]).toBe(1);
   });
+
+  // Regression: 'none' (Unassigned) was coerced with Number('none') → NaN, so
+  // the request went out as vehicleId=NaN, the API rejected it and the table
+  // came back blank. The sentinel must pass through as the string 'none'.
+  it('sends vehicleId=none for the Unassigned filter and renders its rows', async () => {
+    const unassigned = [
+      makeSession('u1', 'Unassigned one'),
+      makeSession('u2', 'Unassigned two'),
+    ];
+    getVehiclesMock.mockResolvedValue([makeVehicle(1, 'Car A')]);
+    getSessionsMock.mockImplementation(async (_limit, offset = 0, vehicleId) => {
+      if (vehicleId === 'none') {
+        return { sessions: unassigned, total: unassigned.length, limit: 50, offset };
+      }
+      const sessions = ALL_SESSIONS.slice(offset, offset + MOCK_PAGE_SIZE);
+      return { sessions, total: ALL_SESSIONS.length, limit: 50, offset };
+    });
+
+    renderBrowser();
+    await waitFor(() => expect(rowNames()).toHaveLength(3));
+
+    fireEvent.change(await screen.findByLabelText('Filter by vehicle:'), {
+      target: { value: 'none' },
+    });
+
+    await waitFor(() => expect(rowNames()).toEqual(['Unassigned one', 'Unassigned two']));
+
+    const lastCall = getSessionsMock.mock.calls[getSessionsMock.mock.calls.length - 1];
+    expect(lastCall?.[0]).toBe(50);
+    expect(lastCall?.[1]).toBe(0);
+    expect(lastCall?.[2]).toBe('none');
+    // The exact regression: no request may ever carry NaN as the filter.
+    expect(getSessionsMock.mock.calls.some(([, , vehicleId]) => Number.isNaN(vehicleId))).toBe(false);
+  });
+
+  // The server pages by offset, so shifting rows between requests can repeat a
+  // session across windows. Duplicates must collapse to one row per session id
+  // (duplicate React keys would also make labels drift).
+  it('dedupes sessions repeated across offset windows', async () => {
+    const all = ['a1', 'a2', 'a3', 'b1', 'b2'].map((id) => makeSession(id, `Row ${id}`));
+    getSessionsMock.mockImplementation(async (_limit, offset = 0) => {
+      // Page 1 repeats the last row of page 0 (offset shifted by one).
+      const sessions = offset === 0 ? all.slice(0, 3) : [all[2], all[3], all[4]];
+      return { sessions, total: all.length, limit: 50, offset };
+    });
+
+    renderBrowser();
+    await waitFor(() => expect(rowNames()).toHaveLength(3));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Load More (3 of 5)' }));
+
+    await waitFor(() => expect(rowNames()).toHaveLength(5));
+    expect(rowNames()).toEqual(['Row a1', 'Row a2', 'Row a3', 'Row b1', 'Row b2']);
+    expect(new Set(rowNames()).size).toBe(rowNames().length);
+  });
+
+  // Guard against paging forever: a window that adds no new rows (empty page or
+  // a duplicated final window) ends pagination even if total still claims more.
+  it('stops paging when an offset window comes back empty', async () => {
+    getSessionsMock.mockImplementation(async (_limit, offset = 0) => {
+      if (offset === 0) return { sessions: PAGE_0, total: ALL_SESSIONS.length, limit: 50, offset };
+      return { sessions: [], total: ALL_SESSIONS.length, limit: 50, offset };
+    });
+
+    renderBrowser();
+    await waitFor(() => expect(rowNames()).toHaveLength(3));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Load More (3 of 9)' }));
+
+    await waitFor(() => expect(screen.queryByRole('button', { name: /^Load More/ })).toBeNull());
+    expect(rowNames()).toEqual(['Alpha 1', 'Alpha 2', 'Alpha 3']);
+  });
+
+  // A failed NEXT page must not replace the rows already on screen with the
+  // full error card; the table stays and a compact retry appears beside it.
+  it('keeps loaded rows and shows an inline retry when the next page fails', async () => {
+    getSessionsMock.mockImplementation(async (_limit, offset = 0) => {
+      if (offset === 0) return { sessions: PAGE_0, total: ALL_SESSIONS.length, limit: 50, offset };
+      throw new Error('offset window failed');
+    });
+
+    renderBrowser();
+    await waitFor(() => expect(rowNames()).toHaveLength(3));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Load More (3 of 9)' }));
+
+    await waitFor(() => expect(screen.getByRole('alert')).toBeTruthy());
+    expect(screen.getByRole('alert').textContent).toMatch(/Couldn.t load more sessions/);
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy();
+    expect(rowNames()).toEqual(['Alpha 1', 'Alpha 2', 'Alpha 3']);
+    expect(screen.queryByText(/Failed to load sessions/)).toBeNull();
+  });
 });
