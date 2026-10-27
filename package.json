@@ -46,6 +46,9 @@
     "*.js": [
       "eslint --fix",
       "node -c"
+    ],
+    "apps/frontend/**/*.{ts,tsx}": [
+      "bash -c 'cd apps/frontend && npx tsc --noEmit'"
     ]
   },
   "overrides": {

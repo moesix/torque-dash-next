@@ -509,12 +509,20 @@ on every commit:
 - **lint-staged** is configured in `package.json`:
   ```json
   "lint-staged": {
-    "*.js": ["eslint --fix", "node -c"]
+    "*.js": ["eslint --fix", "node -c"],
+    "apps/frontend/**/*.{ts,tsx}": ["bash -c 'cd apps/frontend && npx tsc --noEmit'"]
   }
   ```
   Before every `git commit`, staged `.js` files are checked with `eslint --fix`
-  and validated with `node -c` (syntax check). If either step fails, the commit
-  is blocked.
+  and validated with `node -c` (syntax check). Staged frontend `.ts`/`.tsx`
+  files typecheck the whole frontend project. The `bash -c` wrapper is
+  required: lint-staged appends the staged filenames to every command, and
+  `tsc --noEmit <file>` fails with TS5042 — the wrapper discards the appended
+  arguments. The `cd` also makes `npx` resolve the frontend-local TypeScript
+  instead of fetching the placeholder `tsc` package from the registry. If either step fails, the commit is blocked.
+
+  There is no pre-push hook: CI runs the full suite on every PR, so a second
+  local gate would only duplicate the cost.
 
 > First-time setup: run `npm install` (or `npm run prepare`) to initialise the
 > husky hooks directory (`.husky/`).
