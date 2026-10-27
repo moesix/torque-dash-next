@@ -1,12 +1,16 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('fs');
 const path = require('path');
 const { listMigrationFiles, isBenignError } = require('../scripts/migrate');
 
+const SQL_DIR = path.join(__dirname, '..', 'infra', 'timescale');
+
 describe('migration loader', () => {
-    it('returns files in strict lexicographic path order 001–022 then migrations/', () => {
+    it('returns files in strict lexicographic path order 000–023 then migrations/', () => {
         const files = listMigrationFiles();
         const expected = [
+            '000_baseline_tables.sql',
             '001_log_hypertable.sql',
             '002_settings.sql',
             '003_add_llm_settings.sql',
@@ -29,6 +33,7 @@ describe('migration loader', () => {
             '020_analyses_created_id_unique.sql',
             '021_add_map_tile_settings.sql',
             '022_remove_share_surface.sql',
+            '023_user_admin_guarded.sql',
             'migrations/001_add_upload_token.sql',
             'migrations/002_backfill_pid_columns.sql',
         ];
@@ -58,6 +63,37 @@ describe('migration loader', () => {
         const files = listMigrationFiles();
         const unnumbered = files.filter((f) => !/^\d{3}_/.test(path.basename(f)));
         assert.deepEqual(unnumbered, [], `unexpected unnumbered files: ${unnumbered.join(', ')}`);
+    });
+});
+
+describe('baseline schema parity', () => {
+    it('000_baseline_tables.sql creates only "Logs" with the toLogRow() columns', () => {
+        const sql = fs.readFileSync(path.join(SQL_DIR, '000_baseline_tables.sql'), 'utf8');
+        const created = [...sql.matchAll(/CREATE TABLE[^"]*"([^"]+)"/g)].map((m) => m[1]);
+        assert.deepEqual(created, ['Logs'], '000 must not create any other base table');
+        const columns = [
+            'id SERIAL PRIMARY KEY',
+            '"sessionId" INTEGER NOT NULL',
+            '"timestamp" TIMESTAMPTZ NOT NULL',
+            'lon DOUBLE PRECISION',
+            'lat DOUBLE PRECISION',
+            'values JSONB',
+            '"createdAt" TIMESTAMPTZ NOT NULL DEFAULT NOW()',
+            '"updatedAt" TIMESTAMPTZ NOT NULL DEFAULT NOW()',
+        ];
+        for (const column of columns) {
+            assert.ok(sql.includes(column), `baseline Logs DDL must define ${column}`);
+        }
+        assert.ok(!/\$\$/.test(sql), 'no dollar-quoted blocks (the runner splits on ;)');
+    });
+
+    it('023_user_admin_guarded.sql promotes only when no admin exists', () => {
+        const sql = fs.readFileSync(path.join(SQL_DIR, '023_user_admin_guarded.sql'), 'utf8');
+        assert.ok(
+            sql.includes('NOT EXISTS (SELECT 1 FROM "Users" WHERE "isAdmin")'),
+            'guard must skip promotion when an admin already exists'
+        );
+        assert.ok(!/\$\$/.test(sql), 'no dollar-quoted blocks (the runner splits on ;)');
     });
 });
 

@@ -83,8 +83,12 @@ app.use('/api', require('./routes/api.js'));
 app.use('*', (req, res) => res.status(404).json({ error: 'Not found' }));
 
 // Connect to database and (non-prod) sync models.
-// In production, migrations in infra/timescale/log_hypertable.sql are the source
-// of truth — auto-syncing would bypass the hypertable migration.
+// Gate: NODE_ENV !== 'production' runs sequelize.sync() here; with
+// NODE_ENV=production it is skipped. The Docker CMD runs its own unconditional
+// sync() before migrate.js, so this gate only affects app-internal boots.
+// Migrations are authoritative for the objects they define — including the
+// "Logs" baseline (infra/timescale/000_baseline_tables.sql) — and sync stays
+// belt-and-braces.
 async function bootstrap() {
     try {
         if (process.env.NODE_ENV !== 'production') {

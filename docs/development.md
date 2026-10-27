@@ -58,7 +58,7 @@ Set these at the backend repo root (`.env` or exported in the shell).
 | `DATABASE_URL` | **yes** | **REQUIRED** — no default | Postgres/TimescaleDB connection string. App **crashes on startup** if missing. Also used by `scripts/migrate.js`. |
 | `CORS_ORIGINS` | prod | `''` (empty) | Comma-separated list of SPA origins allowed to call `/api` **with cookies** (e.g. `https://app.example.com`). An empty value blocks all cross-origin SPA calls (see Known Issues, LOW). |
 | `COOKIE_SECURE` | prod | unset (`lax`) | Set `true` in production to set `sameSite:none; secure` on the session cookie (required for cross-origin SPA auth). Dev (same-origin) keeps `lax` and works without HTTPS. `SameSite` is derived from this variable in `app.js` — there is no separate `COOKIE_SAMESITE`. **Set `COOKIE_SECURE=true` / terminate TLS at the edge before using BYOK LLM keys** — an unencrypted deployment would ship LLM API keys over plain HTTP. |
-| `NODE_ENV` | no | unset | Optional. `production` skips the **app-internal** `sequelize.sync()` in `app.js`; any other value runs it on boot. This does NOT stop the Docker CMD bootstrap — the image runs an idempotent `sequelize.sync()` before `scripts/migrate.js` on **every** boot regardless of NODE_ENV. Migrations remain the source of truth for TimescaleDB-specific DDL (hypertable, continuous aggregate); base tables are sync-maintained. |
+| `NODE_ENV` | no | unset | Optional. `production` skips the **app-internal** `sequelize.sync()` in `app.js`; any other value runs it on boot. This does NOT stop the Docker CMD bootstrap — the image runs an idempotent `sequelize.sync()` before `scripts/migrate.js` on **every** boot regardless of NODE_ENV. Migrations are authoritative for the schema objects they define (base tables and TimescaleDB-specific DDL); the CMD's sync step is belt-and-braces only. |
 | `PORT` | no | `3000` | Backend listen port. |
 | `SESSION_KEYS` | **yes** | **REQUIRED** — no default | express-session secrets (array accepted via comma-separated string). App **crashes on startup** if missing or if a placeholder value is used. Generate with `openssl rand -hex 24`. |
 | `PUBLIC_ORIGIN` | no | unset | Optional. Overrides the expected CSRF origin. Set to the browser-visible origin (e.g. `https://app.example.com`) when nginx terminates HTTPS but forwards HTTP to the backend, so `X-Forwarded-Proto` doesn't mislead the origin check. |
@@ -84,14 +84,22 @@ statement via `pg`. A `_migrations` tracker table records each file by
 `(filename, content_hash)`; unchanged files are skipped, edited files are
 re-run.
 
+**NEVER edit an already-applied migration — add a new numbered file.** An edit
+changes the file's content hash, so the whole file re-runs; since the runner
+does not wrap a file in a transaction, one non-idempotent statement failing
+midway leaves the schema half-applied. The sole historical exception is `013`
+(the shareId removal), whose remaining statements are all `IF NOT EXISTS`.
+
 **In Docker, migrations run automatically.** The backend container's CMD
 (`Dockerfile`) executes `node scripts/migrate.js` at every container start,
 so `docker compose up -d` applies any pending migrations — no manual step
 needed for Docker deployments. The CMD first runs an idempotent
-`sequelize.sync()` bootstrap **unconditionally** (regardless of NODE_ENV): any
-missing base tables are created by sync, then migrate.js applies the
-TimescaleDB-specific DDL (`Logs` hypertable, continuous aggregate) and seeds
-Settings. A manual run is only required for **non-Docker (manual) setups**:
+`sequelize.sync()` bootstrap **unconditionally** (regardless of NODE_ENV) as
+belt-and-braces; migrations also create the `Logs` baseline themselves
+(`000_baseline_tables.sql`), so that table no longer depends on sync. migrate.js
+then applies the TimescaleDB-specific DDL (`Logs` hypertable, continuous
+aggregate) and seeds Settings. A manual run is only required for **non-Docker
+(manual) setups**:
 
 ```sh
 node scripts/migrate.js
@@ -101,17 +109,20 @@ The script:
 1. Reads all `.sql` files from `infra/timescale/` (recursively), sorted by
    relative filename (top-level `0NN_*` files sort before `migrations/*`).
 2. Strips SQL comments and splits each file into individual statements on `;`.
-3. Runs each statement via `pg`; benign "already exists" / "does not exist"
-   errors are tolerated (idempotent re-runs). A file is marked applied in the
-   tracker only once all its statements succeed.
+3. Runs each statement via `pg`; duplicate-object errors ("already exists",
+   duplicate constraints, "multiple primary keys") are tolerated (idempotent
+   re-runs). `"does not exist"` is **not** tolerated — a missing relation aborts
+   the run, because every base table has an owning migration (`000`–`013`). A
+   file is marked applied in the tracker only once all its statements succeed.
 
-**Current migration files** — top-level series `001`–`020` (in execution order):
+**Current migration files** — top-level series `000`–`023` (in execution order):
 
 | File | Purpose |
 | --- | --- |
+| `000_baseline_tables.sql` | Creates the base `Logs` table — the only base table with no other owning migration — for sync-less installs (`001` converts it to a hypertable) |
 | `001_log_hypertable.sql` | Creates the `Logs` hypertable, promoted columns `engine_rpm` / `vehicle_speed`, unique index on `id`, and the `log_1min` continuous aggregate |
-| `002_settings.sql` | Seeds the `Settings` singleton row (misc global configuration) |
-| `003_add_llm_settings.sql` | Adds `llmProvider`, `llmModel`, `llmEndpoint`, `llmApiKey` columns to Settings |
+| `002_settings.sql` | Creates the `Settings` table and seeds the singleton row (misc global configuration) |
+| `003_add_llm_settings.sql` | Adds `llmProvider`, `llmModel`, `llmEndpoint`, `llmApiKeyEnc` columns to Settings |
 | `004_add_analyses_table.sql` | Creates the `Analyses` table for cached AI analysis results |
 | `005_add_analysis_reasoning.sql` | Adds `reasoning` column to `Analyses` (stores LLM chain-of-thought) |
 | `006_add_deepseek_settings.sql` | Adds `llmThinkingMode` and `llmReasoningEffort` columns to Settings |
@@ -129,6 +140,9 @@ The script:
 | `018_drop_forward_urls.sql` | Drops the retired webhook forward-column from Users (Plan 120) |
 | `019_analysis_retention.sql` | Adds nullable `Settings.analysisRetentionDays` INTEGER for the app-side Analyses prune job (Plan 121) |
 | `020_analyses_created_id_unique.sql` | UNIQUE index on `Analyses("createdAt", "id")` — formalizes the keyset-pagination order |
+| `021_add_map_tile_settings.sql` | Adds admin-configurable `tileProvider` / `cartoApiKey` columns plus an allowlist CHECK to Settings |
+| `022_remove_share_surface.sql` | Drops the retired `Users.shareId` column and its unique index (pre-existing databases; a no-op on fresh installs) |
+| `023_user_admin_guarded.sql` | Re-runs 017's lowest-id promotion only when no admin exists, so a fresh-install re-run cannot promote a second account |
 
 Nested under `migrations/`: `001_add_upload_token.sql` (no-op placeholder) and
 `002_backfill_pid_columns.sql` — the legacy `engine_rpm`/`vehicle_speed`

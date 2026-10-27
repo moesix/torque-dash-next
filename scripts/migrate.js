@@ -1,23 +1,24 @@
 /**
- * Run the TimescaleDB hypertable migration against the configured database.
+ * Run the TimescaleDB migrations against the configured database.
  *
- * Reads infra/timescale/log_hypertable.sql and executes each statement via the
- * `pg` client. This is idempotent in practice: the SQL guards with IF NOT EXISTS
- * where possible, and statements are executed individually so that benign
- * "already exists" / "does not exist" errors on re-run are tolerated and skipped.
+ * Loads every *.sql file under infra/timescale (recursively) and executes each
+ * statement through the `pg` client — one statement at a time, with no wrapping
+ * transaction. Idempotency comes from the SQL's IF NOT EXISTS guards, not from
+ * the runner: only duplicate-object errors ("already exists", duplicate
+ * constraints, "multiple primary keys", re-registering a hypertable/compression
+ * policy) are treated as benign and skipped. Missing-relation errors are NOT
+ * benign — they abort the run.
  *
  * This script runs TimescaleDB migrations. In Docker deployments, it is
  * executed automatically at container startup (see Dockerfile CMD). For
  * non-Docker setups, run manually: `node scripts/migrate.js`.
  *
- * Applied-migration rule: a file that has already shipped is normally never
- * edited — add a new numbered file instead. The content hash below makes an
- * edited file re-run, so an edit is only acceptable when every statement is
- * idempotent.
- * Exception: 013 (shareId removal) was edited with owner sign-off because the
- * column can no longer exist on fresh installs on a sync-first boot. It reruns
- * safely (every remaining statement is IF NOT EXISTS). Future exceptions must
- * be added here with the same justification.
+ * NEVER edit an already-applied migration — add a new numbered file. Re-running
+ * an edited file re-executes all its statements without a wrapping transaction,
+ * so one non-idempotent statement failing midway leaves the schema half-applied.
+ * Historical exception: 013 (shareId removal, owner sign-off) was edited because
+ * fresh sync-less installs cannot have that column; every remaining statement in
+ * it is IF NOT EXISTS, so the re-run is safe.
  */
 const fs = require('fs');
 const path = require('path');
