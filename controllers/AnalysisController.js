@@ -18,34 +18,52 @@ class AnalysisController {
   // interval >= GAP_ANALYSIS.MIN_GAP_SECONDS as {startIso, endIso, seconds}
   // (seconds rounded), sorted longest-first and capped at MAX_REPORTED_GAPS,
   // plus maxRowsInMinute from per-minute row counts (0 for an empty session).
+  //
+  // Both branches read the session's timestamps through one MATERIALIZED
+  // `base` CTE, so the table is scanned once and only the capped gap rows
+  // (LIMIT :maxGaps) travel back to Node.
   static async computeGapSummary(sessionId) {
     const rows = await sequelize.query(`
-      WITH ordered AS (
+      WITH base AS MATERIALIZED (
+        SELECT "timestamp" FROM "Logs" WHERE "sessionId" = :sessionId
+      ), ordered AS (
         SELECT "timestamp" AS curr_ts,
                LAG("timestamp") OVER (ORDER BY "timestamp") AS prev_ts
-        FROM "Logs" WHERE "sessionId" = :sessionId
+        FROM base
       ), gap_rows AS (
         SELECT prev_ts AS gap_start, curr_ts AS gap_end,
                EXTRACT(EPOCH FROM curr_ts - prev_ts)::float AS seconds
         FROM ordered
         WHERE prev_ts IS NOT NULL
           AND EXTRACT(EPOCH FROM curr_ts - prev_ts) >= :minGapSeconds
+      ), reported_gaps AS (
+        -- Longest-first with the ROUNDED seconds, ties broken chronologically,
+        -- mirroring the pure fn's stable desc sort before its cap.
+        SELECT gap_start, gap_end, seconds
+        FROM gap_rows
+        ORDER BY ROUND(seconds::numeric) DESC, gap_start ASC
+        LIMIT :maxGaps
       ), minute_counts AS (
         SELECT date_trunc('minute', "timestamp") AS bucket, COUNT(*) AS cnt
-        FROM "Logs" WHERE "sessionId" = :sessionId
+        FROM base
         GROUP BY 1
       )
-      SELECT 'gap' AS kind, gap_start, gap_end, seconds, NULL::bigint AS cnt FROM gap_rows
+      SELECT 'gap' AS kind, gap_start, gap_end, seconds, NULL::bigint AS cnt FROM reported_gaps
       UNION ALL
       SELECT 'peak', NULL::timestamptz, NULL::timestamptz, NULL::float, MAX(cnt) FROM minute_counts
       ORDER BY gap_start NULLS LAST
     `, {
-      replacements: { sessionId, minGapSeconds: GAP_ANALYSIS.MIN_GAP_SECONDS },
+      replacements: {
+        sessionId,
+        minGapSeconds: GAP_ANALYSIS.MIN_GAP_SECONDS,
+        maxGaps: GAP_ANALYSIS.MAX_REPORTED_GAPS,
+      },
       type: sequelize.QueryTypes.SELECT,
     });
 
-    // Chronological gap order in, then the stable desc sort reproduces the
-    // pure function's tie order before the cap.
+    // SQL already ordered by rounded seconds (ties chronological) and capped
+    // the transfer; this desc sort + slice is idempotent and keeps the JS
+    // output identical to the pure function's.
     const gaps = rows
       .filter(r => r.kind === 'gap')
       .map(r => ({

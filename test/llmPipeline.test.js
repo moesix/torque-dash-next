@@ -816,7 +816,7 @@ describe('computeGapSummary (SQL gap/peak parity)', () => {
     assert.strictEqual(summary.maxRowsInMinute, detectBackfillGaps(timestamps).maxRowsInMinute);
   });
 
-  test('>3 gaps → SQL rows capped at the 3 longest and sorted desc', async () => {
+  test('>3 gaps → three longest kept, ties in the pure fn\'s chronological order', async () => {
     // Segments of 10 rows at 1 Hz, holes of 6/20/10/30/15 s between them.
     // Offsets by hand: 0-9, 15-24, 44-53, 63-72, 102-111, 126-135.
     const timestamps = [];
@@ -857,18 +857,51 @@ describe('computeGapSummary (SQL gap/peak parity)', () => {
     assert.deepStrictEqual(summary, detectBackfillGaps(timestamps));
   });
 
-  test('5.4s gap kept and rounded to 5; 4.9s hole below the predicate', async () => {
-    // Rows at 0s, 5.4s, 10.3s — the 4.9s interval never reaches SQL's output.
-    const timestamps = [iso(0), iso(5400), iso(10300)];
+  test('5.4s fractional gap rounds to 5 whole seconds in the summary', async () => {
+    // The fixture supplies the kept gap row directly; the >=5s predicate is
+    // pinned separately by the threshold test below. Rows at 0s and 5.4s make
+    // the parity cross-check meaningful for fractional seconds.
+    const timestamps = [iso(0), iso(5400)];
     const summary = await drive([
       { kind: 'gap', gap_start: new Date(iso(0)), gap_end: new Date(iso(5400)), seconds: 5.4, cnt: null },
-      { kind: 'peak', gap_start: null, gap_end: null, seconds: null, cnt: '3' },
+      { kind: 'peak', gap_start: null, gap_end: null, seconds: null, cnt: '2' },
     ]);
     assert.deepStrictEqual(summary, {
       gaps: [{ startIso: iso(0), endIso: iso(5400), seconds: 5 }],
-      maxRowsInMinute: 3,
+      maxRowsInMinute: 2,
     });
     assert.deepStrictEqual(summary, detectBackfillGaps(timestamps));
+  });
+
+  test('transfer is bounded: LIMIT :maxGaps = 3 and only 3 rows reach JS', async () => {
+    // Five candidate gaps in the fixture: even if the driver hands back more
+    // than SQL would ship, the summary can never exceed MAX_REPORTED_GAPS.
+    const summary = await drive([
+      { kind: 'gap', gap_start: new Date(iso(9000)), gap_end: new Date(iso(15000)), seconds: 6, cnt: null },
+      { kind: 'gap', gap_start: new Date(iso(24000)), gap_end: new Date(iso(44000)), seconds: 20, cnt: null },
+      { kind: 'gap', gap_start: new Date(iso(53000)), gap_end: new Date(iso(63000)), seconds: 10, cnt: null },
+      { kind: 'gap', gap_start: new Date(iso(72000)), gap_end: new Date(iso(102000)), seconds: 30, cnt: null },
+      { kind: 'gap', gap_start: new Date(iso(111000)), gap_end: new Date(iso(126000)), seconds: 15, cnt: null },
+      { kind: 'peak', gap_start: null, gap_end: null, seconds: null, cnt: '30' },
+    ]);
+
+    assert.strictEqual(summary.gaps.length, 3);
+    assert.deepStrictEqual(summary.gaps.map(g => g.seconds), [30, 20, 15]);
+
+    const { sql, opts } = preworkQueryCalls[0];
+    assert.match(sql, /LIMIT :maxGaps/);
+    assert.strictEqual(opts.replacements.maxGaps, 3);
+    // Rounding inside ORDER BY is what keeps ties aligned with the pure fn.
+    assert.match(sql, /ORDER BY\s+ROUND\([^)]*\)\s+DESC\s*,\s*gap_start\s+ASC/);
+  });
+
+  test('gap and minute CTEs share one MATERIALIZED scan of Logs', async () => {
+    await drive([]);
+    const { sql } = preworkQueryCalls[0];
+    assert.match(sql, /WITH base AS MATERIALIZED \(\s*SELECT "timestamp" FROM "Logs" WHERE "sessionId" = :sessionId\s*\)/);
+    assert.strictEqual((sql.match(/FROM "Logs"/g) || []).length, 1, sql);
+    assert.match(sql, /FROM base\s*\)\s*,\s*gap_rows AS \(/);
+    assert.match(sql, /FROM base\s+GROUP BY 1/);
   });
 
   test('threshold comes from GAP_ANALYSIS.MIN_GAP_SECONDS as a numeric predicate', async () => {
@@ -945,13 +978,31 @@ describe('selectEvenIds (SQL stride parity)', () => {
 });
 
 describe('analysis prework: no full-session scans remain', () => {
-  test('controller source has no unbounded timestamp/id scan', () => {
-    const src = fs.readFileSync(
-      path.join(__dirname, '..', 'controllers', 'AnalysisController.js'), 'utf8'
-    );
-    assert.ok(!src.includes('SELECT timestamp FROM "Logs"'), 'timestamp scan removed');
-    assert.ok(!src.includes('SELECT id FROM "Logs"'), 'unbounded id scan removed');
-    assert.ok(src.includes('FROM "Logs" WHERE "sessionId" = :sessionId\n      ) ranked'), 'ranked selector present');
+  const src = fs.readFileSync(
+    path.join(__dirname, '..', 'controllers', 'AnalysisController.js'), 'utf8'
+  );
+
+  // Style-agnostic invariants: quoting/spacing/newlines may change, the
+  // session scoping and bounding may not.
+  test('every timestamp read of Logs is session-scoped', () => {
+    const reads = [...src.matchAll(/SELECT\s+"?timestamp"?\s+FROM\s+"?Logs"?/gi)];
+    assert.ok(reads.length > 0, 'expected at least one bounded timestamp read');
+    for (const read of reads) {
+      const tail = src.slice(read.index, read.index + 200);
+      assert.match(
+        tail,
+        /"sessionId"\s*=\s*:sessionId/,
+        `unscoped timestamp read: ${tail.split('\n')[0]}`
+      );
+    }
+  });
+
+  test('no unbounded id scan remains', () => {
+    assert.doesNotMatch(src, /SELECT\s+"?id"?\s+FROM\s+"?Logs"?/i);
+  });
+
+  test('ranked, session-scoped selector present', () => {
+    assert.match(src, /FROM "Logs"\s+WHERE "sessionId" = :sessionId\s*\)\s*ranked/);
   });
 });
 
