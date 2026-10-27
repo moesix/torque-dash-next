@@ -246,6 +246,10 @@ export function getSeriesData(
   epochs?: number[],
 ): [number, number | null][] {
   const data: [number, number | null][] = new Array(frames.length);
+  // Internal call sites only: a mismatch means the caller paired this series
+  // with epochs from a different frames array, which would silently shift
+  // every timestamp. Fail loudly instead of producing plausible-but-wrong data.
+  if (epochs && epochs.length !== frames.length) throw new Error('epochs length mismatch');
   const ts = epochs ?? precomputeEpochs(frames);
 
   if (source.source === 'column') {
@@ -317,6 +321,7 @@ export function computeTotalTrim(
   epochs?: number[],
 ): [number, number | null][] {
   const data: [number, number | null][] = new Array(frames.length);
+  if (epochs && epochs.length !== frames.length) throw new Error('epochs length mismatch');
   const ts = epochs ?? precomputeEpochs(frames);
 
   for (let i = 0; i < frames.length; i++) {

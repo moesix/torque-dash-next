@@ -112,10 +112,9 @@ class AnalysisController {
     // controller safe for direct callers without changing the 400 ordering.
     const sid = Number(req.params.sessionId);
     if (!Number.isInteger(sid)) return res.status(400).json({ error: 'Invalid sessionId.' });
-    if (inFlight.has(sid)) {
-      return res.status(409).json({ error: 'Analysis already running for this session.' });
-    }
-    inFlight.add(sid);
+    // Tracks whether THIS request acquired the single-flight slot, so the
+    // finally only releases a slot it owns (a non-owner never reaches add).
+    let inFlightAdded = false;
 
     // Hoisted to function scope (NOT the try block): the catch below reads it,
     // and a block-scoped declaration inside try would be lexically invisible
@@ -138,6 +137,15 @@ class AnalysisController {
         include: [{ model: Vehicle, as: 'Vehicle' }],
       });
       if (!session) return res.status(404).json({ error: 'Session not found' });
+
+      // 1b. Single-flight guard AFTER ownership: a 409 here would otherwise be
+      // an existence oracle for sessions the caller does not own. The 409 body
+      // is unchanged for owners.
+      if (inFlight.has(sid)) {
+        return res.status(409).json({ error: 'Analysis already running for this session.' });
+      }
+      inFlight.add(sid);
+      inFlightAdded = true;
 
       // 2. Check LLM config
       const settings = await Settings.getSingleton();
@@ -340,7 +348,7 @@ class AnalysisController {
         res.end();
       }
     } finally {
-      inFlight.delete(sid);
+      if (inFlightAdded) inFlight.delete(sid);
     }
   }
 

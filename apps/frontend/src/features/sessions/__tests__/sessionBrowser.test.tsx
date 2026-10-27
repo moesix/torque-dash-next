@@ -223,6 +223,9 @@ describe('SessionBrowser pagination (jsdom)', () => {
     await waitFor(() => expect(screen.getByRole('alert')).toBeTruthy());
     expect(screen.getByRole('alert').textContent).toMatch(/Couldn.t load more sessions/);
     expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy();
+    // Exactly one retry control: the error banner owns it, so the pagination
+    // button must not stay visible and offer a second (unlabelled) path.
+    expect(screen.queryByRole('button', { name: /^Load More/ })).toBeNull();
     expect(rowNames()).toEqual(['Alpha 1', 'Alpha 2', 'Alpha 3']);
     expect(screen.queryByText(/Failed to load sessions/)).toBeNull();
   });

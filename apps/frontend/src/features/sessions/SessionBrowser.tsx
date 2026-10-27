@@ -127,7 +127,7 @@ export default function SessionBrowser() {
       {sessions.length > 0 ? (
         <div className="mt-4 overflow-x-auto">
           <SessionTable sessions={sessions} />
-          {hasMore && (
+          {hasMore && !nextPageError && (
             <Button
               variant="ghost"
               size="sm"

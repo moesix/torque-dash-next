@@ -769,6 +769,9 @@ const lifecycle = {
   session: null,
   sample: [],
   created: [],
+  // When set, Session.findOne only resolves for this userId — lets tests
+  // exercise the ownership-first 404 path with the single-flight slot held.
+  ownerUserId: null,
 };
 const modelsPath = require.resolve('../models');
 require.cache[modelsPath] = {
@@ -776,7 +779,14 @@ require.cache[modelsPath] = {
   filename: modelsPath,
   loaded: true,
   exports: {
-    Session: { findOne: async () => lifecycle.session },
+    Session: {
+      findOne: async (opts) => {
+        const owner = lifecycle.ownerUserId;
+        // Ownership scoping is what makes the 404-vs-409 ordering testable.
+        if (owner != null && opts?.where?.userId !== owner) return null;
+        return lifecycle.session;
+      },
+    },
     Log: { findAll: async () => lifecycle.sample },
     Analysis: { create: async (row) => { lifecycle.created.push(row); return row; } },
     Vehicle: {},
@@ -1114,13 +1124,21 @@ describe('analyzeSession single-flight guard', () => {
 
   function reset(sessionId) {
     lifecycle.created = [];
+    lifecycle.ownerUserId = null;
     installSession(sessionId);
     installQueries();
     installAnalyze();
   }
 
+  /** Drain pending microtasks/macrotasks so an in-progress request has
+   *  passed its awaits (ownership lookup) before the next request starts. */
+  function flush() {
+    return new Promise((resolve) => setTimeout(resolve, 0));
+  }
+
   test('second concurrent request for the same session → 409, first still completes', async () => {
     reset(101);
+    lifecycle.ownerUserId = 1;
     let release;
     const gate = new Promise((resolve) => { release = resolve; });
     llmStubs.streamEvents = async function* () {
@@ -1131,7 +1149,9 @@ describe('analyzeSession single-flight guard', () => {
 
     const res1 = makeRes();
     const first = AnalysisController.analyzeSession(makeReq(101), res1);
-    // The guard is registered synchronously, before the first await.
+    // The guard is acquired right after the ownership lookup resolves, so the
+    // owner must be past that await before the duplicate arrives.
+    await flush();
     const res2 = makeRes();
     await AnalysisController.analyzeSession(makeReq(101), res2);
 
@@ -1144,6 +1164,37 @@ describe('analyzeSession single-flight guard', () => {
     assert.ok(res1.chunks.includes('data: [DONE]\n\n'), res1.chunks.join(''));
     assert.strictEqual(lifecycle.created.length, 1);
     assert.strictEqual(lifecycle.created[0].response, 'ab');
+  });
+
+  test('non-owner request while the owner is running → 404, not a 409 oracle', async () => {
+    reset(104);
+    lifecycle.ownerUserId = 1; // makeReq() authenticates as user 1
+    let release;
+    const gate = new Promise((resolve) => { release = resolve; });
+    llmStubs.streamEvents = async function* () {
+      yield { type: 'content', text: 'a' };
+      await gate;
+      yield { type: 'content', text: 'b' };
+    };
+
+    const res1 = makeRes();
+    const first = AnalysisController.analyzeSession(makeReq(104), res1);
+    await flush(); // owner now holds the single-flight slot for 104
+
+    const intruderRes = makeRes();
+    const intruderReq = makeReq(104);
+    intruderReq.user = { id: 2 };
+    await AnalysisController.analyzeSession(intruderReq, intruderRes);
+
+    // The slot is busy, but a non-owner must learn nothing about it.
+    assert.strictEqual(intruderRes.statusCode, 404);
+    assert.deepStrictEqual(intruderRes.body, { error: 'Session not found' });
+    assert.notStrictEqual(intruderRes.statusCode, 409);
+
+    release();
+    await first;
+    assert.strictEqual(res1.statusCode, 200);
+    assert.ok(res1.chunks.includes('data: [DONE]\n\n'), res1.chunks.join(''));
   });
 
   test('guard clears after a thrown stream → same session can retry', async () => {
