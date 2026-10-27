@@ -523,13 +523,28 @@ npm run verify   # npm test && npm run lint && (cd apps/frontend && npm test && 
 **Backend** (Node built-in test runner):
 ```sh
 npm test              # node --test 'test/*.test.js' + scripts/checkMirrors.js + scripts/checkTestIntegrity.js
-npm run test:coverage # runs: c8 node --test + the same check scripts
+npm run test:coverage # same suite under c8; enforces the floors in .c8rc.json
 ```
+
+`c8` runs with `all: true` (unloaded files count as 0%) and `check-coverage:
+true`. Floors are set ~5 points below the measured baseline — lines/statements
+82, branches 80, functions 85 (baseline: 87.35 / 87.35 / 85.76 / 90.36). The
+exclude list is deliberately narrow and each entry is non-runtime code:
+
+- `app.js` — entry point; importing it boots config and a DB connection, which
+  the unit suite must not do. Its wiring is covered by the integration suite.
+- `eslint.config.js` — tooling config, never executed at runtime.
+- `scripts/checkMirrors.js`, `scripts/checkTestIntegrity.js` — gate scripts run
+  as standalone `node` processes from `npm test`, outside the instrumented run.
+- `scripts/seed-demo.js` — DB-writing CLI demo seeder.
+- `test/**`, `integration/**`, `apps/frontend/**`, `node_modules/**` — not
+  backend runtime code (the SPA has its own Vitest coverage).
 
 **Frontend** (Vitest):
 ```sh
 cd apps/frontend
-npm test         # runs: vitest run
+npm test            # runs: vitest run
+npm run test:coverage  # vitest run --coverage (@vitest/coverage-v8; no floors yet)
 npm run test:watch  # runs: vitest (watch mode)
 ```
 
@@ -545,7 +560,9 @@ forced `--legacy-peer-deps` in CI.
 A **GitHub Actions** workflow (`.github/workflows/ci.yml`) runs on every push
 or pull request to the `development` branch:
 
-- **Backend checks:** `npm ci` → `npm test` → `npm run test:coverage` → `npm run lint`.
+- **Backend checks:** `npm ci` → `npm run test:coverage` (the test suite plus the
+  c8 floor gate in one run) → `npm run lint`; the coverage table is published to
+  the job summary and `coverage/` is uploaded as a short-lived artifact.
 - **Frontend checks:** `npm ci` → `npm run lint` (placeholder) → `npm test` (vitest) → `npx tsc --noEmit` (typecheck) → `npm run build`.
 
 CI installs with plain `npm ci` — **no `--legacy-peer-deps`** (the Vitest 5

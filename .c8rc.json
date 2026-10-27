@@ -1,0 +1,23 @@
+{
+  "all": true,
+  "check-coverage": true,
+  "lines": 82,
+  "statements": 82,
+  "branches": 80,
+  "functions": 85,
+  "include": ["**/*.js"],
+  "exclude": [
+    "coverage/**",
+    "node_modules/**",
+    "test/**",
+    "integration/**",
+    "apps/frontend/**",
+    "app.js",
+    "eslint.config.js",
+    "scripts/checkMirrors.js",
+    "scripts/checkTestIntegrity.js",
+    "scripts/seed-demo.js"
+  ],
+  "reporter": ["text", "text-summary", "json-summary", "lcov"],
+  "reports-dir": "coverage"
+}

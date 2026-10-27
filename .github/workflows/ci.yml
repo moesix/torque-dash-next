@@ -32,11 +32,35 @@ jobs:
       - name: Install backend dependencies
         run: npm ci
 
-      - name: Run backend tests
-        run: npm test
-
-      - name: Test coverage
+      - name: Run backend tests (coverage gate)
         run: npm run test:coverage
+
+      - name: Publish coverage summary
+        if: always()
+        run: |
+          if [ ! -f coverage/coverage-summary.json ]; then
+            echo "No coverage summary produced." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          node -e '
+          const fs = require("fs");
+          const { total } = JSON.parse(fs.readFileSync("coverage/coverage-summary.json", "utf8"));
+          const rows = ["lines", "statements", "functions", "branches"].map(
+            (k) => `| ${k} | ${total[k].pct}% | ${total[k].covered}/${total[k].total} |`
+          );
+          fs.appendFileSync(
+            process.env.GITHUB_STEP_SUMMARY,
+            ["| Metric | % | Covered |", "| --- | --- | --- |", ...rows, ""].join("\n")
+          );
+          '
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage
+          path: coverage/
+          retention-days: 7
 
       - name: Run ESLint
         run: npm run lint
