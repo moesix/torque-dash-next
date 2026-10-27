@@ -104,8 +104,7 @@ needed for Docker deployments. The CMD first runs an idempotent
 belt-and-braces; migrations also create the `Logs` baseline themselves
 (`000_baseline_tables.sql`) and `Users`/`Sessions`
 (`000_users_sessions_baseline.sql`), so an empty database migrates with or
-without that sync. migrate.js
-then applies the TimescaleDB-specific DDL (`Logs` hypertable, continuous
+without that sync. migrate.js then applies the TimescaleDB-specific DDL (`Logs` hypertable, continuous
 aggregate) and seeds Settings. A manual run is only required for **non-Docker
 (manual) setups**:
 
@@ -131,6 +130,12 @@ The script:
    CI `migrate-checks` job runs the sync-less path twice on every push/PR to
    `development`. A file is marked applied in the tracker only once all its
    statements succeed.
+
+**Upgrading a migrations-only database:** before booting a release that adds the
+`Logs.sessionId` foreign key (`000_users_sessions_baseline.sql`), check for orphaned rows:
+`SELECT count(*) FROM "Logs" l LEFT JOIN "Sessions" s ON s.id = l."sessionId" WHERE s.id IS NULL;`
+A non-zero count makes the validating FK add fail (non-benign) and the container will not start;
+clean the orphans first. Sync-created databases already carry the constraint and skip benignly.
 
 **Known model ↔ migration differences (accepted).** These predate this
 ordering baseline and are recorded rather than silently changed:
@@ -556,7 +561,7 @@ appears.
 
 `c8` runs with `all: true` (unloaded files count as 0%) and `check-coverage:
 true`. Floors are set a few points below the measured baseline — lines/statements
-82, branches 80, functions 85 (baseline: 85.29 / 85.29 / 85.76 / 89.82). The
+82, branches 80, functions 85 (baseline at floor-setting time: 85.29 / 85.29 / 85.76 / 89.82; today's measurement is ~85.6 / 85.6 / 86.16 / 90.11). The
 exclude list is deliberately narrow and each entry is non-runtime code:
 
 - `eslint.config.js` — tooling config, never executed at runtime.
@@ -850,7 +855,7 @@ blockers are resolved and re-reviewed as PASS:
 - **Verification:** `npm run verify` from the repo root (backend tests + lint,
   then frontend vitest + `tsc --noEmit`); `npm run build` for the frontend
   bundle. Backend tests run under Node's built-in test runner
-  (`test/*.test.js`) plus `scripts/checkMirrors.js` / `scripts/checkTestIntegrity.js`
+  (`node --test test/`) plus `scripts/checkMirrors.js` / `scripts/checkTestIntegrity.js`
   checks.
 - **Additional features implemented:**
   - Env-tunable upload rate limit with token-based burst exemption (a matching Bearer token bypasses the limiter).
