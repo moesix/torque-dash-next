@@ -66,8 +66,10 @@ describe('migration loader', () => {
     });
 });
 
-describe('baseline schema parity', () => {
-    it('000_baseline_tables.sql creates only "Logs" with the toLogRow() columns', () => {
+describe('baseline schema', () => {
+    it('000 defines exactly the base Logs columns', () => {
+        // This checks the DDL text only — it cannot detect drift between the
+        // file and the Sequelize Log model.
         const sql = fs.readFileSync(path.join(SQL_DIR, '000_baseline_tables.sql'), 'utf8');
         const created = [...sql.matchAll(/CREATE TABLE[^"]*"([^"]+)"/g)].map((m) => m[1]);
         assert.deepEqual(created, ['Logs'], '000 must not create any other base table');
@@ -85,6 +87,16 @@ describe('baseline schema parity', () => {
             assert.ok(sql.includes(column), `baseline Logs DDL must define ${column}`);
         }
         assert.ok(!/\$\$/.test(sql), 'no dollar-quoted blocks (the runner splits on ;)');
+    });
+
+    it('002 creates Settings with both timestamp columns', () => {
+        const sql = fs.readFileSync(path.join(SQL_DIR, '002_settings.sql'), 'utf8');
+        for (const column of [
+            '"createdAt" TIMESTAMPTZ NOT NULL DEFAULT NOW()',
+            '"updatedAt" TIMESTAMPTZ NOT NULL DEFAULT NOW()',
+        ]) {
+            assert.ok(sql.includes(column), `002 must define ${column}`);
+        }
     });
 
     it('023_user_admin_guarded.sql promotes only when no admin exists', () => {

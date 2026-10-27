@@ -87,8 +87,10 @@ re-run.
 **NEVER edit an already-applied migration — add a new numbered file.** An edit
 changes the file's content hash, so the whole file re-runs; since the runner
 does not wrap a file in a transaction, one non-idempotent statement failing
-midway leaves the schema half-applied. The sole historical exception is `013`
-(the shareId removal), whose remaining statements are all `IF NOT EXISTS`.
+midway leaves the schema half-applied. There are two historical exceptions: `013`
+(the shareId removal), whose remaining statements are all `IF NOT EXISTS`; and
+`002` (it gained the `createdAt` / `updatedAt` columns), where
+`CREATE TABLE IF NOT EXISTS` makes the re-run a verified no-op on existing DBs.
 
 **In Docker, migrations run automatically.** The backend container's CMD
 (`Dockerfile`) executes `node scripts/migrate.js` at every container start,
@@ -112,8 +114,13 @@ The script:
 3. Runs each statement via `pg`; duplicate-object errors ("already exists",
    duplicate constraints, "multiple primary keys") are tolerated (idempotent
    re-runs). `"does not exist"` is **not** tolerated — a missing relation aborts
-   the run, because every base table has an owning migration (`000`–`013`). A
-   file is marked applied in the tracker only once all its statements succeed.
+   the run, because every base table has an owning migration (`000`–`013`).
+   **Known gap:** that ownership is not yet enough for a fresh install —
+   `004` adds foreign keys to `Sessions` / `Users`, which `013` creates later,
+   and `001` needs an existing `Logs`. So a fresh boot that skips
+   `sequelize.sync()` (and today the sync-first boot too) is **not supported
+   yet**; see the fresh-install follow-up plan for the reordering. A file is
+   marked applied in the tracker only once all its statements succeed.
 
 **Current migration files** — top-level series `000`–`023` (in execution order):
 

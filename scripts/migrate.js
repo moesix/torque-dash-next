@@ -16,9 +16,11 @@
  * NEVER edit an already-applied migration — add a new numbered file. Re-running
  * an edited file re-executes all its statements without a wrapping transaction,
  * so one non-idempotent statement failing midway leaves the schema half-applied.
- * Historical exception: 013 (shareId removal, owner sign-off) was edited because
- * fresh sync-less installs cannot have that column; every remaining statement in
- * it is IF NOT EXISTS, so the re-run is safe.
+ * Two historical exceptions: 013 (shareId removal, owner sign-off) was edited
+ * because fresh sync-less installs cannot have that column — every remaining
+ * statement in it is IF NOT EXISTS, so the re-run is safe; and 002 (it gained
+ * the createdAt/updatedAt columns), where CREATE TABLE IF NOT EXISTS makes the
+ * re-run a verified no-op on existing DBs.
  */
 const fs = require('fs');
 const path = require('path');

@@ -95,7 +95,7 @@ async function bootstrap() {
             await sequelize.sync();
             console.log('Connection to database successfully established');
         } else {
-            console.log('Production: skipping sequelize.sync() (migrations are source of truth).');
+            console.log('Production: skipping sequelize.sync() (migrations own the schema they define; the Docker CMD syncs before migrate).');
         }
         // Load upload API token from env or DB into the runtime holder
         await runtime.initUploadApiToken(models);
