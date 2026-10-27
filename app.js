@@ -104,8 +104,8 @@ async function bootstrap() {
         // Scheduled app-side Analyses prune job (plan 121, option A): idempotent
         // module-level started flag + unref'd 6h interval, so this call never
         // delays listen, double-starts, or holds the process open. test suites
-        // never import app.js (they boot the real router on an ephemeral port),
-        // so no test-env seam is needed here.
+        // boot the exported router on an ephemeral port and never call
+        // bootstrap(), so no test-env seam is needed here.
         require('./services/analysesRetention').startAnalysesPruner();
         // Start server
         app.listen(config.port, () => console.log(`Listening on port ${config.port}`));
@@ -117,4 +117,11 @@ async function bootstrap() {
     }
 }
 
-bootstrap();
+// `node app.js` keeps its boot behaviour; importing this module (integration
+// suite) only gets the wired Express app and never syncs, listens or starts
+// the pruner.
+if (require.main === module) {
+    bootstrap();
+}
+
+module.exports = app;

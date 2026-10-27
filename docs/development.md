@@ -622,6 +622,15 @@ pinned deployments.
 
 These are documented issues from code reviews. Severity is assigned per the review.
 
+### Integration coverage / Express 5 prerequisite ✅ RESOLVED
+
+`npm run test:integration` (CI job `integration-checks`) boots a real
+TimescaleDB through `node scripts/migrate.js` only — no `sequelize.sync()` — and
+drives upload → ingest → sessions → telemetry → CSV → delete → re-upload over
+the real routers and models. The migrate boot path is covered end-to-end and the
+dev sync path exercises the same model contracts, so the Express 5 migration
+prerequisite is met.
+
 ### Auth contract (SPA ↔ backend) ✅ RESOLVED
 
 The auth contract mismatch (SPA vs backend) is **fixed**. All four original
@@ -834,9 +843,33 @@ blockers are resolved and re-reviewed as PASS:
 
 ## 12. Alternative Setup Methods
 
-The sections below cover building from source and manual (non-Docker) setup. For
-most users, the Docker quick start in the README or the full deployment guide
-(`docs/deployment.md`) is sufficient.
+The sections below cover the contributor dev stack (compose), building from
+source, and manual (non-Docker) setup. For most users, the Docker quick start in
+the README or the full deployment guide (`docs/deployment.md`) is sufficient.
+
+### Dev stack (recommended for contributors)
+
+`docker-compose.dev.yml` runs TimescaleDB on **5433** and the backend on
+**3000** under `node --watch`, so backend edits reload without a rebuild:
+
+```sh
+docker compose -f docker-compose.dev.yml up -d
+docker compose -f docker-compose.dev.yml exec backend node scripts/seed-demo.js --sessions=20 --days=30
+```
+
+- The first command starts both services. The backend command is
+  `node scripts/migrate.js && node --watch app.js`: migrations own the schema
+  (the same migrations-only boot CI's `migrate-checks` and `integration-checks`
+  jobs verify), and the watcher is Node's built-in `--watch` — the image ships
+  production dependencies only, so no nodemon. Data lives in the `dev-pgdata`
+  volume; `docker compose -f docker-compose.dev.yml down -v` resets it.
+- The second command (optional) seeds 20 fake sessions over 30 days for
+  `demo@torquedash.local` / `demo-password`. Those are **fake credentials** and
+  the script prints a `DEMO DATA` banner; re-running replaces previous
+  `demo-*` sessions. Frames come from `integration/fixtures/torqueFrames.js`,
+  the same generator the integration suite uses.
+- Backend: **http://localhost:3000** (`/health` probes it). Frontend:
+  `cd apps/frontend && npm run dev` (proxies `/api` to port 3000).
 
 ### Build from source
 
@@ -870,7 +903,7 @@ Then open **http://localhost:8080**.
 > app crashes on startup if missing). Set `COOKIE_SECURE=true` behind a
 > TLS-terminating proxy. The compose defaults are for local/http use.
 
-### Manual setup (without Docker)
+### Manual setup (fallback, without Docker)
 
 **Backend**
 
@@ -927,5 +960,8 @@ breaking changes relevant here:
   route handlers — Express 5 catches rejected promises automatically).
 - `req.query` returns a plain object (no prototype).
 
-Migration is deferred until integration tests exist (plan 050/069). The
-wildcard at `app.js:92` is the only breaking pattern.
+Migration is no longer gated on missing coverage: `npm run test:integration`
+boots a real migrations-only TimescaleDB and drives upload → ingest → sessions
+→ telemetry → CSV → delete → re-upload over the real models, so the
+`app.use('*')` wildcard in `app.js` (the only breaking pattern) can move behind
+that net.

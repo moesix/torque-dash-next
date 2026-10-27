@@ -141,6 +141,51 @@ jobs:
           });
           NODE
 
+  # Real-database integration suite (plan 016). Separate job because Actions
+  # jobs do not share service containers; this one owns its TimescaleDB and
+  # boots the stack migrations-only (`node scripts/migrate.js`) — app.js is
+  # imported for its router, never for bootstrap(), so sequelize.sync() never
+  # runs here.
+  integration-checks:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgres://tdn:tdn@localhost:5432/tdn
+      SESSION_KEYS: ci-integration-session-key
+    services:
+      timescaledb:
+        image: timescale/timescaledb:2.29.1-pg16
+        env:
+          POSTGRES_USER: tdn
+          POSTGRES_PASSWORD: tdn
+          POSTGRES_DB: tdn
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U tdn -d tdn"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install backend dependencies
+        run: npm ci
+
+      # Boot suite migrates twice (fresh + idempotent re-run) and asserts the
+      # schema/hypertable; ingest suite drives upload → drain → sessions →
+      # telemetry → CSV → rename → delete(cascade) → re-upload over HTTP.
+      - name: Run integration suite
+        run: npm run test:integration
+        env:
+          NODE_ENV: test
+
   frontend-checks:
     runs-on: ubuntu-latest
     steps:
