@@ -119,6 +119,29 @@ test('hex-form mapped public ::ffff:808:808 → public', () => {
     assert.strictEqual(isPublicIp('::ffff:808:808'), true);   // 8.8.8.8
 });
 
+test('translated hex ::ffff:0:a9fe:a9fe → private (metadata)', () => {
+    assert.strictEqual(isPublicIp('::ffff:0:a9fe:a9fe'), false); // 169.254.169.254
+});
+test('compatible hex ::a9fe:a9fe → private (metadata)', () => {
+    assert.strictEqual(isPublicIp('::a9fe:a9fe'), false);        // 169.254.169.254
+});
+test('translated hex ::ffff:0:808:808 → public', () => {
+    assert.strictEqual(isPublicIp('::ffff:0:808:808'), true);    // 8.8.8.8
+});
+test('expanded mapped loopback → private (no compressed-spelling bypass)', () => {
+    // ::ffff:127.0.0.1 written out in full — the pre-rewrite regex missed this.
+    assert.strictEqual(isPublicIp('0000:0000:0000:0000:0000:ffff:7f00:0001'), false);
+});
+test('expanded translated metadata → private', () => {
+    assert.strictEqual(isPublicIp('0000:0000:0000:0000:ffff:0000:a9fe:a9fe'), false);
+});
+test('expanded compatible metadata → private', () => {
+    assert.strictEqual(isPublicIp('0000:0000:0000:0000:0000:0000:a9fe:a9fe'), false);
+});
+test('expanded mapped public → public (follows the embedded IPv4)', () => {
+    assert.strictEqual(isPublicIp('0000:0000:0000:0000:0000:ffff:0808:0808'), true);
+});
+
 test('isPublicIp: unparseable string → false (fail-closed)', () => {
     assert.strictEqual(isPublicIp('not-an-ip'), false);
 });
@@ -128,6 +151,45 @@ test('isPublicIp: empty string → false (fail-closed)', () => {
 });
 
 // ── isSafeUrl ─ DNS integration ──────────────────────────────────────────
+
+test('isSafeUrl: hostname resolving to ::ffff:0:a9fe:a9fe → false (entry path)', async (t) => {
+    const dns = require('node:dns');
+    t.mock.method(dns.promises, 'lookup', async () => [
+        { address: '::ffff:0:a9fe:a9fe', family: 6 },
+    ]);
+    assert.strictEqual(await isSafeUrl('http://metadata.example.test/latest/meta-data/'), false);
+});
+
+test('isSafeUrl: hostname resolving to ::a9fe:a9fe → false (entry path)', async (t) => {
+    const dns = require('node:dns');
+    t.mock.method(dns.promises, 'lookup', async () => [
+        { address: '::a9fe:a9fe', family: 6 },
+    ]);
+    assert.strictEqual(await isSafeUrl('http://metadata.example.test/latest/meta-data/'), false);
+});
+
+test('isSafeUrl: DNS-rebound hostname with a PUBLIC v6 answer still passes', async (t) => {
+    // Control for the two cases above: the rejection comes from the address
+    // classification, not from the DNS stub itself.
+    const dns = require('node:dns');
+    t.mock.method(dns.promises, 'lookup', async () => [
+        { address: '2606:4700:4700::1111', family: 6 },
+    ]);
+    assert.strictEqual(await isSafeUrl('http://public.example.test/'), true);
+});
+
+test('URL host ::ffff:0:169.254.169.254 classifies via isPublicIp on the hex form', () => {
+    const hostname = new URL('http://[::ffff:0:169.254.169.254]/').hostname;
+    // WHATWG URL normalizes the dotted tail to hex and keeps the IPv6
+    // brackets — the brackets are a documented, pre-existing limitation.
+    assert.strictEqual(hostname, '[::ffff:0:a9fe:a9fe]');
+    // Bracketed hosts fail closed (the parser rejects the brackets).
+    assert.strictEqual(isPublicIp(hostname), false);
+    // The normalized hex form (brackets stripped) classifies as the embedded
+    // IPv4: 169.254.169.254 → link-local metadata.
+    assert.strictEqual(isPublicIp('::ffff:0:a9fe:a9fe'), false);
+    assert.strictEqual(isPublicIp('0000:0000:0000:0000:ffff:0000:a9fe:a9fe'), false);
+});
 
 test('isSafeUrl: hostname resolving to 127.0.0.1 → false', async () => {
     // 127.0.0.1 is always loopback — no DNS stub needed
@@ -456,6 +518,90 @@ test('safeFetch: same-origin redirect keeps credentials', async (t) => {
     assert.strictEqual(calls[1].init.headers['x-api-key'], 'fake-key');
 });
 
+test('safeFetch: A→B→A redirect stays stripped on the return hop', async (t) => {
+    const calls = [];
+    t.mock.method(globalThis, 'fetch', async (url, init) => {
+        calls.push({ url, init });
+        if (calls.length === 1) {
+            return new Response(null, { status: 302, headers: { Location: 'https://1.1.1.1/b' } });
+        }
+        if (calls.length === 2) {
+            return new Response(null, { status: 302, headers: { Location: 'https://8.8.8.8/a' } });
+        }
+        return new Response('ok', { status: 200 });
+    });
+
+    const res = await safeFetch('https://8.8.8.8/start', {
+        headers: {
+            'Content-Type': 'application/json',
+            Authorization: 'Bearer fake-token',
+            'X-Api-Key': 'fake-key',
+        },
+    });
+
+    assert.strictEqual(res.status, 200);
+    assert.deepStrictEqual(calls.map((c) => c.url), [
+        'https://8.8.8.8/start',
+        'https://1.1.1.1/b',
+        'https://8.8.8.8/a',
+    ]);
+    // Hop 3 is back on the original origin, but the strip is persistent:
+    // credentials are never restored once dropped.
+    assert.ok(!('Authorization' in calls[2].init.headers));
+    assert.ok(!('X-Api-Key' in calls[2].init.headers));
+    assert.strictEqual(calls[2].init.headers['Content-Type'], 'application/json');
+});
+
+test('safeFetch: cross-origin redirect strips credentials from a Headers instance', async (t) => {
+    const calls = [];
+    t.mock.method(globalThis, 'fetch', async (url, init) => {
+        calls.push({ url, init });
+        if (calls.length === 1) {
+            return new Response(null, { status: 302, headers: { Location: 'https://1.1.1.1/next' } });
+        }
+        return new Response('ok', { status: 200 });
+    });
+
+    const headers = new Headers({
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer fake-token',
+        'X-Api-Key': 'fake-key',
+    });
+
+    await safeFetch('https://8.8.8.8/start', { headers });
+
+    const hopHeaders = calls[1].init.headers;
+    assert.ok(hopHeaders instanceof Headers, 'Headers input keeps its form');
+    assert.strictEqual(hopHeaders.get('authorization'), null);
+    assert.strictEqual(hopHeaders.get('x-api-key'), null);
+    assert.strictEqual(hopHeaders.get('content-type'), 'application/json');
+    // The caller's Headers object is copied, never mutated.
+    assert.strictEqual(headers.get('authorization'), 'Bearer fake-token');
+});
+
+test('safeFetch: cross-origin redirect strips credentials from [name, value] pairs', async (t) => {
+    const calls = [];
+    t.mock.method(globalThis, 'fetch', async (url, init) => {
+        calls.push({ url, init });
+        if (calls.length === 1) {
+            return new Response(null, { status: 302, headers: { Location: 'https://1.1.1.1/next' } });
+        }
+        return new Response('ok', { status: 200 });
+    });
+
+    await safeFetch('https://8.8.8.8/start', {
+        headers: [
+            ['Content-Type', 'application/json'],
+            ['Authorization', 'Bearer fake-token'],
+            ['X-Api-Key', 'fake-key'],
+        ],
+    });
+
+    const hopHeaders = calls[1].init.headers;
+    assert.ok(Array.isArray(hopHeaders), '[name, value] input keeps its form');
+    assert.deepStrictEqual(hopHeaders, [['Content-Type', 'application/json']]);
+});
+
 // ── safeFetch ─ scoped loopback allowance (Ollama) ───────────────────────
 
 test('safeFetch: allowLoopback passes literal localhost without DNS resolution', async (t) => {
@@ -540,4 +686,3 @@ test('safeFetch: localhost without allowLoopback still throws (other providers)'
         /Unsafe URL blocked/
     );
 });
-

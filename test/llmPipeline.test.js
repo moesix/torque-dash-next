@@ -152,6 +152,38 @@ describe('endpoint SSRF gate', () => {
     assert.strictEqual(safeFetchCalls.length, 0);
   });
 
+  test('custom endpoint rejects loopback even when the caller requests allowLoopback', async () => {
+    resetCalls();
+    fakeResponse = { ok: true };
+
+    await assert.rejects(
+      () => analyze('hi', {
+        llmProvider: 'custom',
+        llmEndpoint: 'http://127.0.0.1:9/v1',
+        llmApiKeyEnc: prepareApiKey('sk-test'),
+      }, { allowLoopback: true }),
+      /failed safety validation/
+    );
+    assert.strictEqual(safeFetchCalls.length, 0);
+  });
+
+  test('stray allowLoopback option never reaches safeFetch for a non-ollama provider', async () => {
+    resetCalls();
+    fakeResponse = { ok: true };
+
+    const result = await analyze('hi', {
+      llmProvider: 'custom',
+      llmEndpoint: 'https://8.8.8.8/v1',
+      llmApiKeyEnc: prepareApiKey('sk-test'),
+    }, { allowLoopback: true });
+    result.timeoutGuard.clear();
+
+    // The sink gates the flag on llmProvider === 'ollama', so a caller-supplied
+    // allowance cannot widen the guard for custom/openai/deepseek/etc.
+    assert.strictEqual(lastCall().url, 'https://8.8.8.8/v1/chat/completions');
+    assert.strictEqual(lastCall().init.allowLoopback, undefined);
+  });
+
   test('ollama default endpoint (localhost) → passes with the scoped loopback flag', async () => {
     resetCalls();
     fakeResponse = { ok: true };
