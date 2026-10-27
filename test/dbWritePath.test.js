@@ -445,12 +445,26 @@ describe('ingestBuffer.flush — failure isolation', () => {
     });
 
     try {
-      // 1000 A rows trips BATCH_SIZE, so an auto-flush takes that chunk; the
-      // following 500 B rows stay buffered. drain() settles the in-flight
-      // flush and then forces exactly one more pass, which sees two chunks.
+      // 1000 A rows trip BATCH_SIZE, so the auto-flush splices exactly that
+      // chunk; the 500 B rows ingested meanwhile land in the now-empty buffer.
+      // Pass 1 fails the A chunk — a first failure re-queues it wholesale — and
+      // re-queues it in FRONT of B. Assert that settling state first, so the
+      // next pass's chunking is pinned rather than inferred.
       for (let i = 0; i < 1000; i++) ingestBuffer.ingest(bufferedRow(SESSION_A, i));
       for (let i = 0; i < 500; i++) ingestBuffer.ingest(bufferedRow(SESSION_B, 1000 + i));
 
+      // Let the fire-and-forget pass settle (a macrotask flushes all microtasks
+      // without starting drain's extra pass).
+      await new Promise((r) => setImmediate(r));
+
+      assert.strictEqual(writtenRowCount, 0, 'the auto-flushed A chunk wrote nothing');
+      assert.strictEqual(ingestBuffer.size(), 1500,
+        'pass 1 requeued the 1000 A rows in front of the 500 buffered B rows');
+
+      // Pass 2 is drain's forced pass over two chunks: A (1000, now on its
+      // second failure, so it bisects down to single rows that all fail) and
+      // B (500, written). Bisection burns the isolation budget but never lands
+      // an A row, so only B may be summarized.
       await ingestBuffer.drain();
 
       assert.strictEqual(writtenRowCount, 500,
@@ -720,6 +734,163 @@ describe('ingestBuffer.flush — deleted session mid-buffer', () => {
       } else {
         delete require.cache[ibPath];
       }
+    }
+  });
+});
+
+// ── 8. Structural: every Log-mutating handler drains the ingest buffer first ──
+// Same source-structure style as the join ON CONFLICT guard above. A buffered
+// frame that lands after a mutation resurrects a deleted range or is invisible
+// to a snapshot, so the drain must precede the FIRST Log-mutating statement.
+describe('SessionController — drain before Log mutations', () => {
+  const MUTATING = [
+    [/Log\.destroy\s*\(/, 'Log.destroy()'],
+    [/Log\.update\s*\(/, 'Log.update()'],
+    [/\.destroy\s*\(/, 'destroy()'],
+    [/sequelize\.query\s*\(/, 'raw SQL (sequelize.query)'],
+  ];
+
+  // Body of one static handler, up to the next class method.
+  function handlerBody(src, name) {
+    const marker = `    static async ${name}(req, res) {`;
+    const start = src.indexOf(marker);
+    assert.notStrictEqual(start, -1, `handler ${name} not found in SessionController`);
+    const rest = src.slice(start + marker.length);
+    const end = rest.indexOf('\n    static async ');
+    return end === -1 ? rest : rest.slice(0, end);
+  }
+
+  for (const name of ['delete', 'filter', 'cut', 'copy', 'join']) {
+    test(`${name} awaits drainIngest() before its first Log mutation`, () => {
+      const src = fs.readFileSync(
+        path.resolve(__dirname, '../controllers/SessionController.js'),
+        'utf8'
+      );
+      const body = handlerBody(src, name);
+
+      const drainAt = body.indexOf('await drainIngest()');
+      assert.notStrictEqual(drainAt, -1, `${name} must call await drainIngest()`);
+
+      let mutationAt = -1;
+      let mutationLabel = null;
+      for (const [re, label] of MUTATING) {
+        const m = re.exec(body);
+        if (m && (mutationAt === -1 || m.index < mutationAt)) {
+          mutationAt = m.index;
+          mutationLabel = label;
+        }
+      }
+      assert.notStrictEqual(mutationAt, -1,
+        `${name} is expected to mutate Logs (no mutation pattern matched)`);
+      assert.ok(drainAt < mutationAt,
+        `${name}: drainIngest() at offset ${drainAt} must precede ${mutationLabel} at offset ${mutationAt}`);
+    });
+  }
+});
+
+// ── 9. Behaviour: delete drains → reads → destroys → evicts the upload cache ──
+describe('SessionController.delete — drain and evictSession wiring', () => {
+  function makeRes() {
+    const r = { statusCode: null, body: null };
+    r.status = (code) => { r.statusCode = code; return r; };
+    r.json = (body) => { r.body = body; return r; };
+    r.sendStatus = (code) => { r.statusCode = code; return r; };
+    return r;
+  }
+
+  // Load SessionController with the ingest buffer and the upload cache evictor
+  // stubbed, recording every call in `events` so ORDER is assertable.
+  function loadDeleteHarness(row) {
+    const events = [];
+    const mockModels = {
+      Session: {
+        async findOne() { events.push('findOne'); return row; },
+        async destroy() { events.push('destroy'); return 1; },
+      },
+      Log: {},
+      User: {},
+      Vehicle: {},
+      sequelize: {},
+      Sequelize: { Op: {} },
+    };
+
+    const modelsPath = require.resolve('../models');
+    const originalModelsCache = require.cache[modelsPath];
+    require.cache[modelsPath] = {
+      id: modelsPath, filename: modelsPath, loaded: true, exports: mockModels,
+    };
+
+    const ibPath = require.resolve('../services/ingestBuffer');
+    const originalIBCache = require.cache[ibPath];
+    require.cache[ibPath] = {
+      id: ibPath, filename: ibPath, loaded: true,
+      exports: { async drain() { events.push('drain'); } },
+    };
+
+    const uploadPath = require.resolve('../controllers/UploadController');
+    const originalUploadCache = require.cache[uploadPath];
+    require.cache[uploadPath] = {
+      id: uploadPath, filename: uploadPath, loaded: true,
+      exports: { evictSession(...args) { events.push(['evict', ...args]); } },
+    };
+
+    const scPath = require.resolve('../controllers/SessionController');
+    const originalSCCache = require.cache[scPath];
+    delete require.cache[scPath];
+
+    return {
+      SessionController: require('../controllers/SessionController'),
+      events,
+      restore() {
+        if (originalModelsCache) require.cache[modelsPath] = originalModelsCache;
+        else delete require.cache[modelsPath];
+        if (originalIBCache) require.cache[ibPath] = originalIBCache;
+        else delete require.cache[ibPath];
+        if (originalUploadCache) require.cache[uploadPath] = originalUploadCache;
+        else delete require.cache[uploadPath];
+        if (originalSCCache) require.cache[scPath] = originalSCCache;
+        else delete require.cache[scPath];
+      },
+    };
+  }
+
+  test('delete drains, then destroys, then evicts the deleted session key', async () => {
+    const { SessionController, events, restore } =
+      loadDeleteHarness({ id: 's1', sessionId: 'device-session-1' });
+    try {
+      const res = makeRes();
+      await SessionController.delete(
+        { user: { id: 7 }, params: { sessionId: 's1' } },
+        res
+      );
+
+      assert.strictEqual(res.statusCode, 200);
+      assert.deepStrictEqual(events, [
+        'drain',
+        'findOne',
+        'destroy',
+        ['evict', 'device-session-1', 7],
+      ], 'order must be drain → findOne → destroy → evict(sessionId, userId)');
+    } finally {
+      restore();
+    }
+  });
+
+  test('404 path destroys and evicts nothing', async () => {
+    const { SessionController, events, restore } = loadDeleteHarness(null);
+    try {
+      const res = makeRes();
+      await SessionController.delete(
+        { user: { id: 7 }, params: { sessionId: 'missing' } },
+        res
+      );
+
+      assert.strictEqual(res.statusCode, 404);
+      assert.deepStrictEqual(res.body, { error: 'Session not found' });
+      assert.deepStrictEqual(events, ['drain', 'findOne'],
+        'a missing session must not be destroyed or evicted');
+    } finally {
+      restore();
     }
   });
 });

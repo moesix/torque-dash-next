@@ -247,6 +247,18 @@ describe('Upload hardening – UTC trip naming via processUpload', () => {
         }), res);
         assert.strictEqual(sessionUpdateCalls.length, 0);
     });
+
+    test('new session without time still gets a default Trip name', async () => {
+        stubHappyPath({ createsSession: true, timezoneOffset: 0 });
+        const { res, calls } = makeRes();
+        await UploadController.processUpload(makeReq({
+            eml: 'user@x.com', session: 'abc-123',
+        }), res);
+        assert.strictEqual(calls.statusCode, 200);
+        assert.strictEqual(sessionUpdateCalls.length, 1,
+            'absent time must not skip default naming — tsDate already carries server-now');
+        assert.match(sessionUpdateCalls[0].name, /^Trip \d{8} \d{1,2}:\d{2}(AM|PM)$/);
+    });
 });
 
 // ── resolveUser — exported module-private helper, tested directly ──────
@@ -575,6 +587,21 @@ describe('Upload hardening – time parameter contract', () => {
         }), res);
         assert.strictEqual(calls.statusCode, 200);
         assert.strictEqual(lastIngestedRow().time.getTime(), ts);
+    });
+
+    test('repeated empty time params fall back to server-now, never epoch 0', async () => {
+        stubHappyPath();
+        const before = Date.now();
+        const { res, calls } = makeRes();
+        await UploadController.processUpload(makeReq({
+            eml: 'user@x.com', session: 'abc-123', time: ['', ''],
+        }), res);
+        const after = Date.now();
+        assert.strictEqual(calls.statusCode, 200);
+        const ts = lastIngestedRow().time;
+        assert.ok(ts instanceof Date);
+        assert.ok(ts.getTime() >= before && ts.getTime() <= after,
+            'scalarize BEFORE the emptiness check — Number("") === 0 would pin 1970');
     });
 });
 

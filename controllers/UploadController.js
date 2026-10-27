@@ -70,7 +70,8 @@ class UploadController {
             // fallback. Rejecting absent `time` would 400 older/edge clients and
             // trigger a device retry storm; an Invalid Date row, by contrast,
             // would poison the whole ingest buffer, so that is rejected here.
-            const rawTs = time == null || time === '' ? Date.now() : Number(scalar(time));
+            const t = scalar(time);
+            const rawTs = t == null || t === '' ? Date.now() : Number(t);
             const tsDate = new Date(rawTs);
             if (!Number.isFinite(rawTs) || !Number.isFinite(tsDate.getTime())) {
                 return res.status(400).json({ error: 'Invalid time parameter.' });
@@ -131,7 +132,7 @@ class UploadController {
             }
 
             // After findOrCreate, if this is a new session, give it a default name
-            if (wasCreated && time) {
+            if (wasCreated) {
                 // Fetch the user's timezone offset (minutes from UTC, e.g. 480 for UTC+8)
                 const settings = await Settings.getSingleton();
                 const offsetMinutes = settings?.timezoneOffset ?? 0;

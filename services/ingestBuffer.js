@@ -26,11 +26,13 @@ const BATCH_SIZE = 1000;
 const FLUSH_MS = 1000;
 const MAX_RETRIES = 3;
 const MAX_BUFFER_SIZE = 50000; // drop oldest rows if exceeded
-// Upper bound on the bulkCreate calls one flush may spend isolating failing
+// Upper bound on the bulkCreate calls ONE flush may spend isolating failing
 // rows. Without it a wholesale DB outage — every chunk failing again after its
 // first retry, so every chunk eligible for bisection — would turn one flush
-// into thousands of doomed queries. Rows still queued once the budget is spent
-// are re-queued as-is (attempt counters advance normally).
+// into thousands of doomed queries. The budget is global per flush (not per
+// chunk): once it is spent, the rest of that pass re-queues wholesale with the
+// attempt counters advanced normally. It resets on the next pass, so isolation
+// self-heals across flushes — later chunks simply wait for a later pass.
 const MAX_ISOLATION_ATTEMPTS = 64;
 
 const buffer = [];
@@ -196,14 +198,19 @@ function flush() {
 }
 
 /**
- * Resolves after every buffered row is either written or dropped. Safe to call
- * while a flush is in progress — waits for the current flush to settle and
- * forces one more pass. Fulfills even on failure (rows end up re-queued or
- * dropped; callers must not treat a failed drain as a write success).
+ * Quiesces concurrent ingest passes. Resolves once the in-flight pass settles
+ * and one forced pass completes. This is NOT a guarantee that every buffered
+ * row was written: rows that could not be written stay queued for the normal
+ * retry window (≤ MAX_RETRIES flushes) or are dropped once that window is
+ * spent. Fulfills even on failure — callers must not treat a drained buffer as
+ * a write success, only as "no pass is still holding rows in flight".
  */
 async function drain() {
-    if (flushing && currentFlushPromise) await currentFlushPromise;
+    // Wait out any in-flight pass — including one another drain just started
+    // — then take one pass of our own, then wait out passes that overlapped us.
+    while (flushing && currentFlushPromise) await currentFlushPromise;
     if (buffer.length > 0) await flush();
+    while (flushing && currentFlushPromise) await currentFlushPromise;
 }
 
 const timer = setInterval(flush, FLUSH_MS);
@@ -227,8 +234,10 @@ function ingest({ userId, sessionId, time, lon, lat, values, engineRpm, vehicleS
         console.error('[ingestBuffer] buffer overflow, dropping', dropped.length, 'rows');
     }
     if (buffer.length >= BATCH_SIZE) {
-        // fire-and-forget; the request path must NOT await the flush
-        flush().catch((e) => console.error('[ingestBuffer] flush error:', e.message));
+        // fire-and-forget; the request path must NOT await the flush.
+        // flush() never rejects: runFlush() handles failures per chunk and the
+        // returned promise carries a terminal catch, so no .catch is needed.
+        flush();
     }
 }
 
