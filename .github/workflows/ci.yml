@@ -16,6 +16,10 @@ concurrency:
 jobs:
   backend-checks:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ['20.19', '22']
     env:
       DATABASE_URL: postgres://ci:ci@localhost:5432/ci
       SESSION_KEYS: ci-test-key-for-config-loading
@@ -26,7 +30,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: '22'
+          node-version: ${{ matrix.node-version }}
           cache: 'npm'
 
       - name: Install backend dependencies
@@ -55,7 +59,7 @@ jobs:
           '
 
       - name: Upload coverage report
-        if: always()
+        if: always() && matrix.node-version == '22'
         uses: actions/upload-artifact@v4
         with:
           name: backend-coverage

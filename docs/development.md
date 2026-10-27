@@ -11,8 +11,12 @@ the React/Vite frontend (`apps/frontend/`).
 ## 1. Prerequisites
 
 - **Node.js 22** (LTS) and npm — the Docker images are built on
-  `node:22-bookworm-slim` and CI runs on Node 22. Vite 8 requires Node
-  **20.19+ / 22.12+**, so Node 22 is the supported floor.
+  `node:22-bookworm-slim` and CI runs Node 22 (plus a 20.19 leg for the backend
+  checks). Vite 8 requires Node **20.19+ / 22.12+**, so Node 20.19 is the
+  supported floor: both `package.json` files declare `"engines": {"node":
+  ">=20.19"}` (a warning only — engine-strict is deliberately not enabled).
+  `node --watch` (used by `npm run dev` and the dev compose stack) needs
+  ≥18.11, well below the floor.
 - **PostgreSQL** with the **TimescaleDB** extension (`CREATE EXTENSION timescaledb;`)
 - A Torque Pro device/app (or a scripted `GET /api/upload`) to generate data
 - (Frontend only) a modern browser
@@ -522,7 +526,7 @@ npm run verify   # npm test && npm run lint && (cd apps/frontend && npm test && 
 
 **Backend** (Node built-in test runner):
 ```sh
-npm test              # node --test 'test/*.test.js' + scripts/checkMirrors.js + scripts/checkTestIntegrity.js
+npm test              # node --test test/ + scripts/checkMirrors.js + scripts/checkTestIntegrity.js
 npm run test:coverage # same suite under c8; enforces the floors in .c8rc.json
 ```
 
@@ -579,9 +583,13 @@ by restoring the flat config, reinstalling `typescript-eslint` / `@eslint/js` / 
 and flipping the script back to `eslint src/`.
 
 The workflow uses `actions/checkout@v7` and `actions/setup-node@v7` with npm
-caching and **Node 22** (`node-version: '22'`, matching the `node:22-bookworm-slim`
-runtime images). The backend lint step is **enforced** — the previous `continue-on-error: true`
-has been removed, so ESLint failures correctly block the build.
+caching. `backend-checks` runs a Node matrix (**20.19** and **22**): 20.19 is
+the declared `engines.node` floor in both `package.json` files, 22 matches the
+`node:22-bookworm-slim` runtime images and is the leg that publishes the
+coverage artifact. `migrate-checks`, `integration-checks`, and
+`frontend-checks` stay on Node 22. The backend lint step is **enforced** — the
+previous `continue-on-error: true` has been removed, so ESLint failures
+correctly block the build.
 
 Release commits pushed by the Version Bump workflow do **not** trigger CI —
 they are pushed with `GITHUB_TOKEN`, which deliberately skips downstream
