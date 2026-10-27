@@ -231,10 +231,14 @@ on the module):
   // ── Vehicle CRUD ──
   router.get('/vehicles', authenticate, VehicleController.getAll);
   router.post('/vehicles', writeLimiter, authenticate, VehicleController.create);
-  router.put('/vehicles/:vehicleId', writeLimiter, authenticate, VehicleController.update);
-  router.delete('/vehicles/:vehicleId', writeLimiter, authenticate, VehicleController.delete);
-  router.patch('/vehicles/:vehicleId/default', authenticate, VehicleController.setDefault);
+  router.put('/vehicles/:vehicleId', validateIds('vehicleId'), writeLimiter, authenticate, VehicleController.update);
+  router.delete('/vehicles/:vehicleId', validateIds('vehicleId'), writeLimiter, authenticate, VehicleController.delete);
+  router.patch('/vehicles/:vehicleId/default', validateIds('vehicleId'), authenticate, VehicleController.setDefault);
   ```
+- Every route with an id path param (`:sessionId`, `:id`, `:vehicleId`,
+  `:analysisId`) must be wrapped in `validateIds(...)` immediately after the
+  path. It 400s a non-positive-integer segment before it can reach Sequelize
+  and surface as a Postgres `22P02` 500.
 - Write operations use `writeLimiter` rate limiter; reads use `authenticate` only.
 
 ### 6.4 Migration SQL (`infra/timescale/009_add_vehicles.sql`)
@@ -266,9 +270,10 @@ if (valErr) {
 | `copySchema` | `SessionController.copy` | `{ name: string, required }` |
 | `joinSchema` | `SessionController.join` | `{ joinSessionId: positive int, name: string }` |
 | `addLocationSchema` | `SessionController.addLocation` | `{ locations: { start, end } }` strings |
-| `vehicleCreateSchema` | `VehicleController.create` | Vehicle fields: `name` required, `make`/`model`/`year`/`engineCc`/`vin` optional |
+| `vehicleCreateSchema` | `VehicleController.create` | Vehicle fields: `name` required, `make`/`model`/`year`/`engineCc` optional |
 | `vehicleUpdateSchema` | `VehicleController.update` | Same as create, all optional, `min(1)` — at least one field required |
-| `telemetryRangeSchema` | `TelemetryController.range` | `{ from, to }` ISO dates + `limit` (1–10000, default 5000) + `offset` (≥0) — wired so a malformed range returns `400`, not a `500` |
+| `telemetryRangeSchema` | `TelemetryController.range` | `{ from, to }` ISO dates + `limit` (1–10000, default 5000) — wired so a malformed range returns `400`, not a `500`. Cursor-based: no `offset` |
+| `validateIds(...params)` | route middleware in `routes/api.js` | Not a body schema: gates the named path params (`:sessionId`, `:vehicleId`, `:analysisId`) to a positive int4 (≤ 2147483647) before Sequelize, returning `400 { error: 'Invalid <param>.' }` instead of a Postgres `22P02`/`22003` 500 |
 
 **Pure validation helpers** (used by `UserController.updateSettings`):
 
@@ -618,7 +623,7 @@ blockers are resolved and re-reviewed as PASS:
   shared variants) no longer `include` the full `Log` array. They call the new
   `aggregateSummaries()` (one `GROUP BY` per request) and return lightweight
   `startDate`/`endDate`/`duration`/`maxSpeed`/`maxRpm`. Paged telemetry stays
-  on `GET /api/sessions/:id/telemetry`.
+  on `GET /api/sessions/:sessionId/telemetry`.
 - ✅ **CSRF protection added:** `middleware/csrfGuard.js` validates the `Origin`
   header on all state-changing `/api` requests against the expected origin and
   the `CORS_ORIGINS` allowlist (OWASP-recommended for JSON SPAs). The `publicOrigin`

@@ -22,6 +22,7 @@ const { test, describe, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert');
 const express = require('express');
 const passport = require('passport');
+const bcrypt = require('bcrypt');
 
 // ── Mutable model behavior (reset per test) ─────────────────────────
 
@@ -213,6 +214,68 @@ describe('LocalStrategy verify callback (config/passport.js)', () => {
         const args = await runVerify('User@Example.COM', 'password123');
         assert.strictEqual(args[1], userFindOneResult, 'login succeeds for mixed-case input');
         assert.deepStrictEqual(findOneCalls, [{ where: { email: 'user@example.com' } }]);
+    });
+});
+
+// ── Login timing — every email path pays one bcrypt compare ─────────
+
+describe('login timing equalization (config/passport.js)', () => {
+    const realCompare = bcrypt.compare;
+    let compareCalls;
+
+    beforeEach(() => {
+        compareCalls = [];
+        // Spy on the module method: passport.js resolves bcrypt.compare at
+        // call time, so the wrapper observes the real strategy's work.
+        bcrypt.compare = async (...args) => {
+            compareCalls.push(args);
+            return realCompare(...args);
+        };
+    });
+
+    afterEach(() => {
+        bcrypt.compare = realCompare;
+    });
+
+    function runVerify(email, password) {
+        return new Promise((resolve) => {
+            passport._strategies.local._verify(email, password, (...args) => resolve(args));
+        });
+    }
+
+    test('unknown email runs one bcrypt compare against the dummy hash', async () => {
+        userFindOneResult = null;
+        const args = await runVerify('ghost@example.com', 'password123');
+
+        assert.strictEqual(args[0], null);
+        assert.strictEqual(args[1], false);
+        assert.deepStrictEqual(args[2], { message: 'Incorrect username or password.' });
+        assert.strictEqual(compareCalls.length, 1, 'unknown email must still pay one bcrypt compare');
+        assert.strictEqual(compareCalls[0][0], 'password123');
+        // Cost parity, not hash-format parity: the dummy must be as expensive
+        // as a real stored hash, whatever bcrypt's salt prefix looks like.
+        const referenceHash = bcrypt.hashSync('reference-not-a-credential', 10);
+        assert.strictEqual(bcrypt.getRounds(compareCalls[0][1]), bcrypt.getRounds(referenceHash),
+            'dummy hash uses the same cost factor as real password hashes');
+        assert.notStrictEqual(compareCalls[0][1], 'password123', 'dummy is a hash, not the password');
+    });
+
+    test('known email runs exactly one bcrypt compare too (same message)', async () => {
+        const hash = bcrypt.hashSync('password123', 10);
+        userFindOneResult = makeUser({
+            password: hash,
+            // Mirrors models/User.js comparePassword, which is mocked here.
+            comparePassword: async (p) => bcrypt.compare(p, hash),
+        });
+
+        const args = await runVerify('user@example.com', 'password123');
+
+        assert.strictEqual(args[1], userFindOneResult);
+        assert.strictEqual(compareCalls.length, 1, 'known email compares exactly once');
+        assert.strictEqual(compareCalls[0][0], 'password123');
+        assert.strictEqual(compareCalls[0][1], hash, 'known path compares against the stored hash');
+        assert.strictEqual(bcrypt.getRounds(compareCalls[0][1]), bcrypt.getRounds(hash),
+            'cost factor is taken from the stored hash, not a hard-coded value');
     });
 });
 

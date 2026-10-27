@@ -33,7 +33,7 @@ flowchart LR
     TC --> DB
     USR --> UDB[(PostgreSQL: Users/Sessions)]
 
-    BR -.->|GET /api/sessions/:id/telemetry| TC
+    BR -.->|GET /api/sessions/:sessionId/telemetry| TC
 ```
 
 ```
@@ -58,7 +58,7 @@ resolve user (cached) → `findOrCreate` session (resolved numeric FK) →
 ### Read path
 `Browser SPA` → `CORS` + `express-session` → `/api/*` → `authenticate`
 middleware → controller. Telemetry is served via
-`GET /api/sessions/:id/telemetry?from&to&limit` (`TelemetryController.range`),
+`GET /api/sessions/:sessionId/telemetry?from&to&limit` (`TelemetryController.range`),
 which enforces ownership and returns
 **paged** frames from the `Logs` hypertable.
 
@@ -122,7 +122,7 @@ which enforces ownership and returns
   re-queued failed batch could be flushed simultaneously with a fresh batch.
 
 ### 2.3 `TelemetryController.range` (`controllers/TelemetryController.js`)
-- `GET /api/sessions/:id/telemetry?from&to&limit`.
+- `GET /api/sessions/:sessionId/telemetry?from&to&limit`.
 - Enforces ownership (`req.user.id`).
 - `Log.findAll` with `timestamp BETWEEN from AND to`, capped `limit`
   (`min(limit||5000, 10000)`), ordered ASC, **limited attributes**
@@ -226,9 +226,21 @@ sessions after a password change), `015_normalize_emails.sql` (lowercase fold),
   to all responses: `X-Content-Type-Options: nosniff`, `X-Frame-Options:
   SAMEORIGIN`, `X-XSS-Protection: 0` (modern browsers ignore this, but it's kept
   for safety), `Strict-Transport-Security` (set at the nginx layer), and others.
-- **CSP disabled** — `contentSecurityPolicy: false` is passed to Helmet because
-  the React SPA relies on inline scripts and styles. A future plan should enable
-  CSP via nonces or hashes.
+- **CSP enabled on the API** — Helmet's `contentSecurityPolicy` is active in
+  `app.js` with `'unsafe-inline'` for script and style. That `'unsafe-inline'`
+  is vestigial: the backend serves only `/api` JSON, and the SPA HTML is served
+  by nginx, so no backend response carries an inline script or style.
+- **CSP enabled on the SPA edge** — `apps/frontend/nginx.conf` sets a
+  `Content-Security-Policy` (`default-src 'self'`, `script-src 'self'`,
+  `style-src 'self' 'unsafe-inline' https://fonts.googleapis.com`,
+  `font-src 'self' data: https://fonts.gstatic.com`, `img-src 'self' data: https:`,
+  `connect-src 'self'`, `frame-ancestors 'none'`, `object-src 'none'`,
+  `base-uri 'self'`). The Vite build emits one external module script and no
+  inline script/style, so `script-src` needs no `'unsafe-inline'`.
+- **Edge headers** — the same server block adds `X-Frame-Options: DENY`,
+  `X-Content-Type-Options: nosniff`, `Referrer-Policy:
+  strict-origin-when-cross-origin`, and a `Permissions-Policy` denying
+  geolocation, camera, and microphone.
 - **nginx HSTS** — the frontend nginx config (`apps/frontend/nginx.conf`) adds
   `Strict-Transport-Security: max-age=31536000; includeSubDomains` to enforce
   HTTPS for one year.
@@ -951,7 +963,7 @@ See `docs/deployment.md` for the full deployment guide.
 | `GET /api/version` | none | returns `{ version: string }` from package.json |
 | `GET /api/sessions?limit&offset` | cookie | list sessions (paginated: `{ sessions, total, limit, offset }`) |
 | `GET /api/sessions/:id` | cookie + owner | session metadata (no full logs) |
-| `GET /api/sessions/:id/telemetry?from&to&limit` | cookie + owner | paged telemetry frames |
+| `GET /api/sessions/:sessionId/telemetry?from&to&limit` | cookie + owner | paged telemetry frames |
 | `GET /api/sessions/:id/export/csv` | cookie + owner | stream all telemetry as CSV with dynamic PID column discovery |
 | `PATCH /api/sessions/rename/:id` | cookie + owner | rename session (body: `{ name }`) |
 | `PATCH /api/sessions/addlocation/:sessionId` | cookie + owner | set start/end location labels (body: `{ locations: { start, end } }`) |
@@ -973,7 +985,7 @@ See `docs/deployment.md` for the full deployment guide.
 | `GET /api/settings/full` | cookie | full settings for the settings UI (disableRegistration, hasUploadApiToken, tokenFromEnv, isAdmin, LLM provider/model/endpoint, hasLlmApiKey, llmMaxTokens, llmThinkingMode, llmReasoningEffort, timezoneOffset, retentionEnabled, retentionDays, analysisRetentionDays, tileProvider (always, default `osm`), cartoApiKey (only when `tileProvider === 'carto'` — the browser embeds it in tile URLs), vehicle fields) |
 | `PUT /api/settings` | cookie + **admin** | admin-only settings update (disableRegistration, uploadApiToken, llmProvider, llmApiKey, llmModel, llmEndpoint, llmThinkingMode, llmReasoningEffort, llmMaxTokens, retentionEnabled, retentionDays, analysisRetentionDays, tileProvider (`osm`\|`carto`), cartoApiKey (string ≤255, trimmed, `''` clears), vehicle fields, timezoneOffset); 403 for non-admins; response includes `retentionPolicyApplied` |
 | `POST /api/settings/upload-token` | cookie + **admin** | admin-only — generate a new upload API token (shown once); 403 for non-admins |
-| `POST /api/settings/test-llm` | cookie | test LLM connection (returns streaming response) |
+| `POST /api/settings/test-llm` | cookie + **admin** | admin-only — test LLM connection (returns streaming response); 403 for non-admins |
 | `GET /api/vehicles` | cookie | list all vehicles for authenticated user |
 | `GET /api/vehicles/:vehicleId` | cookie | get a single vehicle |
 | `POST /api/vehicles` | cookie | create a new vehicle (body: `{ name, make?, model?, year?, engineCc? }`) |

@@ -492,3 +492,5 @@ module.exports = UserController;
 // Expose the settings projection helper so tests assert against the real
 // response shape (single source of truth) instead of local re-implementations.
 module.exports.settingsView = settingsView;
+// Exported so other controllers reuse the exact same role check and 403 body.
+module.exports.requireAdmin = requireAdmin;

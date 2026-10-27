@@ -11,6 +11,7 @@ const VehicleController = require('../controllers/VehicleController');
 const TelemetryController = require('../controllers/TelemetryController');
 const AnalysisController = require('../controllers/AnalysisController');
 const runtime = require('../config/runtime');
+const { validateIds } = require('../lib/validators');
 
 // Shared limiter defaults: key on req.ip (real client IP via trust proxy),
 // emit RFC-standard RateLimit-* headers, and return a JSON 429 so SPA and
@@ -109,36 +110,36 @@ router.post('/users/logout', UserController.logout);
 router.post('/users/change-password', writeLimiter, authenticate, UserController.changePassword);
 
 router.get('/sessions', authenticate, SessionController.getAll);
-router.get('/sessions/:sessionId', authenticate, SessionController.getOne);
-router.delete('/sessions/:sessionId', authenticate, SessionController.delete);
-router.get('/sessions/:sessionId/export/csv', exportLimiter, authenticate, SessionController.exportCsv);
+router.get('/sessions/:sessionId', validateIds('sessionId'), authenticate, SessionController.getOne);
+router.delete('/sessions/:sessionId', validateIds('sessionId'), authenticate, SessionController.delete);
+router.get('/sessions/:sessionId/export/csv', validateIds('sessionId'), exportLimiter, authenticate, SessionController.exportCsv);
 
 // Paged telemetry frames (ownership enforced inside the controller)
-router.get('/sessions/:id/telemetry', authenticate, TelemetryController.range);
+router.get('/sessions/:sessionId/telemetry', validateIds('sessionId'), authenticate, TelemetryController.range);
 
-router.patch('/sessions/rename/:sessionId', authenticate, SessionController.rename);
-router.patch('/sessions/addlocation/:sessionId', authenticate, SessionController.addLocation);
-router.patch('/sessions/notes/:sessionId', authenticate, SessionController.updateNotes);
-router.patch('/sessions/filter/:sessionId', authenticate, SessionController.filter);
-router.patch('/sessions/cut/:sessionId', authenticate, SessionController.cut);
-router.post('/sessions/copy/:sessionId', authenticate, SessionController.copy);
-router.post('/sessions/join/:sessionId', authenticate, SessionController.join);
-router.patch('/sessions/:sessionId/vehicle', authenticate, SessionController.reassignVehicle);
+router.patch('/sessions/rename/:sessionId', validateIds('sessionId'), authenticate, SessionController.rename);
+router.patch('/sessions/addlocation/:sessionId', validateIds('sessionId'), authenticate, SessionController.addLocation);
+router.patch('/sessions/notes/:sessionId', validateIds('sessionId'), authenticate, SessionController.updateNotes);
+router.patch('/sessions/filter/:sessionId', validateIds('sessionId'), authenticate, SessionController.filter);
+router.patch('/sessions/cut/:sessionId', validateIds('sessionId'), authenticate, SessionController.cut);
+router.post('/sessions/copy/:sessionId', validateIds('sessionId'), authenticate, SessionController.copy);
+router.post('/sessions/join/:sessionId', validateIds('sessionId'), authenticate, SessionController.join);
+router.patch('/sessions/:sessionId/vehicle', validateIds('sessionId'), authenticate, SessionController.reassignVehicle);
 
 // ── Vehicle CRUD ──────────────────────────────────────────────────────
 router.get('/vehicles', authenticate, VehicleController.getAll);
-router.get('/vehicles/:vehicleId', authenticate, VehicleController.getOne);
+router.get('/vehicles/:vehicleId', validateIds('vehicleId'), authenticate, VehicleController.getOne);
 router.post('/vehicles', writeLimiter, authenticate, VehicleController.create);
-router.put('/vehicles/:vehicleId', writeLimiter, authenticate, VehicleController.update);
-router.delete('/vehicles/:vehicleId', writeLimiter, authenticate, VehicleController.delete);
-router.patch('/vehicles/:vehicleId/default', authenticate, VehicleController.setDefault);
+router.put('/vehicles/:vehicleId', validateIds('vehicleId'), writeLimiter, authenticate, VehicleController.update);
+router.delete('/vehicles/:vehicleId', validateIds('vehicleId'), writeLimiter, authenticate, VehicleController.delete);
+router.patch('/vehicles/:vehicleId/default', validateIds('vehicleId'), authenticate, VehicleController.setDefault);
 
 // ── BYOK LLM Analysis ─────────────────────────────────────────────────
 router.post('/settings/test-llm', aiLimiter, authenticate, AnalysisController.testConnection);
-router.post('/sessions/:sessionId/analyze', aiLimiter, authenticate, AnalysisController.analyzeSession);
-router.get('/sessions/:sessionId/analyses', authenticate, AnalysisController.listAnalyses);
-router.get('/sessions/:sessionId/analyses/:analysisId', authenticate, AnalysisController.getAnalysis);
-router.delete('/sessions/:sessionId/analyses/:analysisId', authenticate, AnalysisController.deleteAnalysis);
+router.post('/sessions/:sessionId/analyze', validateIds('sessionId'), aiLimiter, authenticate, AnalysisController.analyzeSession);
+router.get('/sessions/:sessionId/analyses', validateIds('sessionId'), authenticate, AnalysisController.listAnalyses);
+router.get('/sessions/:sessionId/analyses/:analysisId', validateIds('sessionId', 'analysisId'), authenticate, AnalysisController.getAnalysis);
+router.delete('/sessions/:sessionId/analyses/:analysisId', validateIds('sessionId', 'analysisId'), authenticate, AnalysisController.deleteAnalysis);
 
 // ── Cross-vehicle analysis history ────────────────────────────────────
 router.get('/analyses', authenticate, AnalysisController.listAllAnalyses);
@@ -146,7 +147,7 @@ router.get('/analyses/export', exportLimiter, authenticate, AnalysisController.e
 // Single analysis fetch (session pages expand past analyses). MUST stay
 // registered AFTER /analyses/export — Express matches in registration order
 // and would otherwise capture the literal 'export' as an :analysisId.
-router.get('/analyses/:analysisId', authenticate, AnalysisController.getAnalysis);
+router.get('/analyses/:analysisId', validateIds('analysisId'), authenticate, AnalysisController.getAnalysis);
 
 
 module.exports = router;

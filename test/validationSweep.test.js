@@ -6,6 +6,8 @@ process.env.SESSION_KEYS = process.env.SESSION_KEYS || 'abc123';
 
 const { describe, it } = require('node:test');
 const assert = require('node:assert');
+const fs = require('node:fs');
+const path = require('node:path');
 
 // ── Pre-populate require.cache for ../models ────────────────────────
 const mockModels = {
@@ -19,7 +21,8 @@ const mockModels = {
   },
   Log: { count: async () => 0, findAll: async () => [], destroy: async () => 0 },
   User: { findOne: async () => null },
-  Vehicle: { findOne: async () => null },
+  Vehicle: { findOne: async () => null, create: async () => ({}) },
+  Analysis: { findAll: async () => [], count: async () => 0 },
   sequelize: {
     transaction: async (fn) => fn({}),
     query: async () => [],
@@ -45,9 +48,11 @@ const {
   telemetryRangeSchema,
   validateProvider,
   PROVIDER_ALLOWLIST,
+  validateIds,
 } = require('../lib/validators');
 
 const SessionController = require('../controllers/SessionController');
+const VehicleController = require('../controllers/VehicleController');
 
 // ── Test helpers ──────────────────────────────────────────────────
 
@@ -312,6 +317,19 @@ describe('vehicleCreateSchema', () => {
     assert.ifError(error);
     assert.strictEqual(value.engineCc, 2000);
   });
+
+  it('accepts the SPA blank-vehicle payload (null make/model/year/engineCc)', () => {
+    // VehicleManager always sends engineCc, null when the input is blank —
+    // this exact body used to 400 on engineCc.
+    const { error } = vehicleCreateSchema.validate({
+      name: 'Tow Rig',
+      make: null,
+      model: null,
+      year: null,
+      engineCc: null,
+    });
+    assert.ifError(error);
+  });
 });
 
 describe('vehicleUpdateSchema', () => {
@@ -399,22 +417,14 @@ describe('telemetryRangeSchema', () => {
     assert.strictEqual(value.limit, 5000);
   });
 
-  it('rejects negative offset', () => {
+  it('does not declare offset (cursor-based paging)', () => {
+    assert.ok(!Object.keys(telemetryRangeSchema.describe().keys).includes('offset'));
     const { error } = telemetryRangeSchema.validate({
       from: '2026-01-01T00:00:00Z',
       to: '2026-01-02T00:00:00Z',
-      offset: -1
-    });
-    assert.ok(error);
-  });
-
-  it('defaults offset to 0', () => {
-    const { error, value } = telemetryRangeSchema.validate({
-      from: '2026-01-01T00:00:00Z',
-      to: '2026-01-02T00:00:00Z'
-    });
+      offset: 100
+    }, { allowUnknown: true });
     assert.ifError(error);
-    assert.strictEqual(value.offset, 0);
   });
 });
 
@@ -599,4 +609,182 @@ describe('SessionController updateNotes validation', () => {
     mockModels.Session.findOne = async () => null;
   });
 });
+
+describe('validateIds', () => {
+  function run(params, keys = ['sessionId']) {
+    const req = { params };
+    const { res, calls } = makeStubRes();
+    let nextCalled = false;
+    validateIds(...keys)(req, res, () => { nextCalled = true; });
+    return { calls, nextCalled };
+  }
+
+  for (const bad of ['abc', '0', '-1', '1.5', '12abc', '']) {
+    it(`rejects ${JSON.stringify(bad)} with 400`, () => {
+      const { calls, nextCalled } = run({ sessionId: bad });
+      assert.strictEqual(calls.statusCode, 400);
+      assert.deepStrictEqual(calls.body, { error: 'Invalid sessionId.' });
+      assert.strictEqual(nextCalled, false);
+    });
+  }
+
+  it('rejects a missing param', () => {
+    const { calls, nextCalled } = run({});
+    assert.strictEqual(calls.statusCode, 400);
+    assert.strictEqual(nextCalled, false);
+  });
+
+  it('accepts a positive integer id', () => {
+    const { calls, nextCalled } = run({ sessionId: '42' });
+    assert.strictEqual(calls.statusCode, null);
+    assert.strictEqual(nextCalled, true);
+  });
+
+  it('accepts the largest int4 id', () => {
+    const { calls, nextCalled } = run({ sessionId: '2147483647' });
+    assert.strictEqual(calls.statusCode, null);
+    assert.strictEqual(nextCalled, true);
+  });
+
+  for (const bad of ['2147483648', '9'.repeat(20)]) {
+    it(`rejects int4 overflow ${bad} with 400`, () => {
+      const { calls, nextCalled } = run({ sessionId: bad });
+      assert.strictEqual(calls.statusCode, 400);
+      assert.deepStrictEqual(calls.body, { error: 'Invalid sessionId.' });
+      assert.strictEqual(nextCalled, false);
+    });
+  }
+
+  it('checks every named param', () => {
+    const { calls, nextCalled } = run({ sessionId: '1', analysisId: 'nope' }, ['sessionId', 'analysisId']);
+    assert.strictEqual(calls.statusCode, 400);
+    assert.deepStrictEqual(calls.body, { error: 'Invalid analysisId.' });
+    assert.strictEqual(nextCalled, false);
+  });
+});
+
+describe('list pagination clamps', () => {
+  async function listArgs(query) {
+    let captured = null;
+    mockModels.User.findOne = async () => ({ id: 1 });
+    mockModels.Session.findAll = async (opts) => { captured = opts; return []; };
+    mockModels.Session.count = async () => 0;
+    try {
+      const req = makeStubReq({ params: {}, query });
+      const { res } = makeStubRes();
+      await SessionController.getAll(req, res);
+      return captured;
+    } finally {
+      mockModels.User.findOne = async () => null;
+      mockModels.Session.findAll = async () => [];
+      mockModels.Session.count = async () => 0;
+    }
+  }
+
+  it('limit=-1 clamps to 1', async () => {
+    assert.strictEqual((await listArgs({ limit: '-1' })).limit, 1);
+  });
+
+  it('limit=0 falls back to 50', async () => {
+    assert.strictEqual((await listArgs({ limit: '0' })).limit, 50);
+  });
+
+  it('limit=9999 clamps to 200', async () => {
+    assert.strictEqual((await listArgs({ limit: '9999' })).limit, 200);
+  });
+
+  it('offset=-5 clamps to 0', async () => {
+    assert.strictEqual((await listArgs({ offset: '-5' })).offset, 0);
+  });
+
+  it('offset=abc falls back to 0', async () => {
+    assert.strictEqual((await listArgs({ offset: 'abc' })).offset, 0);
+  });
+});
+
+describe('SessionController vehicleId query gate', () => {
+  function run(query) {
+    const req = makeStubReq({ params: {}, query });
+    const { res, calls } = makeStubRes();
+    return { req, res, calls };
+  }
+
+  for (const bad of ['abc', '1.5', '0', '-1', '2147483648', '9'.repeat(20)]) {
+    it(`returns 400 for vehicleId=${bad} before any DB access`, async () => {
+      let userLookedUp = false;
+      mockModels.User.findOne = async () => { userLookedUp = true; return { id: 1 }; };
+      try {
+        const { req, res, calls } = run({ vehicleId: bad });
+        await SessionController.getAll(req, res);
+        assert.strictEqual(calls.statusCode, 400);
+        assert.deepStrictEqual(calls.body, { error: 'Invalid vehicleId.' });
+        assert.strictEqual(userLookedUp, false, 'the gate must run before the DB');
+      } finally {
+        mockModels.User.findOne = async () => null;
+      }
+    });
+  }
+
+  it('passes none, a valid int4 id and an absent filter through', async () => {
+    const wheres = [];
+    mockModels.User.findOne = async () => ({ id: 1 });
+    mockModels.Session.findAll = async (opts) => { wheres.push(opts.where); return []; };
+    mockModels.Session.count = async () => 0;
+    try {
+      for (const query of [{ vehicleId: 'none' }, { vehicleId: '42' }, {}]) {
+        const { req, res, calls } = run(query);
+        await SessionController.getAll(req, res);
+        assert.notStrictEqual(calls.statusCode, 400, JSON.stringify(query));
+      }
+    } finally {
+      mockModels.User.findOne = async () => null;
+      mockModels.Session.findAll = async () => [];
+      mockModels.Session.count = async () => 0;
+    }
+    assert.deepStrictEqual(wheres, [
+      { userId: 1, vehicleId: null },
+      { userId: 1, vehicleId: 42 },
+      { userId: 1 },
+    ]);
+  });
+});
+
+describe('VehicleController body validation', () => {
+  it('rejects create with a non-integer year as 400 JSON', async () => {
+    const req = makeStubReq({ params: {}, body: { name: 'Car', year: 'abc' } });
+    const { res, calls } = makeStubRes();
+    await VehicleController.create(req, res);
+    assert.strictEqual(calls.statusCode, 400);
+    assert.strictEqual(typeof calls.body.error, 'string');
+  });
+
+  it('rejects update with an empty body as 400 JSON', async () => {
+    const req = makeStubReq({ body: {} });
+    const { res, calls } = makeStubRes();
+    await VehicleController.update(req, res);
+    assert.strictEqual(calls.statusCode, 400);
+    assert.strictEqual(typeof calls.body.error, 'string');
+  });
+});
+
+describe('route wiring — id params', () => {
+  it('gates every id-bearing /api route with validateIds for its own :params', () => {
+    const src = fs.readFileSync(path.join(__dirname, '..', 'routes', 'api.js'), 'utf8');
+    const idRoutes = src.split('\n').filter((line) => /^router\.\w+\(.*:\w+/.test(line));
+    assert.strictEqual(idRoutes.length, 21);
+    for (const line of idRoutes) {
+      assert.match(line, /validateIds\(/, `missing validateIds: ${line.trim()}`);
+      // The guard must cover exactly the route's declared path params, in
+      // order — otherwise a renamed param (e.g. :id → :sessionId) silently
+      // validates a key that is always undefined and 400s every request.
+      const pathMatch = line.match(/^router\.\w+\(\s*'([^']+)'/);
+      assert.ok(pathMatch, `unparsable route path: ${line.trim()}`);
+      const paramNames = [...pathMatch[1].matchAll(/:(\w+)/g)].map((m) => m[1]);
+      const argsMatch = line.match(/validateIds\(([^)]*)\)/);
+      const args = [...argsMatch[1].matchAll(/'(\w+)'/g)].map((m) => m[1]);
+      assert.deepStrictEqual(args, paramNames, `validateIds args must match route params: ${line.trim()}`);
+    }
+  });
+});
+
 

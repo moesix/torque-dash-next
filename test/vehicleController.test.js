@@ -140,14 +140,55 @@ describe('VehicleController (with mocked models)', () => {
 
     test('create with a blank/absent name returns 400 before any insert', async () => {
         const calls = install();
-        for (const name of [undefined, '', '   ', 42]) {
+        // Joi-handled shapes (missing/empty/non-string): the schema writes the
+        // message, so only assert the JSON error contract.
+        for (const name of [undefined, '', 42]) {
             const req = makeStubReq({ body: { name } });
             const { res, calls: out } = makeStubRes();
             await VehicleController.create(req, res);
             assert.strictEqual(out.statusCode, 400, `name=${JSON.stringify(name)}`);
-            assert.deepStrictEqual(out.body, { error: 'Vehicle name is required.' });
+            assert.strictEqual(typeof out.body.error, 'string', `name=${JSON.stringify(name)}`);
         }
+
+        // Whitespace-only passes Joi (min(1), no trim) and hits the
+        // controller's explicit guard — assert its exact message.
+        const req = makeStubReq({ body: { name: '   ' } });
+        const { res, calls: out } = makeStubRes();
+        await VehicleController.create(req, res);
+        assert.strictEqual(out.statusCode, 400);
+        assert.deepStrictEqual(out.body, { error: 'Vehicle name is required.' });
+
         assert.strictEqual(calls.vehicleCreate.length, 0, 'no insert for invalid names');
+    });
+
+    test('create persists an SPA blank-vehicle payload (nulls) as 201', async () => {
+        const calls = install();
+
+        const req = makeStubReq({
+            body: { name: 'Tow Rig', make: null, model: null, year: null, engineCc: null },
+        });
+        const { res, calls: out } = makeStubRes();
+        await VehicleController.create(req, res);
+
+        assert.strictEqual(out.statusCode, 201, JSON.stringify(out.body));
+        assert.deepStrictEqual(calls.vehicleCreate[0], {
+            name: 'Tow Rig',
+            make: null,
+            model: null,
+            year: null,
+            engineCc: null,
+            userId: 1,
+        }, 'blank optional fields must persist as NULL, not 400');
+    });
+
+    test('create with an invalid year returns 400 before any insert', async () => {
+        const calls = install();
+        const req = makeStubReq({ body: { name: 'Car', year: 'abc' } });
+        const { res, calls: out } = makeStubRes();
+        await VehicleController.create(req, res);
+        assert.strictEqual(out.statusCode, 400);
+        assert.strictEqual(typeof out.body.error, 'string');
+        assert.strictEqual(calls.vehicleCreate.length, 0, 'no insert for an invalid year');
     });
 
     test('update mutates and saves an owned vehicle', async () => {

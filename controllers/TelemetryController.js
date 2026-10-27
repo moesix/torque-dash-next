@@ -4,7 +4,7 @@ const Op = require('../models').Sequelize.Op;
 const { telemetryRangeSchema } = require('../lib/validators');
 
 class TelemetryController {
-    // GET /api/sessions/:id/telemetry?from&to&limit
+    // GET /api/sessions/:sessionId/telemetry?from&to&limit
     // Enforces ownership and returns paged frames.
     static async range(req, res) {
         try {
@@ -33,7 +33,7 @@ class TelemetryController {
             }
             const { limit } = value;
             if (!req.user) return res.status(401).json({ error: 'Unauthorized' });
-            const session = await Session.findOne({ where: { userId: req.user.id, id: req.params.id } });
+            const session = await Session.findOne({ where: { userId: req.user.id, id: req.params.sessionId } });
             if (!session) return res.status(404).json({ error: 'Not found' });
 
             const rows = await Log.findAll({

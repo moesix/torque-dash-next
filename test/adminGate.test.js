@@ -27,6 +27,7 @@ let settingsRow;
 const upsertCalls = [];
 const saveCalls = [];
 const createCalls = [];
+const llmAnalyzeCalls = [];
 
 function makeSettingsRow() {
     const row = {
@@ -133,7 +134,14 @@ require.cache[llmProvidersPath] = {
     filename: llmProvidersPath,
     loaded: true,
     exports: {
-        analyze: async () => ({ response: { body: '' }, abortController: { abort: () => {} } }),
+        analyze: async (...args) => {
+            llmAnalyzeCalls.push(args);
+            return {
+                response: { body: '' },
+                abortController: { abort: () => {} },
+                timeoutGuard: { bump: () => {}, clear: () => {} },
+            };
+        },
         streamEvents: async function* () {},
     },
 };
@@ -166,6 +174,7 @@ beforeEach(() => {
     upsertCalls.length = 0;
     saveCalls.length = 0;
     createCalls.length = 0;
+    llmAnalyzeCalls.length = 0;
     mockModels.User.count = async () => 0;
     mockModels.User.findOne = async () => null;
 });
@@ -325,6 +334,71 @@ describe('POST /api/settings/upload-token — admin-only gate', { skip: apiRoute
         assert.match(body.uploadApiToken, /^[0-9a-f]{64}$/);
         assert.strictEqual(saveCalls.length, 1);
         assert.strictEqual(settingsRow.uploadApiToken, body.uploadApiToken);
+    });
+});
+
+describe('POST /api/settings/test-llm — admin-only gate', { skip: apiRouter ? false : 'routes/api.js could not load' }, () => {
+    function configureLlm() {
+        settingsRow.llmProvider = 'openai';
+        settingsRow.llmApiKeyEnc = 'enc-key';
+    }
+
+    test('non-admin POST returns 403 with the shared admin message and never reaches the provider', async () => {
+        configureLlm();
+
+        const { status, body } = await withServer(NON_ADMIN, (base) =>
+            sendJson(base, '/api/settings/test-llm', 'POST')
+        );
+
+        assert.strictEqual(status, 403);
+        assert.deepStrictEqual(body, { error: 'Admin access required.' });
+        assert.strictEqual(llmAnalyzeCalls.length, 0, 'provider must not be called for a non-admin');
+        assert.strictEqual(settingsRow.llmProvider, 'openai');
+        assert.strictEqual(settingsRow.llmApiKeyEnc, 'enc-key');
+    });
+
+    test('anonymous POST is rejected by authenticate with 401 before the admin check', async () => {
+        configureLlm();
+
+        const { status, body } = await withServer(null, (base) =>
+            sendJson(base, '/api/settings/test-llm', 'POST')
+        );
+
+        assert.strictEqual(status, 401);
+        assert.deepStrictEqual(body, { error: 'Unauthorized' });
+        assert.strictEqual(llmAnalyzeCalls.length, 0);
+    });
+
+    test('admin POST reaches the provider and returns its response', async () => {
+        configureLlm();
+
+        const { status, body } = await withServer(ADMIN, (base) =>
+            sendJson(base, '/api/settings/test-llm', 'POST')
+        );
+
+        assert.strictEqual(status, 200);
+        assert.deepStrictEqual(body, { ok: true, response: '', provider: 'openai' });
+        assert.strictEqual(llmAnalyzeCalls.length, 1, 'admin request must run exactly one probe');
+    });
+});
+
+describe('POST /api/sessions/:id/analyze — NOT admin-gated', { skip: apiRouter ? false : 'routes/api.js could not load' }, () => {
+    test('authenticated non-admin passes the gate (no 403 admin rejection)', async () => {
+        settingsRow.llmProvider = 'openai';
+        settingsRow.llmApiKeyEnc = 'enc-key';
+
+        const { status, body } = await withServer(NON_ADMIN, (base) =>
+            sendJson(base, '/api/sessions/1/analyze', 'POST')
+        );
+
+        assert.notStrictEqual(status, 403, 'analysis must stay available to every authenticated user');
+        // The mocked Session.findOne returns null, so the only acceptable shape
+        // here is a downstream failure, never an admin rejection.
+        assert.ok(
+            [400, 404, 502].includes(status),
+            `expected a downstream status, got ${status} (${JSON.stringify(body)})`
+        );
+        assert.notDeepStrictEqual(body, { error: 'Admin access required.' });
     });
 });
 

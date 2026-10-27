@@ -13,15 +13,19 @@ const path = require('node:path');
 // ── Mock ./ssrfGuard BEFORE ../lib/llmProviders loads ──────────────────────
 // Lets the timeout-lifecycle suite drive analyzeOpenAICompatible /
 // analyzeAnthropic through their real code paths with no network access.
+// isSafeUrl stays REAL so the endpoint-gate suite exercises the guard.
+const realSsrfGuard = require('../lib/ssrfGuard');
 const ssrfGuardPath = require.resolve('../lib/ssrfGuard');
 let fakeResponse = null;
+const safeFetchCalls = [];
 require.cache[ssrfGuardPath] = {
   id: ssrfGuardPath,
   filename: ssrfGuardPath,
   loaded: true,
   exports: {
-    isSafeUrl: async () => true,
-    safeFetch: async () => {
+    isSafeUrl: realSsrfGuard.isSafeUrl,
+    safeFetch: async (url, init = {}) => {
+      safeFetchCalls.push({ url, init });
       if (!fakeResponse) throw new Error('safeFetch called without a stubbed response');
       return fakeResponse;
     },
@@ -109,6 +113,162 @@ describe('endpoint hijack prevention', () => {
       getBaseUrl({ llmProvider: 'anthropic', llmEndpoint: evilEndpoint }),
       null
     );
+  });
+});
+
+// ── Endpoint SSRF gate + scoped loopback allowance ────────────────────────
+
+describe('endpoint SSRF gate', () => {
+  const lastCall = () => safeFetchCalls[safeFetchCalls.length - 1];
+  const resetCalls = () => { safeFetchCalls.length = 0; };
+
+  test('non-ollama provider with private llmEndpoint → throws before any request', async () => {
+    resetCalls();
+    fakeResponse = { ok: true };
+
+    await assert.rejects(
+      () => analyze('hi', {
+        llmProvider: 'custom',
+        llmEndpoint: 'http://10.1.2.3:8080/v1',
+        llmApiKeyEnc: prepareApiKey('sk-test'),
+      }),
+      /failed safety validation/
+    );
+    assert.strictEqual(safeFetchCalls.length, 0);
+  });
+
+  test('non-ollama provider with loopback llmEndpoint → throws before any request', async () => {
+    resetCalls();
+    fakeResponse = { ok: true };
+
+    await assert.rejects(
+      () => analyze('hi', {
+        llmProvider: 'custom',
+        llmEndpoint: 'http://127.0.0.1:8080/v1',
+        llmApiKeyEnc: prepareApiKey('sk-test'),
+      }),
+      /failed safety validation/
+    );
+    assert.strictEqual(safeFetchCalls.length, 0);
+  });
+
+  test('custom endpoint rejects loopback even when the caller requests allowLoopback', async () => {
+    resetCalls();
+    fakeResponse = { ok: true };
+
+    await assert.rejects(
+      () => analyze('hi', {
+        llmProvider: 'custom',
+        llmEndpoint: 'http://127.0.0.1:9/v1',
+        llmApiKeyEnc: prepareApiKey('sk-test'),
+      }, { allowLoopback: true }),
+      /failed safety validation/
+    );
+    assert.strictEqual(safeFetchCalls.length, 0);
+  });
+
+  test('stray allowLoopback option never reaches safeFetch for a non-ollama provider', async () => {
+    resetCalls();
+    fakeResponse = { ok: true };
+
+    const result = await analyze('hi', {
+      llmProvider: 'custom',
+      llmEndpoint: 'https://8.8.8.8/v1',
+      llmApiKeyEnc: prepareApiKey('sk-test'),
+    }, { allowLoopback: true });
+    result.timeoutGuard.clear();
+
+    // The sink gates the flag on llmProvider === 'ollama', so a caller-supplied
+    // allowance cannot widen the guard for custom/openai/deepseek/etc.
+    assert.strictEqual(lastCall().url, 'https://8.8.8.8/v1/chat/completions');
+    assert.strictEqual(lastCall().init.allowLoopback, undefined);
+  });
+
+  test('ollama default endpoint (localhost) → passes with the scoped loopback flag', async () => {
+    resetCalls();
+    fakeResponse = { ok: true };
+
+    const result = await analyze('hi', {
+      llmProvider: 'ollama',
+      llmApiKeyEnc: prepareApiKey('sk-test'),
+    });
+    result.timeoutGuard.clear();
+
+    const call = lastCall();
+    assert.strictEqual(call.url, 'http://localhost:11434/v1/chat/completions');
+    assert.strictEqual(call.init.allowLoopback, true);
+    assert.strictEqual(call.init.redirect, undefined, 'guard owns the redirect mode');
+  });
+
+  test('ollama explicit 127.0.0.1 endpoint → passes with the scoped loopback flag', async () => {
+    resetCalls();
+    fakeResponse = { ok: true };
+
+    const result = await analyze('hi', {
+      llmProvider: 'ollama',
+      llmEndpoint: 'http://127.0.0.1:11434/v1',
+      llmApiKeyEnc: prepareApiKey('sk-test'),
+    });
+    result.timeoutGuard.clear();
+
+    const call = lastCall();
+    assert.strictEqual(call.url, 'http://127.0.0.1:11434/v1/chat/completions');
+    assert.strictEqual(call.init.allowLoopback, true);
+  });
+
+  test('non-loopback providers never request the loopback allowance', async () => {
+    resetCalls();
+    fakeResponse = { ok: true };
+
+    const result = await analyze('hi', {
+      llmProvider: 'openai',
+      llmApiKeyEnc: prepareApiKey('sk-test'),
+    });
+    result.timeoutGuard.clear();
+
+    assert.notStrictEqual(lastCall().init.allowLoopback, true);
+  });
+});
+
+// ── DeepSeek thinking payload shape (TEST-03) ─────────────────────────────
+
+describe('DeepSeek thinking payload', () => {
+  function deepseekSettings(extra = {}) {
+    return { llmProvider: 'deepseek', llmApiKeyEnc: prepareApiKey('sk-test'), ...extra };
+  }
+
+  async function capturedBody(settings) {
+    safeFetchCalls.length = 0;
+    fakeResponse = { ok: true };
+    const result = await analyze('hi', settings);
+    result.timeoutGuard.clear();
+    const call = safeFetchCalls[safeFetchCalls.length - 1];
+    return { url: call.url, body: JSON.parse(call.init.body) };
+  }
+
+  test('thinking enabled → thinking.enabled + reasoning_effort', async () => {
+    const { url, body } = await capturedBody(
+      deepseekSettings({ llmThinkingMode: true, llmReasoningEffort: 'medium' })
+    );
+    assert.strictEqual(url, 'https://api.deepseek.com/chat/completions');
+    assert.deepStrictEqual(body.thinking, { type: 'enabled' });
+    assert.strictEqual(body.reasoning_effort, 'medium');
+    assert.strictEqual(body.model, 'deepseek-v4-flash');
+    assert.strictEqual(body.stream, true);
+  });
+
+  test('thinking unset → defaults to enabled with high effort', async () => {
+    const { body } = await capturedBody(deepseekSettings());
+    assert.deepStrictEqual(body.thinking, { type: 'enabled' });
+    assert.strictEqual(body.reasoning_effort, 'high');
+  });
+
+  test('thinking disabled → thinking.disabled and no reasoning_effort', async () => {
+    const { body } = await capturedBody(
+      deepseekSettings({ llmThinkingMode: false, llmReasoningEffort: 'high' })
+    );
+    assert.deepStrictEqual(body.thinking, { type: 'disabled' });
+    assert.ok(!('reasoning_effort' in body));
   });
 });
 
