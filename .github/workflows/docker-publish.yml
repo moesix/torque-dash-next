@@ -50,12 +50,19 @@ jobs:
       - name: Resolve release version from the tag
         id: release
         run: |
-          VERSION=$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//')
+          # Highest semantic v* tag — NOT `git describe`, which resolves the
+          # nearest tag reachable from the checked-out master commit and can
+          # silently build the previous release when master lags the new tag
+          # (workflow_run races the mirror).
+          VERSION=$(git tag --list 'v*' --sort=-v:refname | head -n1 | sed 's/^v//')
           if [ -z "$VERSION" ]; then echo "No v* tag found"; exit 1; fi
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          # Build exactly the release commit, not whatever master points at.
+          git checkout --detach "v${VERSION}"
           MAJOR=$(echo "${VERSION}" | cut -d. -f1)
           MINOR=$(echo "${VERSION}" | cut -d. -f2)
           echo "major_minor=${MAJOR}.${MINOR}" >> "$GITHUB_OUTPUT"
+          echo "Building v${VERSION} from $(git rev-parse --short HEAD)"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
