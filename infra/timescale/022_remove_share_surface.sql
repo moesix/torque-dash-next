@@ -9,5 +9,11 @@
 -- run. So these drops are purely for PRE-EXISTING databases: on a fresh one
 -- they are no-ops (IF EXISTS), on an existing one they clean up the column.
 -- Idempotent either way, which is why re-running 022 is safe.
+--
+-- Sync-created databases model shareId as a UNIQUE CONSTRAINT (not a bare
+-- index); dropping an index owned by a constraint is refused, so drop the
+-- constraint first (no-op where it never existed, e.g. migration-created
+-- databases and CI).
+ALTER TABLE "Users" DROP CONSTRAINT IF EXISTS "Users_shareId_key";
 DROP INDEX IF EXISTS "Users_shareId_key";
 ALTER TABLE "Users" DROP COLUMN IF EXISTS "shareId";

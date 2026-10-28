@@ -91,6 +91,16 @@ describe('baseline schema', () => {
         assert.ok(!/\$\$/.test(sql), 'no dollar-quoted blocks (the runner splits on ;)');
     });
 
+    it('022 drops the shareId constraint before its index and column', () => {
+        const sql = fs.readFileSync(path.join(SQL_DIR, '022_remove_share_surface.sql'), 'utf8');
+        const constraintAt = sql.indexOf('DROP CONSTRAINT IF EXISTS "Users_shareId_key"');
+        const indexAt = sql.indexOf('DROP INDEX IF EXISTS "Users_shareId_key"');
+        const columnAt = sql.indexOf('DROP COLUMN IF EXISTS "shareId"');
+        assert.ok(constraintAt !== -1, '022 must drop the sync-created UNIQUE constraint');
+        assert.ok(indexAt === -1 || constraintAt < indexAt, 'constraint drop must precede index drop');
+        assert.ok(columnAt > constraintAt, 'column drop must follow the constraint drop');
+    });
+
     it('002 creates Settings with both timestamp columns', () => {
         const sql = fs.readFileSync(path.join(SQL_DIR, '002_settings.sql'), 'utf8');
         for (const column of [

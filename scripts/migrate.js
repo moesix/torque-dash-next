@@ -21,9 +21,11 @@
  * so one non-idempotent statement failing midway leaves the schema half-applied.
  * Two historical exceptions: 013 (shareId removal, owner sign-off) was edited
  * because fresh sync-less installs cannot have that column — every remaining
- * statement in it is IF NOT EXISTS, so the re-run is safe; and 002 (it gained
+ * statement in it is IF NOT EXISTS, so the re-run is safe; 002 (it gained
  * the createdAt/updatedAt columns), where CREATE TABLE IF NOT EXISTS makes the
- * re-run a verified no-op on existing DBs.
+ * re-run a verified no-op on existing DBs; and 022 (it had to drop the
+ * sync-created UNIQUE CONSTRAINT before the index — all statements IF EXISTS,
+ * so the re-run is a no-op on databases where it already succeeded).
  */
 const fs = require('fs');
 const path = require('path');
