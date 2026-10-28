@@ -91,10 +91,12 @@ re-run.
 **NEVER edit an already-applied migration — add a new numbered file.** An edit
 changes the file's content hash, so the whole file re-runs; since the runner
 does not wrap a file in a transaction, one non-idempotent statement failing
-midway leaves the schema half-applied. There are two historical exceptions: `013`
-(the shareId removal), whose remaining statements are all `IF NOT EXISTS`; and
+midway leaves the schema half-applied. There are three historical exceptions:
+`013` (the shareId removal), whose remaining statements are all `IF NOT EXISTS`;
 `002` (it gained the `createdAt` / `updatedAt` columns), where
-`CREATE TABLE IF NOT EXISTS` makes the re-run a verified no-op on existing DBs.
+`CREATE TABLE IF NOT EXISTS` makes the re-run a verified no-op on existing DBs;
+and `022` (it had to drop the sync-created UNIQUE *constraint* before its index
+— every statement is `IF EXISTS`, so re-runs are no-ops).
 
 **In Docker, migrations run automatically.** The backend container's CMD
 (`Dockerfile`) executes `node scripts/migrate.js` at every container start,
