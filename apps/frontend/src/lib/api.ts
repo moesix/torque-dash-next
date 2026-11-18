@@ -94,13 +94,16 @@ export async function login(email: string, password: string): Promise<boolean> {
     }
     throw new ApiError(message, res.status);
   }
-  // Cookie sanity probe (kept from the previous design).
+  // Cookie sanity probe. The POST already succeeded (2xx) and the cookie is set;
+  // a failure here (500, 429, proxy hiccup) must NOT be reported as bad
+  // credentials. Only a 401 from the probe means the cookie did not stick.
   try {
     await getSessions();
-    return true;
-  } catch {
-    return false;
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) return false;
+    // fall through: the route's own data fetch will surface a real outage
   }
+  return true;
 }
 
 export async function register(email: string, password: string): Promise<void> {

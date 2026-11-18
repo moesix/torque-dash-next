@@ -373,7 +373,8 @@ analysis/settings wrappers were added with those features:
 | `exportSessionCsv(sessionId)` | `GET /api/sessions/:sessionId/export/csv` | HEAD pre-check then native `<a>` download |
 
 All functions use `request()` with `credentials: 'include'` for cookie-based
-auth. Vehicle types (`Vehicle`, `UpdateVehicle`) and the extended `Session`
+auth. `login()` probes `GET /api/sessions`; only a 401 there is treated as a
+login failure (a 500/429/network hiccup after a 2xx POST resolves as success). Vehicle types (`Vehicle`, `UpdateVehicle`) and the extended `Session`
 type (with `notes`, `vehicleId`, `vehicleName`) are defined in `lib/types.ts`;
 `PublicSettings` (anonymous two-field shape) and `Settings` (full, with
 optional `isAdmin`) are separate interfaces so callers can't accidentally read

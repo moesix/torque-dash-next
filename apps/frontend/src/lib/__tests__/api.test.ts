@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import * as api from '../api';
 
 describe('api module', () => {
@@ -126,5 +126,75 @@ describe('pageThrough', () => {
         expect(result.truncated).toBe(true);
         expect(result.items.length).toBe(30000); // whole final full page is kept
         expect(call).toBe(3);
+    });
+});
+
+describe('login cookie probe (plan 031)', () => {
+    afterEach(() => {
+        vi.unstubAllGlobals();
+        vi.restoreAllMocks();
+    });
+
+    function jsonResponse(status: number, body: unknown) {
+        return {
+            ok: status >= 200 && status < 300,
+            status,
+            headers: { get: () => 'application/json' },
+            json: async () => body,
+        };
+    }
+
+    // The 401 path in request() bounces to /login; stub the whole window so the
+    // node test environment never navigates.
+    function stubWindow() {
+        const assign = vi.fn();
+        vi.stubGlobal('window', { location: { pathname: '/sessions', assign } });
+        return assign;
+    }
+
+    it('resolves true when the POST succeeds but the probe 500s', async () => {
+        const fetchMock = vi
+            .fn()
+            .mockResolvedValueOnce(jsonResponse(200, { ok: true }))
+            .mockResolvedValueOnce(jsonResponse(500, { error: 'boom' }));
+        vi.stubGlobal('fetch', fetchMock);
+
+        await expect(api.login('a@example.com', 'password123')).resolves.toBe(true);
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('resolves false only when the probe answers 401', async () => {
+        const assign = stubWindow();
+        const fetchMock = vi
+            .fn()
+            .mockResolvedValueOnce(jsonResponse(200, { ok: true }))
+            .mockResolvedValueOnce(jsonResponse(401, { error: 'Unauthorized' }));
+        vi.stubGlobal('fetch', fetchMock);
+
+        await expect(api.login('a@example.com', 'password123')).resolves.toBe(false);
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+        expect(assign).toHaveBeenCalledWith('/login');
+    });
+
+    it('resolves true when the probe fails at the network layer', async () => {
+        const fetchMock = vi
+            .fn()
+            .mockResolvedValueOnce(jsonResponse(200, { ok: true }))
+            .mockRejectedValueOnce(new TypeError('Failed to fetch'));
+        vi.stubGlobal('fetch', fetchMock);
+
+        await expect(api.login('a@example.com', 'password123')).resolves.toBe(true);
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('rejects with ApiError(401) on a failed POST and never probes', async () => {
+        const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(401, { error: 'Invalid email or password.' }));
+        vi.stubGlobal('fetch', fetchMock);
+
+        await expect(api.login('a@example.com', 'wrong')).rejects.toMatchObject({
+            name: 'ApiError',
+            status: 401,
+        });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 });
