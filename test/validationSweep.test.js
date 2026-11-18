@@ -220,6 +220,16 @@ describe('copySchema', () => {
     assert.ifError(error);
     assert.strictEqual(value.name, 'Duplicated Session');
   });
+
+  it('rejects a name longer than the 255-char Sessions.name column', () => {
+    const { error } = copySchema.validate({ name: 'x'.repeat(256) });
+    assert.ok(error);
+  });
+
+  it('accepts a name exactly at the 255-char column limit', () => {
+    const { error } = copySchema.validate({ name: 'x'.repeat(255) });
+    assert.ifError(error);
+  });
 });
 
 describe('joinSchema', () => {
@@ -243,6 +253,16 @@ describe('joinSchema', () => {
     assert.ifError(error);
     assert.strictEqual(value.joinSessionId, 5);
     assert.strictEqual(value.name, 'Joined');
+  });
+
+  it('rejects a name longer than the 255-char Sessions.name column', () => {
+    const { error } = joinSchema.validate({ joinSessionId: 5, name: 'x'.repeat(256) });
+    assert.ok(error);
+  });
+
+  it('accepts a name exactly at the 255-char column limit', () => {
+    const { error } = joinSchema.validate({ joinSessionId: 5, name: 'x'.repeat(255) });
+    assert.ifError(error);
   });
 });
 
@@ -268,6 +288,22 @@ describe('addLocationSchema', () => {
     });
     assert.ifError(error);
   });
+
+  it('rejects a start or end longer than the 255-char column', () => {
+    for (const key of ['start', 'end']) {
+      const { error } = addLocationSchema.validate({
+        locations: { start: 'Start', end: 'End', [key]: 'x'.repeat(256) },
+      });
+      assert.ok(error, `${key} over 255 must be rejected`);
+    }
+  });
+
+  it('accepts start/end exactly at the 255-char column limit', () => {
+    const { error } = addLocationSchema.validate({
+      locations: { start: 'x'.repeat(255), end: 'x'.repeat(255) },
+    });
+    assert.ifError(error);
+  });
 });
 
 describe('vehicleCreateSchema', () => {
@@ -278,6 +314,16 @@ describe('vehicleCreateSchema', () => {
 
   it('rejects empty name', () => {
     const { error } = vehicleCreateSchema.validate({ name: '' });
+    assert.ok(error);
+  });
+
+  it('accepts a name exactly at the 255-char column limit', () => {
+    const { error } = vehicleCreateSchema.validate({ name: 'x'.repeat(255) });
+    assert.ifError(error);
+  });
+
+  it('rejects a name longer than the 255-char Vehicles.name column', () => {
+    const { error } = vehicleCreateSchema.validate({ name: 'x'.repeat(256) });
     assert.ok(error);
   });
 
@@ -356,6 +402,16 @@ describe('vehicleUpdateSchema', () => {
 
   it('accepts null engineCc', () => {
     const { error } = vehicleUpdateSchema.validate({ engineCc: null });
+    assert.ifError(error);
+  });
+
+  it('rejects a name longer than the 255-char Vehicles.name column', () => {
+    const { error } = vehicleUpdateSchema.validate({ name: 'x'.repeat(256) });
+    assert.ok(error);
+  });
+
+  it('accepts a name exactly at the 255-char column limit', () => {
+    const { error } = vehicleUpdateSchema.validate({ name: 'x'.repeat(255) });
     assert.ifError(error);
   });
 });
@@ -553,6 +609,21 @@ describe('SessionController copy validation', () => {
     await SessionController.copy(req, res);
     assert.strictEqual(calls.statusCode, 400);
   });
+
+  it('returns 400 for a 256-char name (over Sessions.name VARCHAR(255))', async () => {
+    const req = makeStubReq({ body: { name: 'x'.repeat(256) } });
+    const { res, calls } = makeStubRes();
+    await SessionController.copy(req, res);
+    assert.strictEqual(calls.statusCode, 400);
+  });
+
+  it('accepts a 255-char name past the schema (reaches the controller)', async () => {
+    const req = makeStubReq({ body: { name: 'x'.repeat(255) } });
+    const { res, calls } = makeStubRes();
+    await SessionController.copy(req, res);
+    // Mocked lookup returns null → 404; the point is the schema did not 400.
+    assert.notStrictEqual(calls.statusCode, 400);
+  });
 });
 
 describe('SessionController join validation', () => {
@@ -568,6 +639,21 @@ describe('SessionController join validation', () => {
     const { res, calls } = makeStubRes();
     await SessionController.join(req, res);
     assert.strictEqual(calls.statusCode, 400);
+  });
+
+  it('returns 400 for a 256-char name (over Sessions.name VARCHAR(255))', async () => {
+    const req = makeStubReq({ body: { joinSessionId: 5, name: 'x'.repeat(256) } });
+    const { res, calls } = makeStubRes();
+    await SessionController.join(req, res);
+    assert.strictEqual(calls.statusCode, 400);
+  });
+
+  it('accepts a 255-char name past the schema (reaches the controller)', async () => {
+    const req = makeStubReq({ body: { joinSessionId: 5, name: 'x'.repeat(255) } });
+    const { res, calls } = makeStubRes();
+    await SessionController.join(req, res);
+    // Mocked session lookup returns null → 404; the point is no schema 400.
+    assert.notStrictEqual(calls.statusCode, 400);
   });
 });
 
@@ -587,6 +673,29 @@ describe('SessionController addLocation validation', () => {
     const { res, calls } = makeStubRes();
     await SessionController.addLocation(req, res);
     assert.strictEqual(calls.statusCode, 400);
+    mockModels.Session.findOne = async () => null;
+  });
+
+  it('returns 400 for a 256-char location label (over VARCHAR(255))', async () => {
+    mockModels.Session.findOne = async () => ({ id: 1 });
+    for (const key of ['start', 'end']) {
+      const locations = { start: 'Start', end: 'End', [key]: 'x'.repeat(256) };
+      const req = makeStubReq({ body: { locations } });
+      const { res, calls } = makeStubRes();
+      await SessionController.addLocation(req, res);
+      assert.strictEqual(calls.statusCode, 400, `${key} over 255`);
+    }
+    mockModels.Session.findOne = async () => null;
+  });
+
+  it('accepts 255-char labels past the schema', async () => {
+    mockModels.Session.findOne = async () => ({ id: 1 });
+    const req = makeStubReq({
+      body: { locations: { start: 'x'.repeat(255), end: 'x'.repeat(255) } },
+    });
+    const { res, calls } = makeStubRes();
+    await SessionController.addLocation(req, res);
+    assert.strictEqual(calls.statusCode, 200);
     mockModels.Session.findOne = async () => null;
   });
 });
