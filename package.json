@@ -10,6 +10,7 @@
     "test": "node --test test/*.test.js",
     "test:coverage": "c8 node --test test/*.test.js && node scripts/checkMirrors.js && node scripts/checkTestIntegrity.js",
     "test:integration": "node --test --test-concurrency=1 --test-force-exit integration/*.test.js",
+    "test:coverage:integration": "c8 --config c8.integration.json node --test --test-concurrency=1 --test-force-exit integration/*.test.js",
     "verify": "npm run test:coverage && npm run lint && cd apps/frontend && npm test && npm run build",
     "verify:db": "npm run verify && npm run test:integration",
     "prepare": "husky || true"
