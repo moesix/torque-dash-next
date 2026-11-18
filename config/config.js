@@ -33,8 +33,8 @@ let config = {
             if (keys.length === 0) {
                 throw new Error('SESSION_KEYS must contain at least one key');
             }
-            const placeholders = ['please-change-this-in-production', 'change-me', 'secret', 'changeme'];
-            if (keys.some(k => placeholders.includes(k.toLowerCase()))) {
+            const PLACEHOLDER_PATTERN = /change[_-]?me|placeholder|changeme|please-change|your[-_ ]?secret|^secret$/i;
+            if (keys.some(k => PLACEHOLDER_PATTERN.test(k))) {
                 throw new Error(
                     'SESSION_KEYS contains a placeholder value.\n' +
                     'Generate real keys with: openssl rand -hex 24'
