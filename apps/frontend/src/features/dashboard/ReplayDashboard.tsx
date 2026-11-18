@@ -28,7 +28,13 @@ import OverlayChart from '@/components/charts/OverlayChart';
 import DiagnosticPanels from '@/components/charts/DiagnosticPanels';
 import PidTogglePanel from '@/components/telemetry/PidTogglePanel';
 import DecodedMetricsTable from '@/components/telemetry/DecodedMetricsTable';
-import { getAvailableSeries, getSeriesData, precomputeEpochs, coerceScalar } from '@/lib/pidDecode';
+import {
+  getAvailableSeries,
+  getSeriesStats,
+  precomputeEpochs,
+  coerceScalar,
+} from '@/lib/pidDecode';
+import type { SeriesStats } from '@/lib/pidDecode';
 import { useSessionTelemetry } from './hooks/useSessionTelemetry';
 import { usePidSelection } from './hooks/usePidSelection';
 import { usePrintMode } from './hooks/usePrintMode';
@@ -130,12 +136,13 @@ export default function ReplayDashboard() {
   // change would otherwise re-parse every frame per selected series).
   const epochs = useMemo(() => precomputeEpochs(frames), [frames]);
 
-  // Build series data for ALL available sources (used by DecodedMetricsTable).
-  // Memoized — no re-scan of frames on re-render.
-  const allSeriesData = useMemo(() => {
-    const map = new Map<string, [number, number | null][]>();
+  // Fold per-PID stats for ALL available sources (used by DecodedMetricsTable).
+  // One pass per source, no tuple array materialized; memoized so re-renders
+  // never re-scan frames.
+  const statsByPid = useMemo(() => {
+    const map = new Map<string, SeriesStats | null>();
     for (const src of available) {
-      map.set(src.pid, getSeriesData(frames, src, epochs));
+      map.set(src.pid, getSeriesStats(frames, src, epochs));
     }
     return map;
   }, [frames, available, epochs]);
@@ -409,7 +416,7 @@ export default function ReplayDashboard() {
             onReset={handleReset}
           />
         </div>
-        <DecodedMetricsTable sources={available} seriesData={allSeriesData} />
+        <DecodedMetricsTable sources={available} stats={statsByPid} />
       </div>
 
       {/* Time Series — full width */}
