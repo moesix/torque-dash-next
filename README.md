@@ -206,6 +206,8 @@ For detailed deployment instructions, troubleshooting, and reverse proxy setup, 
 
 ## Security
 
+For vulnerability reporting and the supported-version policy, see [SECURITY.md](SECURITY.md).
+
 **Upload authentication:** Uploads require `Authorization: Bearer <token>` with your configured `UPLOAD_API_TOKEN` — token authentication is mandatory (the 2026 baseline), and email alone is never sufficient once a token exists. Email-only ingestion happens only when no token is configured anywhere (env or Settings UI) — a discouraged bootstrap mode that is insecure for production and should be closed off before exposing the server. If upgrading, add your token in Torque Pro → *Settings → Advanced → HTTP Auth Token*. Requests presenting a matching token **bypass the upload rate limiter** — the known uploader's reconnect bursts are never `429`'d, and the exemption is keyed on the secret token, not a spoofable query param.
 
 **Administrator model:** The **first registered user is the site admin** (`isAdmin`); on upgraded deployments the lowest-id account is promoted automatically. Only the admin may change server settings — registration toggle, upload-token rotation, LLM provider config, timezone, and data-retention policies (`PUT /api/settings`, `POST /api/settings/upload-token` return `403` for everyone else). Non-admin users still manage their own sessions, vehicles, and analysis history. See the [deployment guide](docs/deployment.md) for the `scripts/promote-admin.js` recovery path.
