@@ -189,6 +189,113 @@ describe('SessionController (with mocked models)', () => {
   });
 });
 
+// ── getAll — list query shape ───────────────────────────────────────
+// The list path must not duplicate work: req.user is already the authenticated
+// user (no User.findOne), one page query + one count, and the summary decorator
+// reuses the page rows instead of re-selecting Sessions.
+
+describe('SessionController.getAll (query shape)', () => {
+  const originals = {
+    sessionFindOne: mockModels.Session.findOne,
+    sessionFindAll: mockModels.Session.findAll,
+    sessionCount: mockModels.Session.count,
+    userFindOne: mockModels.User.findOne,
+    logFindAll: mockModels.Log.findAll,
+  };
+
+  function restoreAll() {
+    mockModels.Session.findOne = originals.sessionFindOne;
+    mockModels.Session.findAll = originals.sessionFindAll;
+    mockModels.Session.count = originals.sessionCount;
+    mockModels.User.findOne = originals.userFindOne;
+    mockModels.Log.findAll = originals.logFindAll;
+  }
+
+  function installListMocks({ sessions = [], total = 0, logRows = [] } = {}) {
+    const calls = { userFindOne: 0, sessionFindAll: 0, sessionCount: 0, logFindAll: 0 };
+    mockModels.User.findOne = async () => { calls.userFindOne++; return { id: 1 }; };
+    mockModels.Session.findAll = async () => { calls.sessionFindAll++; return sessions; };
+    mockModels.Session.count = async () => { calls.sessionCount++; return total; };
+    mockModels.Log.findAll = async (opts) => {
+      calls.logFindAll++;
+      mockModels.Log.findAll.__lastOpts = opts;
+      return logRows;
+    };
+    return calls;
+  }
+
+  function pageRow(id, overrides = {}) {
+    return {
+      id,
+      createdAt: new Date('2026-01-01T00:00:00Z'),
+      firstTimestamp: new Date('2026-01-01T00:10:00Z'),
+      lastTimestamp: new Date('2026-01-01T01:10:00Z'),
+      maxRpm: 5000,
+      maxSpeed: 120,
+      vehicleId: null,
+      Vehicle: null,
+      ...overrides,
+    };
+  }
+
+  test('issues one page query + one count and no User.findOne', async () => {
+    try {
+      const calls = installListMocks({ sessions: [pageRow(1), pageRow(2)], total: 40 });
+
+      const { res, calls: out } = makeStubRes();
+      await SessionController.getAll(makeStubReq(), res);
+
+      assert.ok(out.body, 'response body written');
+      assert.strictEqual(calls.userFindOne, 0, 'authenticated user must not be re-fetched');
+      assert.strictEqual(calls.sessionFindAll, 1, 'exactly one Sessions page query (no summary re-select)');
+      assert.strictEqual(calls.sessionCount, 1, 'exactly one count');
+      assert.strictEqual(calls.logFindAll, 0, 'denormalized summaries need no Log scan');
+      assert.strictEqual(out.body.total, 40);
+      assert.strictEqual(out.body.sessions.length, 2);
+      assert.strictEqual(new Date(out.body.sessions[0].startDate).toISOString(), '2026-01-01T00:10:00.000Z');
+      assert.strictEqual(out.body.sessions[0].duration, '1h 0s');
+      assert.strictEqual(out.body.sessions[0].maxRpm, 5000);
+    } finally {
+      restoreAll();
+    }
+  });
+
+  test('reuses page rows for a NULL-summary session (fallback still runs)', async () => {
+    try {
+      // One denormalized row + one legacy NULL row: the decorator must take the
+      // preloaded rows AND still run the single grouped Log fallback for the
+      // NULL one — never a second Sessions query, never a per-session scan.
+      const legacy = pageRow(3, {
+        firstTimestamp: null, lastTimestamp: null, maxRpm: null, maxSpeed: null,
+      });
+      const logRows = [{
+        sessionId: 3,
+        start: '2026-02-01T00:00:00Z',
+        end: '2026-02-01T02:00:00Z',
+        maxSpeed: 90,
+        maxRpm: 3000,
+      }];
+      const calls = installListMocks({ sessions: [pageRow(1), legacy], total: 2, logRows });
+
+      const { res, calls: out } = makeStubRes();
+      await SessionController.getAll(makeStubReq(), res);
+
+      assert.strictEqual(calls.sessionFindAll, 1, 'preloaded rows must satisfy the summary read');
+      assert.strictEqual(calls.logFindAll, 1, 'one grouped fallback for the NULL-summary id');
+      const fallbackOpts = mockModels.Log.findAll.__lastOpts;
+      assert.ok(fallbackOpts, 'fallback query observed');
+      assert.deepStrictEqual(fallbackOpts.where, { sessionId: [3] },
+        'fallback is scoped to only the NULL-summary ids');
+      const byId = new Map(out.body.sessions.map((s) => [s.id, s]));
+      assert.strictEqual(new Date(byId.get(1).startDate).toISOString(), '2026-01-01T00:10:00.000Z');
+      assert.strictEqual(new Date(byId.get(3).startDate).toISOString(), '2026-02-01T00:00:00.000Z');
+      assert.strictEqual(byId.get(3).maxRpm, 3000);
+    } finally {
+      restoreAll();
+    }
+  });
+});
+
 // ── reassignVehicle — ownership + IDOR guard ────────────────────────
 // PATCH /api/sessions/:sessionId/vehicle. The vehicle must belong to the
 // caller AND the session must belong to the caller; both checks happen before

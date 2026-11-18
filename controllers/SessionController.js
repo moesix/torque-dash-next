@@ -1,6 +1,5 @@
 const Session = require('../models').Session;
 const Log = require('../models').Log;
-const User = require('../models').User;
 const Vehicle = require('../models').Vehicle;
 const sequelize = require('../models').sequelize;
 const Op = require('../models').Sequelize.Op;
@@ -74,8 +73,9 @@ class SessionController {
             });
             if(!session) return res.status(404).json({ error: 'Session not found' });
 
-            // Single aggregate query for start/end + max speed/RPM.
-            const summaries = await aggregateSummaries([session.id]);
+            // Single aggregate query for start/end + max speed/RPM; reuse the
+            // session row just loaded (all summary columns are selected).
+            const summaries = await aggregateSummaries([session.id], [session]);
             const s = summaries.get(session.id) || {};
             const out = decorateWithSummaries(session, s);
             out.vehicleId = session.vehicleId || null;
@@ -105,14 +105,13 @@ class SessionController {
             }
             const vehicleId = rawVehicleId ? Number(rawVehicleId) : null;
 
-            // Check if user exists
-            let user = await User.findOne({
-                where: { id: req.user.id }
-            });
-            if(!user) return res.status(401).json({ error: 'User not found' });
+            // The route sits behind `authenticate`, whose passport
+            // deserializeUser already loaded the user (and rejects a deleted
+            // one), so the identity in req.user is authoritative — the old
+            // existence `User.findOne` was a duplicate query per page.
 
             // Build where clause with optional vehicleId filter
-            const where = { userId: user.id };
+            const where = { userId: req.user.id };
             if (vehicleId) where.vehicleId = vehicleId;
             else if (req.query.vehicleId === 'none') where.vehicleId = null;
 
@@ -132,8 +131,10 @@ class SessionController {
 
             const total = await Session.count({ where });
 
-            // ONE grouped aggregate query across fetched session ids — never per-session.
-            const summaries = await aggregateSummaries(sessions.map(s => s.id));
+            // Decorate from the rows just loaded: the page query already selected
+            // every Sessions column, so the summary seam must not re-select them.
+            // ONE grouped Log aggregate still runs for any NULL-summary rows.
+            const summaries = await aggregateSummaries(sessions.map(s => s.id), sessions);
             const out = sessions.map(session => {
                 const s = summaries.get(session.id) || {};
                 const json = decorateWithSummaries(session, s);

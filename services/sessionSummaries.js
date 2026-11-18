@@ -109,18 +109,30 @@ async function loadAggregateRange(sessionId) {
  * Aggregated session summary (start/end time + max speed/RPM) for a batch of
  * session ids. Reads the denormalized `Sessions` columns first and falls back
  * to the grouped Log aggregate only for the ids that are still NULL.
+ *
+ * `preloadedRows` (optional) are Sessions rows the caller has already loaded
+ * (instances or plain objects): when given, they replace the summary `SELECT`,
+ * so the list/detail paths never re-read the rows they just fetched. They MUST
+ * carry `id`, `firstTimestamp`, `lastTimestamp`, `maxRpm`, `maxSpeed` — the
+ * list/detail queries select every Sessions column. Behaviour is otherwise
+ * identical: NULL-summary rows still go through `loadAggregateRanges`.
  */
-async function aggregateSummaries(sessionIds) {
+async function aggregateSummaries(sessionIds, preloadedRows) {
     const map = new Map();
     if (!sessionIds || sessionIds.length === 0) return map;
 
-    const { Session } = models();
-    // Read denormalized columns from Session first
-    const sessions = await Session.findAll({
-        where: { id: sessionIds },
-        attributes: ['id', 'firstTimestamp', 'lastTimestamp', 'maxRpm', 'maxSpeed'],
-        raw: true,
-    });
+    let sessions;
+    if (preloadedRows) {
+        sessions = preloadedRows.map(s => (typeof s.toJSON === 'function' ? s.toJSON() : s));
+    } else {
+        const { Session } = models();
+        // Read denormalized columns from Session first
+        sessions = await Session.findAll({
+            where: { id: sessionIds },
+            attributes: ['id', 'firstTimestamp', 'lastTimestamp', 'maxRpm', 'maxSpeed'],
+            raw: true,
+        });
+    }
 
     const missingIds = [];
     for (const s of sessions) {
