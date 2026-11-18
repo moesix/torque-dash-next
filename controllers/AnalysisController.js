@@ -219,7 +219,15 @@ class AnalysisController {
             { replacements: { ids: sampledIds }, type: sequelize.QueryTypes.SELECT }
           );
         }
-        sample = [...firstBatch, ...randomBatch, ...lastBatch];
+        // firstBatch/randomBatch/lastBatch overlap by design (the stride
+        // selector includes both boundary rows). Key by id so each frame
+        // appears once; the prompt's row count then matches "Data points in
+        // sample" and the statistics are not skewed by duplicated edges.
+        const byId = new Map();
+        for (const row of [...firstBatch, ...randomBatch, ...lastBatch]) {
+          byId.set(row.id, row);
+        }
+        sample = [...byId.values()];
       }
 
       // The sample mixes ASC (first), id-order (random), and DESC (last) batches —

@@ -184,6 +184,37 @@ describe('buildTelemetryCsv chronological ordering', () => {
   });
 });
 
+describe('sample statistics honesty + location sanitization (plans/032)', () => {
+  function promptFor(session) {
+    return buildAnalysisPrompt(session, {}, [], [], null);
+  }
+
+  it('labels the statistics block as sample-derived, never whole-drive', () => {
+    const prompt = promptFor({ name: 'Morning Commute' });
+    assert.ok(prompt.includes('## Sample Statistics (0 sampled rows)'));
+    assert.ok(
+      prompt.includes(
+        'These values are computed from the sampled rows below, not necessarily the whole drive.'
+      )
+    );
+    assert.ok(prompt.includes('say the sample may have missed it'));
+    assert.ok(!prompt.includes('Entire Drive'));
+    assert.ok(!prompt.includes('Pre-Calculated'));
+    assert.ok(!prompt.includes('Use these exact calculated values'));
+  });
+
+  it('reports the sampled row count in the heading', () => {
+    const sample = [
+      { timestamp: '2026-10-01T10:00:00.000Z', engine_rpm: 900, vehicle_speed: 0, values: {} },
+      { timestamp: '2026-10-01T10:00:01.000Z', engine_rpm: 950, vehicle_speed: 0, values: {} },
+    ];
+    const prompt = buildAnalysisPrompt({ name: 'Idle' }, {}, sample, [], null);
+    assert.ok(prompt.includes('## Sample Statistics (2 sampled rows)'));
+    assert.ok(prompt.includes('Data points in sample: 2'));
+  });
+
+});
+
 describe('buildAnalysisPrompt vehicle context (plans/118)', () => {
   // The controller passes { ...session.toJSON(), duration } where toJSON()
   // serializes the eager-loaded Vehicle profile under the `Vehicle` key
