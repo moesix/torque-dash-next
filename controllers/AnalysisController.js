@@ -461,9 +461,17 @@ class AnalysisController {
   static async exportAnalyses(req, res) {
     try {
       const where = { userId: req.user.id };
-      if (req.query.vehicleId) {
+      // Same gate/wording as listAllAnalyses: absent/''/'none' means no
+      // vehicle filter; anything else must be an int4 id BEFORE Number() so
+      // junk can't reach Sequelize's Session lookup as a 22P02/22003 500.
+      const rawVehicleId = req.query.vehicleId;
+      if (rawVehicleId !== undefined && rawVehicleId !== '' && rawVehicleId !== 'none'
+          && !isInt4Id(rawVehicleId)) {
+        return res.status(400).json({ error: 'Invalid vehicleId.' });
+      }
+      if (rawVehicleId && rawVehicleId !== 'none') {
         const sessions = await Session.findAll({
-          where: { userId: req.user.id, vehicleId: Number(req.query.vehicleId) },
+          where: { userId: req.user.id, vehicleId: Number(rawVehicleId) },
           attributes: ['id'],
         });
         where.sessionId = { [Op.in]: sessions.map(s => s.id) };
