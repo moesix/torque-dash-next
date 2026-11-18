@@ -162,7 +162,9 @@ which enforces ownership and returns
 order — top-level files (`001_log_hypertable.sql` … `020_analyses_created_id_unique.sql`)
 sort before the nested `migrations/` directory, so the legacy PID backfill
 (`migrations/002_backfill_pid_columns.sql`) is now discovered and applied after
-the numbered series (previously orphaned). The current series is **001–020**:
+the numbered series (previously orphaned). The series is append-only and
+currently runs through **027**; see `infra/timescale/` for the authoritative
+list rather than relying on this document:
 `017_user_admin.sql` adds `Users.isAdmin` (first-user bootstrap + lowest-id
 upgrade backfill), `018_drop_forward_urls.sql` drops the retired webhook
 forward-column, `019_analysis_retention.sql` adds
@@ -174,14 +176,15 @@ Users/Sessions baseline DDL for sync-less databases), `014_add_token_version.sql
 sessions after a password change), `015_normalize_emails.sql` (lowercase fold),
 `016_denormalize_summaries.sql` (`Sessions.firstTimestamp`/`lastTimestamp`).
 
-### 2.5 `TelemetryController.exportCsv` (`controllers/TelemetryController.js`)
+### 2.5 `SessionController.exportCsv` (`controllers/SessionController.js`)
 - `GET /api/sessions/:sessionId/export/csv` — authenticated (cookie + owner), streams
   all telemetry frames for a session as a CSV download.
 - **Dynamic column discovery** — reads the `values` JSONB from each frame and
-  auto-discovers all unique PID keys across the session's data. Each PID becomes
-  a column header (resolved to its human-readable display name and unit via
-  `pidDecode.ts`). Timestamp, GPS coordinates, engine RPM, and vehicle speed are
-  promoted as fixed columns.
+  auto-discovers all unique PID keys across the session's data. Each PID key
+  becomes a raw column header (the backend does **not** resolve display names or
+  units — consumers see `kff1005`, `kc`, etc., exactly as Torque sent them).
+  Timestamp, GPS coordinates (`lat`/`lon`), engine RPM, and vehicle speed are
+  promoted as the fixed leading columns.
 - **Streaming response** — the entire response is streamed as `text/csv` with
   `Content-Disposition: attachment`, so even large sessions don't exhaust server
   memory. CSV is written row-by-row using a lightweight streaming approach
@@ -213,12 +216,8 @@ sessions after a password change), `015_normalize_emails.sql` (lowercase fold),
 - **GPS PIDs** — `kff1005` = longitude, `kff1006` = latitude. These are
   destructured as GPS coordinates in `UploadController.processUpload` and
   stored as `lon`/`lat` on the `Log` model. Non-GPS uploads are stored with
-  null lat/lon.
-- **⚠️ Label discrepancy** — as of this writing, `pidRegistry.js` and
-  `pidDecode.ts` label `kff1005`/`kff1006` as "Fuel Trim (Long/Short Term)"
-  with `%` units, which conflicts with their actual use as GPS coordinates in
-  the upload path. The labels should be updated to "GPS Longitude" / "GPS
-  Latitude" (unit: `°`) and the frontend FALLBACK_MAP synced accordingly.
+  null lat/lon. `pidRegistry.js` and the frontend `pidDecode.ts` FALLBACK_MAP
+  label them "GPS Longitude" / "GPS Latitude" (unit: `°`).
 
 ### 2.7 Security Headers (Helmet)
 
@@ -554,8 +553,9 @@ src/
 ```
 
 ### 3.2 Data fetching
-- **TanStack Query** drives all reads: `getSessions`, `getSession`,
-  `getTelemetry`, `getVehicles`, `getAllAnalyses`.
+- **TanStack Query** drives the dashboard and auth reads: `getSessions`,
+  `getSession`, `getTelemetry`, `getVehicles`, `getAllAnalyses`. Settings and
+  AnalysisHistory still use effect-based fetches.
 - **Mutations** use direct `fetch` via the `request()` wrapper: notes updates,
   vehicle CRUD, session reassignment, and all settings changes.
 - **Auth** is cookie-based: every `fetch` uses `credentials: 'include'`. The
@@ -715,7 +715,7 @@ extracts `[timestamp_ms, value]` pairs via the safe `coerceScalar()` helper.
 
 ### 3.8 Design System and Theme
 
-- **CSS custom properties** — colors (bg-base, bg-card, text-primary, accent, etc.) defined as CSS variables in `index.css`, with `.dark` class overrides for dark mode. Tailwind v4 uses a CSS-first configuration approach: all design tokens are defined in the `@theme` block in `index.css`, referenced as `var()` tokens (`--color-surface-base`, `--color-fg`, `--color-brand-accent`). The `tailwind.config.ts` file is reduced to a minimal placeholder since the JS config is no longer the primary source of truth.
+- **CSS custom properties** — colors (bg-base, bg-card, text-primary, accent, etc.) defined as CSS variables in `index.css`, with `.dark` class overrides for dark mode. Tailwind v4 uses a CSS-first configuration approach: all design tokens are defined in the `@theme` block in `index.css`, referenced as `var()` tokens (`--color-surface-base`, `--color-fg`, `--color-brand-accent`). There is no JS Tailwind config file; Tailwind v4 is configured entirely through CSS.
 - **PostCSS replaced** — the `postcss.config.js` file has been removed. Tailwind is loaded via the `@tailwindcss/vite` Vite plugin (in `vite.config.ts`), with `@import "tailwindcss"` in `index.css` replacing the old `@tailwind base/components/utilities` directives.
 - **Tremor removed (Plan 049)** — the `@tremor/react` dependency and all Tremor
   components were replaced with native Tailwind utilities (cards, buttons,

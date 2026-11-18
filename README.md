@@ -24,7 +24,7 @@ A self-hosted dashboard for [Torque Pro](https://torque-bhp.com/) vehicle teleme
 | **BYOK AI analysis** | Connect your own LLM (OpenAI, Anthropic, DeepSeek, Ollama, or any OpenAI-compatible endpoint) for per-session diagnostic insights. |
 | **DeepSeek first-class** | `deepseek-v4-flash` / `deepseek-v4-pro` with chain-of-thought Thinking Mode and configurable reasoning effort (High / Max). |
 | **PID decode engine** | Auto-discovers every OBD-II parameter from Torque's `values` JSONB — no schema changes when you add new PIDs. |
-| **Session management** | Auto-named trips (`Trip DDMMYYYY HH:MM AM/PM`), inline rename, shareable links, freeform notes with auto-save. |
+| **Session management** | Auto-named trips (`Trip DDMMYYYY HH:MM AM/PM`), inline rename, freeform notes with auto-save. |
 | **Multi-vehicle support** | Define named vehicle profiles (make, model, year, engine size), assign sessions to vehicles, filter session list by vehicle. |
 | **Cross-vehicle analysis history** | Browse and export all AI analyses across sessions and vehicles in one view — paginated, filterable, exportable as Markdown, with **per-row delete** from the session panel or Settings → Analysis History. |
 | **Configurable data retention** | Opt-in TimescaleDB retention policy auto-deletes telemetry older than 90/120/180/365 days — off by default (all data kept indefinitely), toggled from the Settings page by the admin. A separate **analysis retention** control (Off/90/120/180/365) prunes cached AI-analysis rows on a 6-hour schedule. |
@@ -91,7 +91,7 @@ After creating all user accounts, disable public registration via the Settings U
 <summary><strong>Session list</strong></summary>
 
 <p align="center">
-  <img src="./imgs/tdn-session-list.png" width="100%" alt="Session list with summary cards showing trip duration, distance, and max speed">
+  <img src="./imgs/tdn-session-list.png" width="100%" alt="Session list with summary cards showing trip duration and max speed">
 </p>
 
 </details>
@@ -184,7 +184,7 @@ After creating all user accounts, disable public registration via the Settings U
 | `PORT` | `3000` | Backend HTTP port. |
 | `NODE_ENV` | _(unset)_ | Optional. `production` skips the app-internal `sequelize.sync()` in `app.js`. The Docker image CMD still runs an idempotent `sequelize.sync()` bootstrap before `scripts/migrate.js` on every boot, regardless of NODE_ENV; migrations are the source of truth for TimescaleDB DDL and also create an empty database's baseline tables, so they work sync-first and sync-less. |
 | `COOKIE_SECURE` | `false` | `true` to set `Secure` on session cookies (requires HTTPS). `SameSite` is derived from it in `app.js` (`none` when true, else `lax`) — there is no separate `COOKIE_SAMESITE` variable. |
-| `CORS_ORIGINS` | _(empty)_ | Comma-separated allowed origins for cross-origin API access. Also serves as the CSRF trust list. |
+| `CORS_ORIGINS` | _(empty)_ | Comma-separated allowed origins for cross-origin API access. Also serves as the CSRF trust list. Not needed in the default same-origin nginx deployment; set it only when the SPA is served from a different origin. |
 | `PUBLIC_ORIGIN` | _(unset)_ | Overrides the expected CSRF origin. Set when nginx terminates HTTPS but forwards HTTP to the backend. |
 | `UPLOAD_API_TOKEN` | **REQUIRED for production** | Uploads require `Authorization: Bearer <token>`; without a matching header they return 401. Set here — the env value wins and locks the Settings UI — or generate from the Settings page after first login. |
 | `UPLOAD_RATE_LIMIT_MAX` | `600` | Max uploads per window per IP. |

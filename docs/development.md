@@ -344,10 +344,11 @@ cd apps/frontend
 npm run build      # runs `tsc --noEmit && vite build` → apps/frontend/dist
 ```
 
-> The backend does **not** currently serve `apps/frontend/dist` (it serves the
-> legacy `public/`). In production the SPA is expected to be served by a separate
-> origin/CDN or an nginx layer that proxies `/api` to the backend. See Known
-> Issues (LOW).
+> The backend does not serve the SPA: `app.js` has no `express.static` handler.
+> In production the frontend nginx image (`apps/frontend/Dockerfile`) serves the
+> built SPA and proxies `/api` to the backend (same origin). A separate
+> origin/CDN deployment also works, but then `CORS_ORIGINS` and `COOKIE_SECURE`
+> must be set. See Known Issues (LOW).
 
 ### Frontend API client (`lib/api.ts`)
 
@@ -707,8 +708,9 @@ blockers are resolved and re-reviewed as PASS:
 
 1. ✅ `app.js` now registers `express.json({ limit: '1mb' })` on `/api`
    (before the api router) so JSON bodies populate `req.body`.
-2. ✅ `middleware/auth.js` branches on `req.originalUrl.startsWith('/api')`
-   and returns **401 JSON**; legacy HTML routes keep the redirect.
+2. ✅ `middleware/auth.js` always returns **401 JSON**. Every protected route is
+   mounted under `/api` (SPA and Torque uploads), so there is no HTML-redirect
+   branch to preserve.
 3. ✅ `models/User.js` `confirmPassword` is now `.optional()` (still validated
    when present).
 4. ✅ `UserController.register`/`login` return **JSON** for `/api` requests
@@ -775,14 +777,16 @@ blockers are resolved and re-reviewed as PASS:
 
 ### Low priority
 
-- **Empty `CORS_ORIGINS` blocks the cross-origin SPA.** `app.js` builds the CORS
-  origin allowlist from `process.env.CORS_ORIGINS`. If unset/empty, the allowlist
-  is `[]` and **all** cross-origin `/api` requests are refused. Must be set in
-  production.
-- **SPA build not served by Express.** `app.js` serves the legacy `public/`
-  directory; `apps/frontend/dist` is not served. Confirm the deploy topology
-  (separate origin/CDN, or an nginx layer proxying `/api` to the backend) — both
-  are acceptable, but the choice affects cookie/CSRF handling.
+- **`CORS_ORIGINS` is only needed for a cross-origin SPA.** In the shipped
+  topology the frontend nginx serves the SPA and proxies `/api` on the same
+  origin, so the allowlist can stay empty. If the SPA is deployed on a different
+  origin, set `CORS_ORIGINS` to that origin: `app.js` builds the allowlist from
+  `process.env.CORS_ORIGINS`, and an empty value refuses every cross-origin
+  `/api` request.
+- **SPA is served by nginx, not Express (by design).** `app.js` has no static
+  handler; the frontend image's nginx serves the build and proxies `/api` to the
+  backend. A separate origin/CDN is also supported but requires `CORS_ORIGINS`
+  (and `COOKIE_SECURE=true` for cookie auth over HTTPS).
 - **`log_1min` continuous aggregate is unused.** The 1-minute continuous
   aggregate exists but no endpoint reads from it. Consider serving dashboard
   overviews from it to reduce load on the raw hypertable.
