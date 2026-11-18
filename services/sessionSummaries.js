@@ -31,15 +31,17 @@
  *    fallback, one aggregate `findOne` for the single-session writer (the
  *    list path must not re-scan Logs per session).
  *
- * Models are resolved lazily on each call: the test suites inject a mocked
- * `../models` into require.cache and re-require the controller (the pattern
- * this module inherited), so a module-load-time binding would go stale.
+ * Models and the PID-key registry are bound once at load time: a test that
+ * injects a mocked `../models` must purge this module (see
+ * test/support/loadWithMocks.js) so the mock is what gets bound.
  */
 
 const { formatDuration } = require('../lib/csvExport');
+const modelsModule = require('../models');
+const pidRegistry = require('../lib/pidRegistry');
 
 function models() {
-    return require('../models');
+    return modelsModule;
 }
 
 // internal — exported for tests
@@ -246,16 +248,10 @@ async function mergeWrittenRows(sessionId, rows) {
 async function recomputeSummary(sessionId) {
     if (!sessionId) return;
     await withSummaryWriteLock(async () => {
-        // Drop the cached PID key-set BEFORE reading the aggregate: cut/filter can
-        // remove every row, in which case the cache is the most wrong (it still
-        // carries PIDs that no longer exist) and the early return below would skip
-        // invalidation entirely.
-        //
-        // Resolved lazily, like the models above: some suites stub `lib/pidRegistry`
-        // in require.cache with a partial surface (`discoverPidKeys` only), so a
-        // load-time destructure would bind `undefined` for the whole process.
-        const { invalidatePidKeys } = require('../lib/pidRegistry');
-        invalidatePidKeys(sessionId);
+        // Cut/filter can remove every row, in which case the cache is the most
+        // wrong (it still carries PIDs that no longer exist) and the early
+        // return below would skip invalidation entirely.
+        pidRegistry.invalidatePidKeys(sessionId);
         const log = await loadAggregateRange(sessionId);
         if (!log) return;
         const { Session } = models();

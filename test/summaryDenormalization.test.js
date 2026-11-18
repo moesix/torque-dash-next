@@ -6,6 +6,7 @@ process.env.SESSION_KEYS = process.env.SESSION_KEYS || 'abc123';
 
 const { test, describe } = require('node:test');
 const assert = require('node:assert');
+const { loadWithMocks: loadModuleWithMocks } = require('./support/loadWithMocks');
 
 // ── Pre-populate require.cache for ../models ────────────────────────
 // We mock Session/Log/sequelize so we can test the logic without a DB.
@@ -41,44 +42,13 @@ function makeMockModels(overrides = {}) {
 }
 
 function loadWithMocks(mockModels) {
-  const modelsPath = require.resolve('../models');
-  const originalCache = require.cache[modelsPath];
-  require.cache[modelsPath] = {
-    id: modelsPath,
-    filename: modelsPath,
-    loaded: true,
-    exports: mockModels,
-  };
-
-  const scPath = require.resolve('../controllers/SessionController');
-  const originalSCCache = require.cache[scPath];
-  delete require.cache[scPath];
-
-  // Also manage the ingestBuffer module cache so tests can drive the REAL
-  // flush() against mocked models (fresh module => fresh empty buffer).
-  const ibPath = require.resolve('../services/ingestBuffer');
-  const originalIBCache = require.cache[ibPath];
-  delete require.cache[ibPath];
-
-  return {
-    restore() {
-      if (originalCache) {
-        require.cache[modelsPath] = originalCache;
-      } else {
-        delete require.cache[modelsPath];
-      }
-      if (originalSCCache) {
-        require.cache[scPath] = originalSCCache;
-      } else {
-        delete require.cache[scPath];
-      }
-      if (originalIBCache) {
-        require.cache[ibPath] = originalIBCache;
-      } else {
-        delete require.cache[ibPath];
-      }
-    }
-  };
+  // sessionSummaries binds ../models at load time now, so it must be purged
+  // alongside the controller; ingestBuffer pulls the same service in.
+  return loadModuleWithMocks(
+    '../controllers/SessionController',
+    [{ path: '../models', exports: mockModels }],
+    ['../services/sessionSummaries', '../services/ingestBuffer']
+  );
 }
 
 // ── Tests ───────────────────────────────────────────────────────────
