@@ -39,6 +39,7 @@ describe('migration loader', () => {
             '025_settings_timestamps.sql',
             'migrations/001_add_upload_token.sql',
             'migrations/002_backfill_pid_columns.sql',
+            'migrations/003_recompute_session_summaries.sql',
         ];
         assert.deepEqual(files, expected);
     });

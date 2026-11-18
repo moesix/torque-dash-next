@@ -317,6 +317,40 @@ describe('Migration 016 — idempotent SQL', () => {
   });
 });
 
+describe('Migration 003 — post-backfill summary recompute', () => {
+  test('exists in the nested dir and only widens via LEAST/GREATEST', () => {
+    const fs = require('fs');
+    const path = require('path');
+    const migrationPath = path.resolve(
+      __dirname,
+      '../infra/timescale/migrations/003_recompute_session_summaries.sql'
+    );
+    assert.ok(fs.existsSync(migrationPath), 'Migration 003 should exist');
+    const sql = fs.readFileSync(migrationPath, 'utf8');
+
+    assert.match(sql, /UPDATE "Sessions"/);
+    for (const col of ['firstTimestamp', 'lastTimestamp', 'maxRpm', 'maxSpeed']) {
+      assert.ok(sql.includes(`"${col}"`), `Should recompute ${col}`);
+    }
+    assert.strictEqual(
+      (sql.match(/LEAST\(COALESCE/g) || []).length, 1,
+      'firstTimestamp must be widened monotonically (LEAST)'
+    );
+    assert.strictEqual(
+      (sql.match(/GREATEST\(COALESCE/g) || []).length, 3,
+      'lastTimestamp/maxRpm/maxSpeed must each be widened monotonically (GREATEST)'
+    );
+    // No unconditional assignment: every SET value is guarded by COALESCE + min/max.
+    for (const col of ['firstTimestamp', 'lastTimestamp', 'maxRpm', 'maxSpeed']) {
+      assert.doesNotMatch(
+        sql,
+        new RegExp(`"${col}"\\s*=\\s*agg\\.`),
+        `${col} must never be assigned unconditionally from the aggregate`
+      );
+    }
+  });
+});
+
 describe('ingestBuffer — summary merge shape guards', () => {
   test('has no SQL literal fragments (merge owns its SQL)', () => {
     const fs = require('fs');
