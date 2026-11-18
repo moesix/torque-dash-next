@@ -10,11 +10,12 @@ the React/Vite frontend (`apps/frontend/`).
 
 ## 1. Prerequisites
 
-- **Node.js 22** (LTS) and npm — the Docker images are built on
-  `node:22-bookworm-slim` and CI runs Node 22 (plus a 20.19 leg for the backend
-  checks). Vite 8 requires Node **20.19+ / 22.12+**, so Node 20.19 is the
-  supported floor: both `package.json` files declare `"engines": {"node":
-  ">=20.19"}` (a warning only — engine-strict is deliberately not enabled).
+- **Node.js 22.22+** (LTS) and npm — the Docker images are built on
+  `node:22-bookworm-slim` and CI runs a Node 22/24 matrix for the backend checks.
+  The real floor is Node **22.22.0**: `react-router@8.3.0` requires
+  `>=22.22.0`, so both `package.json` files declare `"engines": {"node":
+  ">=22.22.0"}` (a warning only — engine-strict is deliberately not enabled) and
+  `.nvmrc` pins 22.23. Node 20 (EOL 2026-04-30) and Node 22.12 are unsupported.
   `node --watch` (used by `npm run dev` and the dev compose stack) needs
   ≥18.11, well below the floor.
 - **PostgreSQL** with the **TimescaleDB** extension (`CREATE EXTENSION timescaledb;`)
@@ -542,20 +543,29 @@ on every commit:
 ### 9.3 Test Commands
 
 **One-command verification:** run `npm run verify` from the repo root before
-every commit — it executes the backend suite + lint, then the frontend suite +
-TypeScript check:
+every commit — it runs the exact gates CI runs: backend coverage suite (floors +
+structural guards) + lint, then the frontend suite + production build (the build
+runs `tsc --noEmit`, so the typecheck is not repeated):
 
 ```sh
-npm run verify   # npm test && npm run lint && (cd apps/frontend && npm test && npx tsc --noEmit)
+npm run verify     # npm run test:coverage && npm run lint && (cd apps/frontend && npm test && npm run build)
+npm run verify:db  # npm run verify + npm run test:integration (needs a dev DB)
 ```
 
 **Backend** (Node built-in test runner):
 ```sh
-npm test              # node --test test/ + scripts/checkMirrors.js + scripts/checkTestIntegrity.js
-npm run test:coverage # same suite under c8; enforces the floors in .c8rc.json
+npm test              # node --test test/*.test.js only — no guards, no floors
+npm run test:coverage # the same suite under c8 + scripts/checkMirrors.js +
+                      # scripts/checkTestIntegrity.js; enforces .c8rc.json floors
 ```
 
-Every file directly under `test/` must be named `*.test.js` — Node 20.19's
+**Run one file or one test name** (no coverage, so the guards do not run):
+```sh
+node --test test/sessionController.test.js            # one file
+node --test --test-name-pattern="join" test/*.test.js # one test name
+```
+
+Every file directly under `test/` must be named `*.test.js` — Node 20.x's
 `node --test test/` executes *all* `.js` files in the directory while Node 22+
 runs only `*.test.js`, so a stray helper would silently be a test on one runtime
 and a no-op on the other. `scripts/checkTestIntegrity.js` fails the run if one
@@ -568,7 +578,8 @@ exclude list is deliberately narrow and each entry is non-runtime code:
 
 - `eslint.config.js` — tooling config, never executed at runtime.
 - `scripts/checkMirrors.js`, `scripts/checkTestIntegrity.js` — gate scripts run
-  as standalone `node` processes from `npm test`, outside the instrumented run.
+  as standalone `node` processes from `npm run test:coverage`, outside the
+  instrumented run.
 - `scripts/seed-demo.js` — DB-writing CLI demo seeder.
 - `test/**`, `integration/**`, `apps/frontend/**`, `node_modules/**` — not
   backend runtime code (the SPA has its own Vitest coverage).
@@ -579,6 +590,14 @@ module is side-effect-free — a plain `require` only returns the wired Express
 app. Keeping it in the gate means the entry point's own lines are measured
 instead of hidden; since the unit suite never imports it, its lines count as 0%
 under `all: true`, which is already priced into the floors above.
+
+**Integration coverage** (`c8.integration.json`, visibility only):
+```sh
+npm run test:coverage:integration   # needs a dev DB; writes coverage-integration/
+```
+The 82/85 gate above is **unit-suite only**; integration coverage is published
+for visibility, not gating (`check-coverage: false`) — it needs a stable
+baseline across two releases before it can become a gate.
 
 **Frontend** (Vitest):
 ```sh
@@ -602,12 +621,12 @@ or pull request to the `development` branch:
 
 - **Backend checks:** `npm ci` → `npm audit --omit=dev --audit-level=high` (the
   runtime-only advisory gate; dev advisories are deliberately excluded — see
-  §10) → `npm run test:coverage` (the test suite plus the c8 floor gate in one
-  run) → `npm run lint`; the coverage table is published to the job summary and
-  `coverage/` is uploaded as a short-lived artifact.
+  §10) → `npm run test:coverage` on the primary matrix leg (`npm test` on the
+  second leg) → `npm run lint`; the coverage table is published to the job summary
+  and the primary leg's `coverage/` is uploaded as a short-lived artifact.
 - **Frontend checks:** `npm ci` → `npm audit --omit=dev --audit-level=high` →
-  `npm run lint` (placeholder) → `npm test` (vitest) → `npx tsc --noEmit`
-  (typecheck) → `npm run build`.
+  `npm run lint` (placeholder) → `npm test` (vitest) → `npm run build`
+  (`tsc --noEmit && vite build`, so the typecheck runs exactly once).
 
 CI installs with plain `npm ci` — **no `--legacy-peer-deps`** (the Vitest 5
 upgrade removed the need). `CLAUDE.md` / `AGENTS.md` are **not tracked** (they
@@ -623,13 +642,13 @@ by restoring the flat config, reinstalling `typescript-eslint` / `@eslint/js` / 
 and flipping the script back to `eslint src/`.
 
 The workflow uses `actions/checkout@v7` and `actions/setup-node@v7` with npm
-caching. `backend-checks` runs a Node matrix (**20.19** and **22**): 20.19 is
-the declared `engines.node` floor in both `package.json` files, 22 matches the
-`node:22-bookworm-slim` runtime images and is the leg that publishes the
-coverage artifact. `migrate-checks`, `integration-checks`, and
-`frontend-checks` stay on Node 22. The backend lint step is **enforced** — the
-previous `continue-on-error: true` has been removed, so ESLint failures
-correctly block the build.
+caching. `backend-checks` runs a Node matrix (**22** and **24**): both satisfy
+`engines.node >=22.22.0`, and 22 matches the `node:22-bookworm-slim` runtime
+images and is the leg that runs the coverage gate and publishes the artifact;
+the 24 leg runs the plain suite to prove forward compatibility. `migrate-checks`,
+`integration-checks`, and `frontend-checks` stay on Node 22. The backend lint
+step is **enforced** — the previous `continue-on-error: true` has been removed,
+so ESLint failures correctly block the build.
 
 Dependency updates are automated by `.github/dependabot.yml`: weekly npm
 updates for both packages (minor/patch grouped into one PR, limit 5) and
@@ -878,11 +897,13 @@ blockers are resolved and re-reviewed as PASS:
   React replay dashboard (overlay chart + imperative Leaflet marker), CSV export,
   session management, BYOK AI analysis.
 - **Auth contract resolved and re-reviewed PASS.**
-- **Verification:** `npm run verify` from the repo root (backend tests + lint,
-  then frontend vitest + `tsc --noEmit`); `npm run build` for the frontend
-  bundle. Backend tests run under Node's built-in test runner
-  (`node --test test/`) plus `scripts/checkMirrors.js` / `scripts/checkTestIntegrity.js`
-  checks.
+- **Verification:** `npm run verify` from the repo root (backend coverage suite —
+  floors + structural guards — and lint, then frontend vitest and the production
+  build, which subsumes the TypeScript check); `npm run build` alone for the
+  frontend bundle. Backend tests run under Node's built-in test runner
+  (`node --test test/*.test.js`); `scripts/checkMirrors.js` /
+  `scripts/checkTestIntegrity.js` and the c8 floors run as part of
+  `npm run test:coverage`.
 - **Additional features implemented:**
   - Env-tunable upload rate limit with token-based burst exemption (a matching Bearer token bypasses the limiter).
   - Runtime-toggleable registration (`Settings` singleton +
