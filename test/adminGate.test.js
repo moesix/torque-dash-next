@@ -406,6 +406,16 @@ describe('PUT /api/settings — admin-only gate', { skip: apiRouter ? false : 'r
         assert.strictEqual(settingsRow.cartoApiKey, null);
     });
 
+    test('admin PUT response keeps the admin LLM projection (settingsView third arg)', async () => {
+        const { status, body } = await withServer(ADMIN, (base) =>
+            sendJson(base, '/api/settings', 'PUT', { llmEndpoint: 'https://llm.example.com/v1' })
+        );
+
+        assert.strictEqual(status, 200);
+        assert.strictEqual(body.llmEndpoint, 'https://llm.example.com/v1',
+            'the admin form re-hydrates from this response, so it must keep llmEndpoint');
+    });
+
     test('admin PUT switches to CARTO and the stored key comes back in the same admin-only response', async () => {
         const { status, body } = await withServer(ADMIN, (base) =>
             sendJson(base, '/api/settings', 'PUT', { tileProvider: 'carto', cartoApiKey: 'carto_key_1' })
@@ -553,5 +563,39 @@ describe('GET /api/settings/full — authenticated projection carries isAdmin', 
 
         assert.strictEqual(status, 200);
         assert.strictEqual(body.isAdmin, false);
+    });
+
+    test('non-admin full-settings body omits llmEndpoint/llmModel entirely even when configured', async () => {
+        settingsRow.llmProvider = 'custom';
+        settingsRow.llmModel = 'operator-model';
+        settingsRow.llmEndpoint = 'https://operator:secret@llm.internal/v1';
+
+        const { status, body } = await withServer(NON_ADMIN, (base) => getJson(base, '/api/settings/full'));
+
+        assert.strictEqual(status, 200);
+        for (const key of ['llmEndpoint', 'llmModel', 'llmProvider']) {
+            assert.strictEqual(
+                Object.prototype.hasOwnProperty.call(body, key),
+                false,
+                `non-admin response must not carry ${key}`
+            );
+        }
+        assert.strictEqual(body.hasLlmProvider, true, 'the boolean "configured" state stays visible');
+        assert.strictEqual(body.hasLlmApiKey, false);
+        assert.ok(!JSON.stringify(body).includes('llm.internal'), 'no endpoint fragment may leak');
+    });
+
+    test('admin full-settings body carries llmProvider/llmModel/llmEndpoint', async () => {
+        settingsRow.llmProvider = 'custom';
+        settingsRow.llmModel = 'operator-model';
+        settingsRow.llmEndpoint = 'https://llm.internal/v1';
+
+        const { status, body } = await withServer(ADMIN, (base) => getJson(base, '/api/settings/full'));
+
+        assert.strictEqual(status, 200);
+        assert.strictEqual(body.llmProvider, 'custom');
+        assert.strictEqual(body.llmModel, 'operator-model');
+        assert.strictEqual(body.llmEndpoint, 'https://llm.internal/v1');
+        assert.strictEqual(body.hasLlmProvider, true);
     });
 });

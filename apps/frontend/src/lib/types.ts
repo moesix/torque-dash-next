@@ -109,10 +109,14 @@ export interface Settings {
   isAdmin?: boolean;
 
   // ── BYOK LLM fields ────────────────────────────────────────────────
+  /** True when a provider is configured. Visible to every authenticated user. */
   hasLlmProvider: boolean;
-  llmProvider: string | null;
-  llmModel: string | null;
-  llmEndpoint: string | null;
+  /** Provider/model/endpoint are ADMIN-ONLY (plan 030): the server omits these
+   *  keys entirely for non-admin sessions, so they are optional here. Only the
+   *  admin-gated settings cards read them. */
+  llmProvider?: string | null;
+  llmModel?: string | null;
+  llmEndpoint?: string | null;
   hasLlmApiKey: boolean;
   vehicleMake: string | null;
   vehicleModel: string | null;

@@ -179,7 +179,10 @@ class UserController {
                 extras.isAdmin = Boolean(req.user.isAdmin);
             }
             res.set('Cache-Control', 'private, max-age=30');
-            res.json(settingsView(settings, extras));
+            // Role projection (plan 030): non-admins must not learn the
+            // operator's LLM endpoint/model (the endpoint may embed URL
+            // userinfo). Session-derived, never client input.
+            res.json(settingsView(settings, extras, { isAdmin: req.user && req.user.isAdmin }));
         } catch (err) {
             console.error(err.message || err);
             res.status(500).json({ error: 'Internal server error' });
@@ -242,8 +245,18 @@ class UserController {
             }
             if (llmEndpoint !== undefined) {
               if (llmEndpoint !== null) {
-                try { new URL(llmEndpoint); } catch {
+                let parsed;
+                try { parsed = new URL(llmEndpoint); } catch {
                   return res.status(400).json({ error: 'Invalid endpoint URL' });
+                }
+                // Plan 030: `https://user:pass@host` would round-trip
+                // credentials through the settings response, and non-HTTP(S)
+                // schemes are not endpoints the LLM client can use.
+                if (parsed.username || parsed.password) {
+                  return res.status(400).json({ error: 'Endpoint URL must not contain credentials.' });
+                }
+                if (!/^https?:$/.test(parsed.protocol)) {
+                  return res.status(400).json({ error: 'Endpoint URL must be http or https.' });
                 }
               }
               updateData.llmEndpoint = llmEndpoint;
@@ -393,10 +406,12 @@ class UserController {
 
             // Re-fetch the full settings row to return complete state
             const current = await Settings.getSingleton();
+            // This handler is admin-gated above, so the response keeps the
+            // admin projection (the settings card writes state from it).
             res.json(settingsView(current, {
                 disableRegistration: current.disableRegistration || envDisabled,
                 retentionPolicyApplied: policyApplied,
-            }));
+            }, { isAdmin: true }));
         } catch (err) {
             console.error(err.message || err);
             res.status(500).json({ error: 'Internal server error' });
@@ -490,15 +505,24 @@ class UserController {
 // Single source of truth for the settings response shape. Callers pass extras
 // (e.g. disableRegistration override, retentionPolicyApplied) via the second
 // argument which is spread on top of the base fields.
-function settingsView(settings, extras = {}) {
+//
+// The third argument is the VIEWER and is optional (plan 030): omitting it
+// projects the non-admin shape, so existing two-argument callers never leak
+// provider config. Only admins receive the concrete provider/model/endpoint;
+// everyone else gets `hasLlmProvider` (the settings page renders a
+// "configured" state from the booleans).
+function settingsView(settings, extras = {}, viewer = {}) {
+    const isAdmin = Boolean(viewer.isAdmin);
     return {
         disableRegistration: settings.disableRegistration || false,
         hasUploadApiToken: Boolean(settings.uploadApiToken || runtime.isFromEnv()),
         tokenFromEnv: runtime.isFromEnv(),
         hasLlmProvider: Boolean(settings.llmProvider),
-        llmProvider: settings.llmProvider || null,
-        llmModel: settings.llmModel || null,
-        llmEndpoint: settings.llmEndpoint || null,
+        ...(isAdmin ? {
+            llmProvider: settings.llmProvider || null,
+            llmModel: settings.llmModel || null,
+            llmEndpoint: settings.llmEndpoint || null,
+        } : {}),
         hasLlmApiKey: Boolean(settings.llmApiKeyEnc),
         vehicleMake: settings.vehicleMake || null,
         vehicleModel: settings.vehicleModel || null,

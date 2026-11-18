@@ -8,12 +8,22 @@ const { describe, it } = require('node:test');
 const assert = require('node:assert');
 
 // Pre-populate require.cache for ../models so the controller can load
-// without connecting to a real database.
+// without connecting to a real database. `settingsState` backs the singleton
+// row so updateSettings' re-fetch projection can be asserted.
+let settingsState = {};
 const mockModels = {
   Session: { findOne: async () => null, findAll: async () => [], count: async () => 0, update: async () => [0] },
   Log: { count: async () => 0, findAll: async () => [], destroy: async () => 0 },
   User: { findOne: async () => null },
   Vehicle: { findOne: async () => null },
+  Settings: {
+    getSingleton: async () => settingsState,
+    upsert: async (data) => {
+      Object.assign(settingsState, data);
+      return settingsState;
+    },
+    invalidateCache: () => {},
+  },
   sequelize: { transaction: async (fn) => fn({}), query: async () => [], fn: () => {}, col: () => {} },
   Sequelize: { Op: {} },
 };
@@ -30,7 +40,8 @@ const {
   validateCartoApiKey,
   MAX_CARTO_API_KEY_LENGTH,
 } = require('../lib/validators');
-const { settingsView } = require('../controllers/UserController');
+const UserController = require('../controllers/UserController');
+const { settingsView } = UserController;
 
 // ── LLM thinking mode ──────────────────────────────────────────────
 
@@ -340,5 +351,116 @@ describe('settings response shape — map tile provider (real settingsView)', ()
   it('treats a null key under carto as absent-but-exposed empty string', () => {
     const res = settingsView({ tileProvider: 'carto', cartoApiKey: null });
     assert.strictEqual(res.cartoApiKey, '');
+  });
+});
+
+// ── LLM endpoint URL validation (plan 030) ──────────────────────────
+// Drives the REAL controller so the route's admin gate + validator +
+// projection are exercised together (the HTTP-level counterparts live in
+// adminGate.test.js).
+
+describe('PUT /api/settings — llmEndpoint URL rejection', () => {
+  function makeRes() {
+    const calls = { statusCode: null, body: null };
+    const res = {
+      status(code) { calls.statusCode = code; return res; },
+      json(obj) { calls.body = obj; return res; },
+    };
+    return { res, calls };
+  }
+
+  function makeReq(body) {
+    // updateSettings is admin-gated; the gate itself is covered elsewhere.
+    settingsState = {};
+    return { user: { id: 1, isAdmin: true }, body };
+  }
+
+  it('rejects a URL carrying userinfo even when it parses', async () => {
+    const { res, calls } = makeRes();
+    await UserController.updateSettings(makeReq({ llmEndpoint: 'https://u:p@example.com/v1' }), res);
+    assert.strictEqual(calls.statusCode, 400);
+    assert.deepStrictEqual(calls.body, { error: 'Endpoint URL must not contain credentials.' });
+  });
+
+  it('rejects a username-only userinfo URL too', async () => {
+    const { res, calls } = makeRes();
+    await UserController.updateSettings(makeReq({ llmEndpoint: 'https://user@example.com/v1' }), res);
+    assert.strictEqual(calls.statusCode, 400);
+    assert.deepStrictEqual(calls.body, { error: 'Endpoint URL must not contain credentials.' });
+  });
+
+  it('rejects non-http(s) schemes', async () => {
+    const { res, calls } = makeRes();
+    await UserController.updateSettings(makeReq({ llmEndpoint: 'ftp://example.com' }), res);
+    assert.strictEqual(calls.statusCode, 400);
+    assert.deepStrictEqual(calls.body, { error: 'Endpoint URL must be http or https.' });
+  });
+
+  it('rejects values that do not parse as a URL', async () => {
+    const { res, calls } = makeRes();
+    await UserController.updateSettings(makeReq({ llmEndpoint: 'not a url' }), res);
+    assert.strictEqual(calls.statusCode, 400);
+    assert.deepStrictEqual(calls.body, { error: 'Invalid endpoint URL' });
+  });
+
+  it('accepts an https endpoint with a path', async () => {
+    const { res, calls } = makeRes();
+    await UserController.updateSettings(makeReq({ llmEndpoint: 'https://example.com/v1' }), res);
+    assert.strictEqual(calls.statusCode, null, 'no error status was set');
+    assert.strictEqual(calls.body.llmEndpoint, 'https://example.com/v1');
+  });
+
+  it('accepts a plain-http endpoint (self-hosted ollama) and null (clear)', async () => {
+    const http = makeRes();
+    await UserController.updateSettings(makeReq({ llmEndpoint: 'http://ollama.local:11434/v1' }), http.res);
+    assert.strictEqual(http.calls.statusCode, null);
+    assert.strictEqual(http.calls.body.llmEndpoint, 'http://ollama.local:11434/v1');
+
+    const cleared = makeRes();
+    await UserController.updateSettings(makeReq({ llmEndpoint: null }), cleared.res);
+    assert.strictEqual(cleared.calls.statusCode, null);
+    assert.strictEqual(cleared.calls.body.llmEndpoint, null);
+  });
+});
+
+// ── Role projection (plan 030) ──────────────────────────────────────
+
+describe('settingsView role projection', () => {
+  const row = {
+    llmProvider: 'custom',
+    llmModel: 'operator-model',
+    llmEndpoint: 'https://llm.internal/v1',
+    llmApiKeyEnc: 'enc',
+  };
+
+  it('omits provider/model/endpoint for the default (two-argument) call', () => {
+    const res = settingsView(row);
+    for (const key of ['llmProvider', 'llmModel', 'llmEndpoint']) {
+      assert.strictEqual(Object.prototype.hasOwnProperty.call(res, key), false,
+        `${key} must not appear in the non-admin projection`);
+    }
+    assert.strictEqual(res.hasLlmProvider, true);
+    assert.strictEqual(res.hasLlmApiKey, true);
+  });
+
+  it('omits provider/model/endpoint for an explicit non-admin viewer', () => {
+    const res = settingsView(row, {}, { isAdmin: false });
+    assert.strictEqual(res.llmEndpoint, undefined);
+    assert.strictEqual(res.llmModel, undefined);
+    assert.strictEqual(res.llmProvider, undefined);
+  });
+
+  it('includes provider/model/endpoint for an admin viewer', () => {
+    const res = settingsView(row, {}, { isAdmin: true });
+    assert.strictEqual(res.llmProvider, 'custom');
+    assert.strictEqual(res.llmModel, 'operator-model');
+    assert.strictEqual(res.llmEndpoint, 'https://llm.internal/v1');
+  });
+
+  it('still spreads extras on top for both projections', () => {
+    const nonAdmin = settingsView(row, { retentionPolicyApplied: true }, { isAdmin: false });
+    assert.strictEqual(nonAdmin.retentionPolicyApplied, true);
+    const admin = settingsView(row, { retentionPolicyApplied: true }, { isAdmin: true });
+    assert.strictEqual(admin.retentionPolicyApplied, true);
   });
 });
