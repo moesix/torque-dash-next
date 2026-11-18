@@ -213,6 +213,21 @@ describe('sample statistics honesty + location sanitization (plans/032)', () => 
     assert.ok(prompt.includes('Data points in sample: 2'));
   });
 
+  it('sanitizes newlines and truncates a 5000-char location', () => {
+    const session = {
+      name: 'Line one\nline two',
+      startLocation: 'A'.repeat(5000),
+      endLocation: 'B'.repeat(5000),
+    };
+    const prompt = promptFor(session);
+    const locationLine = prompt.split('\n').find((line) => line.startsWith('Location: '));
+    assert.ok(locationLine, 'prompt must carry a Location line');
+    assert.ok(locationLine.length <= 220, `Location line is ${locationLine.length} chars`);
+    assert.ok(!locationLine.includes('\n'));
+    const contextName = prompt.split('\n').find((line) => line.startsWith('Session: '));
+    assert.ok(contextName.includes('Line one line two'));
+    assert.ok(!contextName.includes('\n'));
+  });
 });
 
 describe('buildAnalysisPrompt vehicle context (plans/118)', () => {
