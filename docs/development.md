@@ -55,7 +55,7 @@ pin). No Tremor — all UI uses native Tailwind utilities (Plan 049).
 
 ## 3. Environment Variables
 
-Set these at the backend repo root (`.env` or exported in the shell).
+The backend does not read .env outside Docker (no dotenv). For host runs, `export` the variables; Compose reads `.env`.
 
 | Variable | Required | Default | Description |
 | --- | --- | --- | --- |
@@ -952,18 +952,17 @@ docker compose -f docker-compose.dev.yml exec backend node scripts/seed-demo.js 
 ```bash
 git clone https://github.com/moesix/torque-dash-next.git
 cd torque-dash-next
-
-# **Required:** generate session keys (app crashes on startup if missing)
-export SESSION_KEYS="$(openssl rand -hex 24)"
-# **Required for production (2026 baseline):** upload API token for Torque
-# Pro authentication. Alternatively generate from the Settings UI after first
-# login (an env-set token overrides and locks the UI).
-export UPLOAD_API_TOKEN="$(openssl rand -hex 24)"
-
-docker compose up -d --build
+cp .env.example .env
+# edit .env: POSTGRES_PASSWORD, SESSION_KEYS (>=32 chars), UPLOAD_API_TOKEN
+docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 ```
 
 Then open **http://localhost:8080**.
+
+`docker-compose.build.yml` is a Compose override: it builds the backend and
+frontend images from this checkout instead of pulling them from GHCR. It must be
+passed *after* the base file (as above) so the `db` service and volumes from
+`docker-compose.yml` are included.
 
 - On first boot the backend creates the database tables, turns the `Logs` table
   into a TimescaleDB hypertable, and seeds the `Settings` row. Data is persisted
@@ -980,6 +979,8 @@ Then open **http://localhost:8080**.
 > TLS-terminating proxy. The compose defaults are for local/http use.
 
 ### Manual setup (fallback, without Docker)
+
+> Prefer Docker? Use the build override in [Build from source](#build-from-source) instead — it produces the same schema and services.
 
 **Backend**
 
