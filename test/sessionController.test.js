@@ -141,6 +141,45 @@ describe('SessionController (with mocked models)', () => {
     assert.strictEqual(calls.statusCode, 400);
   });
 
+  // Structural guard against re-inverting the delete predicate. The original
+  // bug was a one-word `id NOT IN` that deleted the multiples instead of the
+  // rest — a stubbed-models behavioural test cannot see it, and the integration
+  // test is DB-gated. Read the actual SQL the handler builds.
+  test('filter DELETE selects the non-Nth rows with `id IN`, never `id NOT IN`', async () => {
+    const originals = {
+      sessionFindOne: mockModels.Session.findOne,
+      logCount: mockModels.Log.count,
+      sequelizeQuery: mockModels.sequelize.query,
+    };
+    const queries = [];
+    try {
+      mockModels.Session.findOne = async () => ({ id: 's1', userId: 1 });
+      mockModels.Log.count = async () => 20; // > filterNumber so the SQL runs
+      mockModels.sequelize.query = async (sql, opts) => {
+        queries.push({ sql, opts });
+        return [[], 0];
+      };
+
+      const req = makeStubReq({ body: { filterNumber: 5 } });
+      const { res, calls } = makeStubRes();
+      await SessionController.filter(req, res);
+
+      assert.strictEqual(calls.statusCode, 200);
+      assert.strictEqual(queries.length, 1, 'exactly one DELETE for one filter call');
+      const { sql, opts } = queries[0];
+      assert.match(sql, /id IN \(/, 'the subquery is the DELETE set, so `id IN` must select it');
+      assert.doesNotMatch(sql, /id NOT IN \(/, '`id NOT IN` keeps the rows it should delete');
+      assert.match(sql, /rn % :filterNumber != 0/, 'the DELETE set is every non-Nth row');
+      // Reviewer contract: the DELETE stays session-scoped and bound.
+      assert.match(sql, /WHERE "sessionId" = :sessionId/);
+      assert.deepStrictEqual(opts.replacements, { sessionId: 's1', filterNumber: 5 });
+    } finally {
+      mockModels.Session.findOne = originals.sessionFindOne;
+      mockModels.Log.count = originals.logCount;
+      mockModels.sequelize.query = originals.sequelizeQuery;
+    }
+  });
+
   // ── delete ──────────────────────────────────────────────────────
   // Fix: now returns 404 JSON (not 401) when session is not found.
 
