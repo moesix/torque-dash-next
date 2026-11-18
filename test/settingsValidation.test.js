@@ -423,6 +423,44 @@ describe('PUT /api/settings — llmEndpoint URL rejection', () => {
   });
 });
 
+// ── llmModel acceptance (plan 032) ─────────────────────────────────
+// null is an explicit clear: the settings card sends it when the provider
+// changes so the new provider falls back to its default model.
+
+describe('PUT /api/settings — llmModel null acceptance', () => {
+  function makeRes() {
+    const calls = { statusCode: null, body: null };
+    const res = {
+      status(code) { calls.statusCode = code; return res; },
+      json(obj) { calls.body = obj; return res; },
+    };
+    return { res, calls };
+  }
+
+  function makeReq(body) {
+    settingsState = {};
+    return { user: { id: 1, isAdmin: true }, body };
+  }
+
+  it('accepts null, persists null, and returns null', async () => {
+    const { res, calls } = makeRes();
+    await UserController.updateSettings(makeReq({ llmModel: null }), res);
+    assert.strictEqual(calls.statusCode, null, 'no error status was set');
+    assert.strictEqual(settingsState.llmModel, null, 'persisted value must be null');
+    assert.strictEqual(calls.body.llmModel, null);
+  });
+
+  it('still rejects a non-string model and an over-long string', async () => {
+    const number = makeRes();
+    await UserController.updateSettings(makeReq({ llmModel: 42 }), number.res);
+    assert.strictEqual(number.calls.statusCode, 400);
+
+    const long = makeRes();
+    await UserController.updateSettings(makeReq({ llmModel: 'm'.repeat(201) }), long.res);
+    assert.strictEqual(long.calls.statusCode, 400);
+  });
+});
+
 // ── Role projection (plan 030) ──────────────────────────────────────
 
 describe('settingsView role projection', () => {

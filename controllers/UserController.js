@@ -238,10 +238,13 @@ class UserController {
               updateData.llmProvider = llmProvider;
             }
             if (llmModel !== undefined) {
-              if (typeof llmModel !== 'string' || llmModel.length > 200) {
-                return res.status(400).json({ error: 'llmModel must be a string of at most 200 characters.' });
+              // null is an explicit clear: the frontend sends it when the
+              // provider changes so the new provider uses its default model
+              // instead of inheriting the previous provider's model name.
+              if (llmModel !== null && (typeof llmModel !== 'string' || llmModel.length > 200)) {
+                return res.status(400).json({ error: 'llmModel must be a string of at most 200 characters, or null.' });
               }
-              updateData.llmModel = llmModel;
+              updateData.llmModel = llmModel || null;
             }
             if (llmEndpoint !== undefined) {
               if (llmEndpoint !== null) {
