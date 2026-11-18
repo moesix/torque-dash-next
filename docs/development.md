@@ -823,7 +823,11 @@ blockers are resolved and re-reviewed as PASS:
 - **Admin model & analysis retention (Plans 099 + 121).** The first registered
   user is promoted to `isAdmin` at register time (migration 017 also backfills
   the lowest-id user on upgraded deployments; `scripts/promote-admin.js
-  [--demote] <email>` recovers a mis-promoted account). `PUT /api/settings` and
+  [--demote] <email>` recovers a mis-promoted account). The first-admin count
+  runs under `pg_advisory_xact_lock(hashtext('torquedash:first-admin'))`, so
+  concurrent registrations cannot both win, and setting `ADMIN_SETUP_TOKEN`
+  requires the first registration to supply the matching `setupToken`
+  (plan 030). `PUT /api/settings` and
   `POST /api/settings/upload-token` return `403` for non-admins. Settings gains
   `analysisRetentionDays` (Off/90/120/180/365, migration 019); the app-side
   pruner in `services/analysesRetention.js` sweeps stale `Analysis` rows across

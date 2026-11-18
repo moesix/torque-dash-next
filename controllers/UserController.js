@@ -93,13 +93,39 @@ class UserController {
                 return res.status(409).json({ error: 'Registration failed. Please try a different email.' });
             }
 
-            // Save new user to db. First-registered-user bootstrap (plan 099):
-            // when no user row exists yet, this account becomes the admin
-            // (isAdmin = count === 0). Count and create are not atomic together,
-            // so a theoretical simultaneous-registration race could yield two
-            // admins — acceptable for a personal deployment.
-            const userCount = await User.count();
-            user = await User.create({ email: email, password: password, isAdmin: userCount === 0 });
+            // Save new user to db. First-registered-user bootstrap (plans 099 +
+            // 030): when no user row exists yet, this account becomes the admin.
+            // The count runs inside a transaction holding a DB-scoped advisory
+            // lock, so two concurrent registrations cannot both observe zero
+            // users and both become admin. The lock is released when the
+            // transaction ends; only the count is guarded (a concurrent user
+            // delete — not possible through the API today — could still slip
+            // between the count and the create).
+            const setupToken = process.env.ADMIN_SETUP_TOKEN;
+            const isFirstUser = await sequelize.transaction(async (t) => {
+                await sequelize.query(
+                    "SELECT pg_advisory_xact_lock(hashtext('torquedash:first-admin'))",
+                    { transaction: t }
+                );
+                const count = await User.count({ transaction: t });
+                return count === 0;
+            });
+
+            // Bootstrap secret (plan 030): when the operator has set
+            // ADMIN_SETUP_TOKEN, the account that would become admin must
+            // present it — otherwise an unauthenticated visitor racing the
+            // operator on a fresh deployment wins admin rights.
+            if (isFirstUser && setupToken) {
+                const supplied = req.body ? req.body.setupToken : undefined;
+                if (supplied !== setupToken) {
+                    return res.status(403).json({ error: 'Setup token required for the first account.' });
+                }
+            }
+            if (isFirstUser && !setupToken && process.env.NODE_ENV === 'production') {
+                console.warn('[UserController] first account will become admin and ADMIN_SETUP_TOKEN is unset');
+            }
+
+            user = await User.create({ email: email, password: password, isAdmin: isFirstUser });
 
             // Send response
             return res.status(201).json({ ok: true });

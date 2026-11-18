@@ -138,14 +138,25 @@ chain. Versioning is **dev-led**: releases happen on `development`, and
 ## 5. First-time setup
 
 1. Open **http://localhost:8080** in your browser.
-2. Register the first account at the sign-up page — **this account becomes the
+2. Optional but recommended: set `ADMIN_SETUP_TOKEN` in `.env` before exposing
+   the instance (generate one with `openssl rand -hex 24`). When it is set, the
+   first registration must pass the same value as `setupToken` (the sign-up
+   request field) — otherwise the request is rejected with `403`. On a fresh
+   instance this closes the window where any visitor who reaches the port
+   before you do becomes the admin. If the variable is **unset**, the first
+   registrant still becomes admin (the original bootstrap behaviour) and a
+   warning is logged in production.
+3. Register the first account at the sign-up page — **this account becomes the
    site admin** (`isAdmin`), the only account that can change server settings.
-3. Sign in with your credentials.
-4. Configure the upload API token — **required for production** (see step 2's
+   The first-admin check is serialized with a Postgres advisory lock
+   (`pg_advisory_xact_lock`), so two simultaneous first registrations cannot
+   both become admin.
+4. Sign in with your credentials.
+5. Configure the upload API token — **required for production** (see step 2's
    "Upload API token" section): either set `UPLOAD_API_TOKEN` in `.env` before
    launching, or generate one from **Settings** now (admin only — which the
    first account is).
-5. Configure Torque Pro (see below).
+6. Configure Torque Pro (see below).
 
 ### Configure Torque Pro
 

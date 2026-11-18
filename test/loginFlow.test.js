@@ -78,6 +78,8 @@ const mockModels = {
         findAll: async () => [],
     },
     sequelize: {
+        // register() takes an advisory lock + counts users inside a transaction
+        transaction: async (fn) => fn({ id: 'tx-stub' }),
         query: async () => [],
         QueryTypes: { SELECT: 'SELECT' },
         fn: () => {},
