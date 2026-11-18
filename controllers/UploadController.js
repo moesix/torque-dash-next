@@ -3,16 +3,9 @@ const User = require('../models').User;
 const Session = require('../models').Session;
 const Vehicle = require('../models').Vehicle;
 const Settings = require('../models').Settings;
-const userCache = require('../lib/userCache');
+const { userCache, vehicleCache, sessionCache } = require('../lib/hotCaches');
 const ingestBuffer = require('../services/ingestBuffer');
 const runtime = require('../config/runtime');
-
-// Dedicated hot-path caches for the per-frame identity lookups. When the
-// loaded userCache module doesn't expose the class (slim test doubles inject
-// a plain get/set/del object), fall back to using that object as the backend.
-const UserCacheClass = userCache.UserCache || null;
-const vehicleCache = UserCacheClass ? new UserCacheClass({ ttl: 300_000, max: 1000 }) : userCache;
-const sessionCache = UserCacheClass ? new UserCacheClass({ ttl: 60_000, max: 5000 }) : userCache;
 
 // Express turns repeated query params (`kc=100&kc=200`) into arrays. Scalar
 // fields that are coerced or stored as single values take the first element,
@@ -180,12 +173,3 @@ class UploadController {
 module.exports = UploadController;
 // Exported for direct unit testing of the module-private resolver.
 module.exports.resolveUser = resolveUser;
-
-// Drop the cached device-session → numeric FK mapping for one session. Called
-// after a session row is deleted so the next upload re-resolves (and recreates)
-// it instead of buffering frames against a nonexistent FK.
-function evictSession(sessionKey, userId) {
-    if (sessionKey == null || userId == null) return;
-    sessionCache.del(`s:${userId}:${sessionKey}`);
-}
-module.exports.evictSession = evictSession;

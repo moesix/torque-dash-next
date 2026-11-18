@@ -6,7 +6,7 @@ const Op = require('../models').Sequelize.Op;
 const { nanoid } = require('nanoid');
 const { discoverPidKeys, invalidatePidKeys } = require('../lib/pidRegistry');
 const ingestBuffer = require('../services/ingestBuffer');
-const { evictSession } = require('./UploadController');
+const { evictSession } = require('../lib/hotCaches');
 // Summary aggregate lives in one place (plans/017) — re-exported below for
 // existing consumers/tests.
 const {

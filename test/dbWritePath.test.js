@@ -916,10 +916,10 @@ describe('SessionController.delete — drain and evictSession wiring', () => {
       exports: { async drain() { events.push('drain'); } },
     };
 
-    const uploadPath = require.resolve('../controllers/UploadController');
-    const originalUploadCache = require.cache[uploadPath];
-    require.cache[uploadPath] = {
-      id: uploadPath, filename: uploadPath, loaded: true,
+    const hotCachesPath = require.resolve('../lib/hotCaches');
+    const originalHotCachesCache = require.cache[hotCachesPath];
+    require.cache[hotCachesPath] = {
+      id: hotCachesPath, filename: hotCachesPath, loaded: true,
       exports: { evictSession(...args) { events.push(['evict', ...args]); } },
     };
 
@@ -931,8 +931,8 @@ describe('SessionController.delete — drain and evictSession wiring', () => {
       else delete require.cache[modelsPath];
       if (originalIBCache) require.cache[ibPath] = originalIBCache;
       else delete require.cache[ibPath];
-      if (originalUploadCache) require.cache[uploadPath] = originalUploadCache;
-      else delete require.cache[uploadPath];
+      if (originalHotCachesCache) require.cache[hotCachesPath] = originalHotCachesCache;
+      else delete require.cache[hotCachesPath];
       if (originalSCCache) require.cache[scPath] = originalSCCache;
       else delete require.cache[scPath];
     }
