@@ -111,7 +111,8 @@ async function writeChunk(items, written, state) {
         await writeBatch(items);
         for (const item of items) written.push(item);
     } catch (err) {
-        console.error('[ingestBuffer] chunk write failed, re-queueing:', err.message);
+        const sidList = [...new Set(items.map(i => i.sessionId))].join(',');
+        console.error(`[ingestBuffer] chunk write failed (sessions: ${sidList}), re-queueing:`, err.message);
         await requeueOrBisect(items, written, state);
     }
 }
@@ -152,6 +153,7 @@ async function runFlush() {
     // successfully-written chunk: when every Log write failed (rows re-queued or
     // dropped), these Session updates must NOT run — otherwise denormalized
     // summaries would advance AHEAD of the Logs table they derive from.
+    let currentSummarySessionId = null;
     try {
         const stats = new Map(); // sessionId -> {minTs, maxTs, maxRpm, maxSpeed}
         for (const r of writtenRows) {
@@ -167,6 +169,7 @@ async function runFlush() {
         // COALESCE handles the NULL (never-backfilled) case; LEAST/GREATEST run
         // in JS because both candidates are known here.
         for (const [sessionId, s] of stats) {
+            currentSummarySessionId = sessionId;
             const existing = await Session.findByPk(sessionId, {
                 attributes: ['id', 'firstTimestamp', 'lastTimestamp', 'maxRpm', 'maxSpeed'],
             });
@@ -180,7 +183,7 @@ async function runFlush() {
             await Session.update(merged, { where: { id: sessionId } });
         }
     } catch (err) {
-        console.error('[ingestBuffer] summary update failed:', err.message);
+        console.error(`[ingestBuffer] summary update failed (session: ${currentSummarySessionId ?? 'unknown'}):`, err.message);
     }
 }
 
