@@ -357,7 +357,7 @@ describe('ingestBuffer.flush — failure isolation', () => {
   // Build a fresh ingestBuffer whose Log.bulkCreate delegates to `impl`
   // (throw to fail a write) and whose Session summary merge is recorded.
   function loadFlushHarness({ bulkCreate, findByPk, update }) {
-    const calls = { bulkCreate: [], findByPk: [], update: [] };
+    const calls = { bulkCreate: [], query: [], findByPk: [], update: [] };
     const mockModels = {
       Log: {
         async bulkCreate(rows, opts) {
@@ -373,6 +373,13 @@ describe('ingestBuffer.flush — failure isolation', () => {
         async update(vals, opts) {
           calls.update.push({ vals, opts });
           return update ? update(vals, opts) : [1];
+        },
+      },
+      // The summary merge is one monotonic UPDATE per session; record it.
+      sequelize: {
+        async query(sql, opts) {
+          calls.query.push({ sql, opts });
+          return [];
         },
       },
     };
@@ -471,10 +478,9 @@ describe('ingestBuffer.flush — failure isolation', () => {
         'only the succeeding chunk (500 rows) reached the DB');
       assert.strictEqual(ingestBuffer.size(), 1000,
         'exactly the failing chunk is back in the buffer');
-      assert.deepStrictEqual(calls.findByPk.map((c) => c.id), [SESSION_B],
+      assert.deepStrictEqual(calls.query.map((c) => c.opts.replacements.id), [SESSION_B],
         'summary merge must run for the written session only');
-      assert.deepStrictEqual(calls.update.map((c) => c.opts.where), [{ id: SESSION_B }],
-        'Session.update must target the written session only');
+      assert.strictEqual(calls.query.length, 1, 'one summary UPDATE for the written session only');
     } finally {
       restore();
     }
@@ -503,12 +509,12 @@ describe('ingestBuffer.flush — failure isolation', () => {
       await ingestBuffer.flush(); // first failure: whole chunk re-queued
       assert.strictEqual(ingestBuffer.size(), 6, 'first failure re-queues the whole chunk');
       assert.strictEqual(writtenRowCount, 0, 'nothing written on the first failure');
-      assert.strictEqual(calls.findByPk.length, 0, 'no summary merge when nothing was written');
+      assert.strictEqual(calls.query.length, 0, 'no summary merge when nothing was written');
 
       await ingestBuffer.flush(); // repeat failure: bisect
       assert.strictEqual(writtenRowCount, 5, 'five healthy rows written');
       assert.strictEqual(ingestBuffer.size(), 1, 'only the poison row is re-queued');
-      assert.deepStrictEqual(calls.findByPk.map((c) => c.id), [SESSION],
+      assert.deepStrictEqual(calls.query.map((c) => c.opts.replacements.id), [SESSION],
         'summary merge runs for the written session');
 
       // The poison row alone advances its attempt counter once per cycle.

@@ -318,7 +318,7 @@ describe('Migration 016 — idempotent SQL', () => {
 });
 
 describe('ingestBuffer — summary merge shape guards', () => {
-  test('merges in JS with bound parameters — no SQL literal fragments', () => {
+  test('has no SQL literal fragments (merge owns its SQL)', () => {
     const fs = require('fs');
     const path = require('path');
     const bufSrc = fs.readFileSync(
@@ -326,8 +326,9 @@ describe('ingestBuffer — summary merge shape guards', () => {
       'utf8'
     );
     // Regression guards for plan 073: the old literal-SQL block referenced a
-    // nonexistent "sub" alias and silently failed every flush. The merge must
-    // stay in JS with plain bound parameters — no SQL literal fragments.
+    // nonexistent "sub" alias and silently failed every flush. The merge SQL
+    // now lives in sessionSummaries.mergeWrittenRows; ingestBuffer itself must
+    // stay free of SQL literal fragments and aliases.
     assert.ok(!bufSrc.includes('sequelize.literal'),
       'ingestBuffer must not use sequelize.literal (broken sub-alias history)');
     assert.ok(!bufSrc.includes('sub.'),
@@ -335,71 +336,60 @@ describe('ingestBuffer — summary merge shape guards', () => {
   });
 });
 
-describe('flush — real-path summary merge through ingestBuffer', () => {
-  // Drives the ACTUAL flush() with mocked models capturing arguments.
-  function makeFlushMocks({ findByPkResult, bulkCreateError } = {}) {
-    const updateCalls = [];
-    const findByPkCalls = [];
+describe('flush — ingest routes the summary merge through mergeWrittenRows', () => {
+  // Drives the ACTUAL flush() with mocked models. The merge is now one SQL
+  // UPDATE per session (LEAST/GREATEST), so assertions are on the generated
+  // statement and bound replacements — the old findByPk read-modify-write is
+  // gone (that is the defect plan 026 removes).
+  function makeFlushMocks({ bulkCreateError } = {}) {
+    const queryCalls = [];
     let bulkCreateCalls = 0;
-    return {
-      updateCalls,
-      findByPkCalls,
-      mockModels: {
-        Session: {
-          findByPk: async (id, opts) => {
-            findByPkCalls.push({ id, opts });
-            return typeof findByPkResult === 'function' ? findByPkResult(id) : findByPkResult;
-          },
-          update: async (vals, opts) => { updateCalls.push({ vals, opts }); return [1]; },
-        },
-        Log: {
-          bulkCreate: async (rows) => {
-            if (bulkCreateError) throw bulkCreateError;
-            bulkCreateCalls += rows.length;
-            return rows;
-          },
+    const mockModels = makeMockModels({
+      Session: { update: async () => [1] },
+      Log: {
+        bulkCreate: async (rows) => {
+          if (bulkCreateError) throw bulkCreateError;
+          bulkCreateCalls += rows.length;
+          return rows;
         },
       },
-      getBulkCreateCalls: () => bulkCreateCalls,
-    };
+      sequelize: {
+        query: async (sql, opts) => { queryCalls.push({ sql, opts }); return []; },
+      },
+    });
+    return { mockModels, queryCalls, getBulkCreateCalls: () => bulkCreateCalls };
   }
 
-  test('wider batch bounds merge into existing session — exact update args', async () => {
-    const T1 = new Date('2026-05-01T10:00:00Z'); // existing firstTimestamp
-    const T2 = new Date('2026-05-01T12:00:00Z'); // existing lastTimestamp
+  test('wider batch bounds merge monotonically in ONE update per session', async () => {
     const before = new Date('2026-05-01T09:00:00Z');
     const after = new Date('2026-05-01T13:00:00Z');
 
-    const { mockModels, updateCalls, findByPkCalls } = makeFlushMocks({
-      // Plan spec: existing row has narrower bounds and smaller maxima.
-      findByPkResult: { id: 7, firstTimestamp: T1, lastTimestamp: T2, maxRpm: 3000, maxSpeed: 80 },
-    });
-
+    const { mockModels, queryCalls } = makeFlushMocks();
     const { restore } = loadWithMocks(mockModels);
     try {
       const { ingest, flush } = require('../services/ingestBuffer');
 
-      // Three rows spanning wider bounds than the existing columns:
-      // one timestamp before T1, one after T2, rpm 5000 (>3000), speed 120 (>80).
       ingest({ userId: 1, sessionId: 7, time: before, lon: 0, lat: 0, values: {}, engineRpm: 5000, vehicleSpeed: 60 });
-      ingest({ userId: 1, sessionId: 7, time: T2, lon: 0, lat: 0, values: {}, engineRpm: 1000, vehicleSpeed: 120 });
+      ingest({ userId: 1, sessionId: 7, time: after, lon: 0, lat: 0, values: {}, engineRpm: 1000, vehicleSpeed: 120 });
       ingest({ userId: 1, sessionId: 7, time: after, lon: 0, lat: 0, values: {}, engineRpm: 2500, vehicleSpeed: 90 });
 
       await flush();
 
-      assert.strictEqual(findByPkCalls.length, 1, 'one findByPk per affected session');
-      assert.strictEqual(findByPkCalls[0].id, 7);
-      assert.deepStrictEqual(findByPkCalls[0].opts.attributes,
-        ['id', 'firstTimestamp', 'lastTimestamp', 'maxRpm', 'maxSpeed']);
-
-      assert.strictEqual(updateCalls.length, 1, 'Session.update called exactly ONCE');
-      assert.deepStrictEqual(updateCalls[0].vals, {
-        firstTimestamp: before, // min(batch, existing)
-        lastTimestamp: after,   // max(batch, existing)
-        maxRpm: 5000,           // GREATEST(3000, 5000)
-        maxSpeed: 120,          // GREATEST(80, 120)
+      assert.strictEqual(queryCalls.length, 1, 'Session summary update is exactly ONE statement');
+      const { sql, opts } = queryCalls[0];
+      assert.match(sql, /^UPDATE "Sessions" SET /);
+      assert.match(sql, /"firstTimestamp" = LEAST\(COALESCE\("firstTimestamp", :minTs\), :minTs\)/);
+      assert.match(sql, /"lastTimestamp" = GREATEST\(COALESCE\("lastTimestamp", :maxTs\), :maxTs\)/);
+      assert.match(sql, /"maxRpm" = GREATEST\(COALESCE\("maxRpm", :maxRpm\), :maxRpm\)/);
+      assert.match(sql, /"maxSpeed" = GREATEST\(COALESCE\("maxSpeed", :maxSpeed\), :maxSpeed\)/);
+      assert.match(sql, /WHERE id = :id$/);
+      assert.deepStrictEqual(opts.replacements, {
+        id: 7,
+        minTs: before,
+        maxTs: after,
+        maxRpm: 5000,
+        maxSpeed: 120,
       });
-      assert.deepStrictEqual(updateCalls[0].opts, { where: { id: 7 } });
     } finally {
       restore();
     }
@@ -409,11 +399,7 @@ describe('flush — real-path summary merge through ingestBuffer', () => {
     const tA = new Date('2026-06-01T08:15:00Z');
     const tB = new Date('2026-06-01T09:45:00Z');
 
-    const { mockModels, updateCalls } = makeFlushMocks({
-      // Never-backfilled session: all denormalized columns NULL.
-      findByPkResult: { id: 8, firstTimestamp: null, lastTimestamp: null, maxRpm: null, maxSpeed: null },
-    });
-
+    const { mockModels, queryCalls } = makeFlushMocks();
     const { restore } = loadWithMocks(mockModels);
     try {
       const { ingest, flush } = require('../services/ingestBuffer');
@@ -423,14 +409,14 @@ describe('flush — real-path summary merge through ingestBuffer', () => {
 
       await flush();
 
-      assert.strictEqual(updateCalls.length, 1, 'Session.update called exactly ONCE');
-      assert.deepStrictEqual(updateCalls[0].vals, {
-        firstTimestamp: tA,  // COALESCE(NULL, batchMin) -> batchMin
-        lastTimestamp: tB,   // COALESCE(NULL, batchMax) -> batchMax
-        maxRpm: 4500,        // COALESCE(NULL, 4500)     -> 4500
-        maxSpeed: 95,        // COALESCE(NULL, 95)       -> 95
-      }, 'NULL columns must be replaced by batch stats verbatim');
-      assert.deepStrictEqual(updateCalls[0].opts, { where: { id: 8 } });
+      assert.strictEqual(queryCalls.length, 1);
+      assert.deepStrictEqual(queryCalls[0].opts.replacements, {
+        id: 8,
+        minTs: tA,
+        maxTs: tB,
+        maxRpm: 4500,
+        maxSpeed: 95,
+      }, 'COALESCE(NULL, batchStat) must yield the batch stat');
     } finally {
       restore();
     }
@@ -440,12 +426,7 @@ describe('flush — real-path summary merge through ingestBuffer', () => {
     const earlier = new Date('2026-06-02T07:00:00Z');
     const later = new Date('2026-06-02T08:30:00Z');
 
-    const { mockModels, updateCalls } = makeFlushMocks({
-      // Existing row already holds the later bound; the batch adds the earlier
-      // frame and repeats the later one.
-      findByPkResult: { id: 9, firstTimestamp: later, lastTimestamp: later, maxRpm: null, maxSpeed: null },
-    });
-
+    const { mockModels, queryCalls } = makeFlushMocks();
     const { restore } = loadWithMocks(mockModels);
     try {
       const { ingest, flush } = require('../services/ingestBuffer');
@@ -455,42 +436,37 @@ describe('flush — real-path summary merge through ingestBuffer', () => {
 
       await flush();
 
-      assert.strictEqual(updateCalls.length, 1, 'Session.update called exactly ONCE');
-      assert.strictEqual(updateCalls[0].vals.firstTimestamp, earlier,
-        'firstTimestamp must collapse to the earliest frame, not the first ingested');
-      assert.strictEqual(updateCalls[0].vals.lastTimestamp, later,
-        'lastTimestamp must collapse to the latest frame');
+      assert.strictEqual(queryCalls.length, 1);
+      assert.strictEqual(queryCalls[0].opts.replacements.minTs, earlier);
+      assert.strictEqual(queryCalls[0].opts.replacements.maxTs, later);
+      assert.strictEqual(queryCalls[0].opts.replacements.maxRpm, 2100);
+      assert.strictEqual(queryCalls[0].opts.replacements.maxSpeed, 70);
     } finally {
       restore();
     }
   });
 
-  test('missing session (findByPk null) — no update, no throw', async () => {
-    const { mockModels, updateCalls } = makeFlushMocks({ findByPkResult: null });
-
+  test('missing session row — the UPDATE matches zero rows, still no throw', async () => {
+    // No read-then-write means the merge cannot know the row is gone; it issues
+    // the same monotonic UPDATE, which simply affects 0 rows. Never a throw.
+    const { mockModels, queryCalls } = makeFlushMocks();
     const { restore } = loadWithMocks(mockModels);
     try {
       const { ingest, flush } = require('../services/ingestBuffer');
 
       ingest({ userId: 1, sessionId: 999, time: new Date('2026-07-01T00:00:00Z'), lon: 0, lat: 0, values: {}, engineRpm: 1500, vehicleSpeed: 40 });
-      ingest({ userId: 1, sessionId: 999, time: new Date('2026-07-01T00:30:00Z'), lon: 0, lat: 0, values: {}, engineRpm: 1600, vehicleSpeed: 55 });
 
-      // Must resolve without throwing despite the session not existing.
       await flush();
 
-      assert.strictEqual(updateCalls.length, 0,
-        'Session.update must NOT be called when the session is missing');
+      assert.strictEqual(queryCalls.length, 1, 'one UPDATE attempted for the affected session');
+      assert.strictEqual(queryCalls[0].opts.replacements.id, 999);
     } finally {
       restore();
     }
   });
 
-  test('failed bulkCreate — NO Session.update (summaries never run ahead of Logs)', async () => {
-    const { mockModels, updateCalls, findByPkCalls } = makeFlushMocks({
-      findByPkResult: { id: 12, firstTimestamp: null, lastTimestamp: null, maxRpm: null, maxSpeed: null },
-      bulkCreateError: new Error('db down'),
-    });
-
+  test('failed bulkCreate — NO summary UPDATE (summaries never run ahead of Logs)', async () => {
+    const { mockModels, queryCalls } = makeFlushMocks({ bulkCreateError: new Error('db down') });
     const { restore } = loadWithMocks(mockModels);
     try {
       const { ingest, flush } = require('../services/ingestBuffer');
@@ -498,27 +474,21 @@ describe('flush — real-path summary merge through ingestBuffer', () => {
       ingest({ userId: 1, sessionId: 12, time: new Date('2026-09-01T00:00:00Z'), lon: 0, lat: 0, values: {}, engineRpm: 1000, vehicleSpeed: 30 });
       ingest({ userId: 1, sessionId: 12, time: new Date('2026-09-01T00:10:00Z'), lon: 0, lat: 0, values: {}, engineRpm: 1100, vehicleSpeed: 35 });
 
-      // Must resolve without throwing despite the write failure (errors are
-      // caught and logged; rows are re-queued/dropped by the retry policy).
+      // Must resolve without throwing despite the write failure.
       await flush();
 
-      assert.strictEqual(findByPkCalls.length, 0,
-        'summary merge must not even start when the Log write failed');
-      assert.strictEqual(updateCalls.length, 0,
-        'Session.update must NOT happen when bulkCreate threw');
+      assert.strictEqual(queryCalls.length, 0,
+        'summary merge must not start when the Log write failed');
     } finally {
       restore();
     }
   });
 
-  test('batch without rpm/speed keeps existing maxima (null-normalized merge)', async () => {
+  test('batch without rpm/speed omits those columns — existing maxima survive', async () => {
     const tA = new Date('2026-08-01T06:00:00Z');
     const tB = new Date('2026-08-01T06:10:00Z');
 
-    const { mockModels, updateCalls } = makeFlushMocks({
-      findByPkResult: { id: 11, firstTimestamp: tA, lastTimestamp: tB, maxRpm: 3200, maxSpeed: 88 },
-    });
-
+    const { mockModels, queryCalls } = makeFlushMocks();
     const { restore } = loadWithMocks(mockModels);
     try {
       const { ingest, flush } = require('../services/ingestBuffer');
@@ -529,13 +499,11 @@ describe('flush — real-path summary merge through ingestBuffer', () => {
 
       await flush();
 
-      assert.strictEqual(updateCalls.length, 1);
-      assert.deepStrictEqual(updateCalls[0].vals, {
-        firstTimestamp: tA,
-        lastTimestamp: tB,
-        maxRpm: 3200,  // existing preserved when batch contributes nothing
-        maxSpeed: 88,
-      }, 'absent batch metrics must not clobber existing column values');
+      assert.strictEqual(queryCalls.length, 1);
+      const { sql, opts } = queryCalls[0];
+      assert.ok(!/"maxRpm"/.test(sql), 'absent batch metrics must not appear in the SET clause');
+      assert.ok(!/"maxSpeed"/.test(sql), 'absent batch metrics must not appear in the SET clause');
+      assert.deepStrictEqual(opts.replacements, { id: 11, minTs: tA, maxTs: tB });
     } finally {
       restore();
     }
