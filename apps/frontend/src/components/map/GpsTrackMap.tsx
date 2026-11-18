@@ -466,6 +466,20 @@ export default function GpsTrackMap({ frames, className }: Props) {
     return unsubscribe;
   }, [frames, timestamps]);
 
+  // No GPS at all in this session: an empty world map at (0,0) is noise.
+  // Say so explicitly instead. This branch is rendered AFTER all hooks so the
+  // hook order is identical across renders; it also omits `data-map-provider`
+  // (there is no tile pane to scope).
+  if (positions.length === 0) {
+    return (
+      <div
+        className={`flex items-center justify-center ${heightClass} rounded border border-[var(--border-default)] text-sm text-fg-muted`}
+      >
+        No GPS data in this session.
+      </div>
+    );
+  }
+
   return (
     <div
       // `'osm'` only while the keyless OpenStreetMap provider is effectively
