@@ -19,7 +19,7 @@
   "author": "",
   "license": "MIT",
   "engines": {
-    "node": ">=20.19"
+    "node": ">=22.22.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
