@@ -105,6 +105,10 @@ function makeStubRes() {
     json(obj) { calls.body = obj; return res; },
     sendStatus(code) { calls.statusCode = code; return res; },
     set(key, val) { calls.headers[key] = val; return res; },
+    vary(field) {
+      calls.headers.Vary = calls.headers.Vary ? `${calls.headers.Vary}, ${field}` : field;
+      return res;
+    },
     send(data) { calls.body = data; return res; },
   };
   return { res, calls };
@@ -234,14 +238,17 @@ describe('GET /api/settings/full — authenticated full settings', () => {
     }
   });
 
-  it('sets private Cache-Control', async () => {
+  it('sets private, non-cacheable Cache-Control keyed by the cookie', async () => {
     const UserController = require('../controllers/UserController');
     const req = {};
     const { res, calls } = makeStubRes();
 
     await UserController.getSettingsFull(req, res);
 
-    assert.strictEqual(calls.headers['Cache-Control'], 'private, max-age=30');
+    // plan 031 — was `private, max-age=30`; a browser-cached copy showed a
+    // stale isAdmin/token state for up to 30s.
+    assert.strictEqual(calls.headers['Cache-Control'], 'private, no-store');
+    assert.strictEqual(calls.headers.Vary, 'Cookie');
   });
 });
 

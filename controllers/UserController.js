@@ -120,6 +120,8 @@ class UserController {
             // may be cached in shared caches.
             if (req.user && req.user.id) {
                 res.set('Cache-Control', 'private, max-age=30');
+                // Same URL returns a different body shape per session.
+                res.vary('Cookie');
             } else {
                 res.set('Cache-Control', 'public, max-age=30');
             }
@@ -141,7 +143,11 @@ class UserController {
             if (req.user && req.user.id) {
                 extras.isAdmin = Boolean(req.user.isAdmin);
             }
-            res.set('Cache-Control', 'private, max-age=30');
+            // Carries session-derived isAdmin and token state, and changes as
+            // soon as an admin edits settings — never serve it from the HTTP
+            // cache.
+            res.set('Cache-Control', 'private, no-store');
+            res.vary('Cookie');
             res.json(settingsView(settings, extras));
         } catch (err) {
             console.error(err.message || err);

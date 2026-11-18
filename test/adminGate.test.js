@@ -210,7 +210,7 @@ function withServer(identity, handler) {
 
 async function getJson(base, path) {
     const res = await fetch(`${base}${path}`);
-    return { status: res.status, body: await res.json() };
+    return { status: res.status, body: await res.json(), headers: res.headers };
 }
 
 async function sendJson(base, path, method, body) {
@@ -416,6 +416,25 @@ describe('GET /api/settings — public shape and session-derived isAdmin', { ski
         assert.strictEqual(body.isAdmin, undefined);
     });
 
+    test('anonymous settings stay shared-cacheable (no Vary, public max-age)', async () => {
+        // plan 031 — do not change the public branch's caching.
+        const { status, headers } = await withServer(null, (base) => getJson(base, '/api/settings'));
+
+        assert.strictEqual(status, 200);
+        assert.strictEqual(headers.get('cache-control'), 'public, max-age=30');
+        assert.strictEqual(headers.get('vary'), null);
+    });
+
+    test('authenticated settings are keyed by the session cookie', async () => {
+        // Same URL returns two shapes; without Vary a shared cache can hand the
+        // admin body to the next account (plan 031).
+        const { status, headers } = await withServer(ADMIN, (base) => getJson(base, '/api/settings'));
+
+        assert.strictEqual(status, 200);
+        assert.match(headers.get('cache-control') || '', /private/);
+        assert.match(headers.get('vary') || '', /\bCookie\b/);
+    });
+
     test('authenticated non-admin sees isAdmin: false', async () => {
         const { status, body } = await withServer(NON_ADMIN, (base) => getJson(base, '/api/settings'));
 
@@ -440,6 +459,16 @@ describe('GET /api/settings/full — authenticated projection carries isAdmin', 
         assert.strictEqual(body.isAdmin, true);
         assert.ok(Object.prototype.hasOwnProperty.call(body, 'llmProvider'), 'full settings shape must be intact');
         assert.strictEqual(typeof body.retentionEnabled, 'boolean');
+    });
+
+    test('full-settings is never HTTP-cacheable and is keyed by the session cookie', async () => {
+        // It carries isAdmin and token state, and changes the moment an admin
+        // edits settings — no stale window, no cross-account reuse (plan 031).
+        const { status, headers } = await withServer(ADMIN, (base) => getJson(base, '/api/settings/full'));
+
+        assert.strictEqual(status, 200);
+        assert.match(headers.get('cache-control') || '', /no-store/);
+        assert.match(headers.get('vary') || '', /\bCookie\b/);
     });
 
     test('non-admin full-settings response includes isAdmin: false', async () => {

@@ -141,7 +141,11 @@ class SessionController {
                 json.vehicleName = session.Vehicle?.name || null;
                 return json;
             });
-            res.set('Cache-Control', 'private, max-age=30');
+            // Personal, mutation-sensitive list: never serve from the HTTP cache.
+            // The SPA's query cache handles snappiness; a stale 30s window made
+            // renames and deletes look like they failed.
+            res.set('Cache-Control', 'private, no-store');
+            res.vary('Cookie');
             res.json({ sessions: out, total, limit, offset });
         }
         catch (err) {

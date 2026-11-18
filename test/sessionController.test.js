@@ -66,14 +66,20 @@ function makeStubReq(overrides = {}) {
 }
 
 function makeStubRes() {
-  const calls = { status: null, body: null, statusCode: null };
+  const calls = { status: null, body: null, statusCode: null, headers: {} };
+  const varyValues = [];
   const res = {
     status(code) { calls.statusCode = code; calls.status = code; return res; },
     json(obj) { calls.body = obj; return res; },
     sendStatus(code) { calls.statusCode = code; calls.status = code; return res; },
     send(data) { calls.body = data; return res; },
-    setHeader() { return res; },
-    set() { return res; },
+    setHeader(name, value) { calls.headers[name.toLowerCase()] = value; return res; },
+    set(name, value) { calls.headers[name.toLowerCase()] = value; return res; },
+    vary(field) {
+      varyValues.push(field);
+      calls.headers.vary = varyValues.join(', ');
+      return res;
+    },
     write() { return res; },
     end() { return res; },
   };
@@ -83,6 +89,26 @@ function makeStubRes() {
 // ── Tests ───────────────────────────────────────────────────────────
 
 describe('SessionController (with mocked models)', () => {
+
+  // ── getAll — per-user cache headers ─────────────────────────────
+  // The list is personal and mutation-sensitive; a browser-cached copy made
+  // renames/deletes look like they silently failed (plan 031).
+
+  test('getAll sends Cache-Control: private, no-store and Vary: Cookie', async () => {
+    const originalFindOne = mockModels.User.findOne;
+    try {
+      mockModels.User.findOne = async () => ({ id: 1 });
+      const req = makeStubReq();
+      const { res, calls } = makeStubRes();
+      await SessionController.getAll(req, res);
+
+      assert.strictEqual(calls.statusCode, null, 'happy path must not set an error status');
+      assert.match(calls.headers['cache-control'] || '', /no-store/);
+      assert.match(calls.headers.vary || '', /\bCookie\b/);
+    } finally {
+      mockModels.User.findOne = originalFindOne;
+    }
+  });
 
   // ── rename ──────────────────────────────────────────────────────
 
