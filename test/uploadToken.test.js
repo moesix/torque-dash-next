@@ -9,50 +9,12 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 const express = require('express');
 const crypto = require('crypto');
-const rateLimit = require('express-rate-limit');
 const runtime = require('../config/runtime');
 
-// Import the REAL makeLimiter from routes/api.js as the single source of
-// truth. This requires the config module to load, which needs DATABASE_URL
-// and SESSION_KEYS.  Step 6 ensures CI always provides these env vars.
-let makeLimiter;
-let uploadLimiterSkip;
-let canLoadReal;
-try {
-  ({ makeLimiter, uploadLimiterSkip } = require('../routes/api'));
-  canLoadReal = true;
-} catch {
-  canLoadReal = false;
-}
-
-// Fallback for when routes/api.js can't load (no env vars in local dev).
-// This is the same function — identical shape and options.
-function localMakeLimiter({ windowMs, max, skip }) {
-    return rateLimit({
-        windowMs,
-        max,
-        standardHeaders: true,
-        legacyHeaders: false,
-        skip,
-        message: { error: 'Too many requests, please slow down.' },
-    });
-}
-
-// Stand-in copy of the production predicate (routes/api.js uploadLimiterSkip)
-// used only when routes/api.js cannot be imported (no DATABASE_URL/SESSION_KEYS).
-// Same constant-time shape: the byte-length pre-check short-circuits before
-// crypto.timingSafeEqual.
-function localUploadLimiterSkip(req) {
-    const token = runtime.getUploadApiToken();
-    if (!token) return false;
-    const header = req.headers.authorization || '';
-    const provided = header.startsWith('Bearer ') ? header.slice(7) : '';
-    if (Buffer.byteLength(provided, 'utf8') !== Buffer.byteLength(token, 'utf8')) return false;
-    return crypto.timingSafeEqual(Buffer.from(provided, 'utf8'), Buffer.from(token, 'utf8'));
-}
-
-const limiter = canLoadReal ? makeLimiter : localMakeLimiter;
-if (!uploadLimiterSkip) uploadLimiterSkip = localUploadLimiterSkip;
+// Import the REAL makeLimiter and uploadLimiterSkip from routes/api.js as the
+// single source of truth. DATABASE_URL/SESSION_KEYS are set above, before any
+// require, so the module always loads and there is no fallback copy.
+const { makeLimiter, uploadLimiterSkip } = require('../routes/api');
 
 function startServer(configure) {
     const app = express();
@@ -119,7 +81,7 @@ test('rate limiter skip uses runtime token (integration)', async () => {
     runtime.setUploadApiToken('test-bearer-token');
     const { server, base } = await startServer((app) => {
         app.use(
-            limiter({
+            makeLimiter({
                 windowMs: 60000,
                 max: 1,
                 skip: (req) => {
@@ -159,7 +121,7 @@ test('runtime skip without token set', async () => {
     runtime.setUploadApiToken(null);
     const { server, base } = await startServer((app) => {
         app.use(
-            limiter({
+            makeLimiter({
                 windowMs: 60000,
                 max: 1,
                 skip: (req) => {

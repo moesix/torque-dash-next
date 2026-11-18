@@ -1,37 +1,17 @@
 'use strict';
 
+// routes/api.js loads the config module, which needs DATABASE_URL and
+// SESSION_KEYS. Set them before any require so the test always exercises the
+// REAL makeLimiter (same pattern as test/dbWritePath.test.js).
+process.env.DATABASE_URL = process.env.DATABASE_URL || 'postgres://x:x@localhost/x';
+process.env.SESSION_KEYS = process.env.SESSION_KEYS || 'test-key-for-rate-limit-tests';
+
 const { test } = require('node:test');
 const assert = require('node:assert');
 const express = require('express');
 
-// Import the REAL makeLimiter from routes/api.js as the single source of
-// truth. This requires the config module to load, which needs DATABASE_URL
-// and SESSION_KEYS.  Step 6 ensures CI always provides these env vars.
-let makeLimiter;
-let canLoadReal;
-try {
-  ({ makeLimiter } = require('../routes/api'));
-  canLoadReal = true;
-} catch {
-  // In local dev without DATABASE_URL the real module cannot load.
-  canLoadReal = false;
-}
-
-// Fallback for when routes/api.js can't load (no env vars in local dev).
-// This is the same function — identical shape and options.
-const rateLimit = require('express-rate-limit');
-function localMakeLimiter({ windowMs, max, skip }) {
-    return rateLimit({
-        windowMs,
-        max,
-        standardHeaders: true,
-        legacyHeaders: false,
-        skip,
-        message: { error: 'Too many requests, please slow down.' },
-    });
-}
-
-const limiter = canLoadReal ? makeLimiter : localMakeLimiter;
+// Single source of truth: the limiter the route factory actually wires.
+const { makeLimiter } = require('../routes/api');
 
 function startServer(configure) {
     const app = express();
@@ -45,7 +25,7 @@ function startServer(configure) {
     });
 }
 
-test('config exposes tiered rate limits with sane defaults', { skip: canLoadReal ? false : 'DATABASE_URL/SESSION_KEYS not set — cannot import routes/api.js config' }, () => {
+test('config exposes tiered rate limits with sane defaults', () => {
     const { rateLimits } = require('../config/config');
     for (const tier of ['auth', 'upload', 'write', 'global']) {
         assert.ok(rateLimits[tier], `missing tier: ${tier}`);
@@ -58,7 +38,7 @@ test('config exposes tiered rate limits with sane defaults', { skip: canLoadReal
 
 test('bursting past max returns a JSON 429', async () => {
     const { server, base } = await startServer((app) => {
-        app.use(limiter({ windowMs: 60000, max: 3 }));
+        app.use(makeLimiter({ windowMs: 60000, max: 3 }));
         app.get('/x', (req, res) => res.json({ ok: true }));
     });
     try {
@@ -79,7 +59,7 @@ test('a matching Bearer token skips the upload limiter', async () => {
     const token = 'secret-token';
     const { server, base } = await startServer((app) => {
         app.use(
-            limiter({
+            makeLimiter({
                 windowMs: 60000,
                 max: 1,
                 skip: (req) => (req.headers.authorization || '') === `Bearer ${token}`,
@@ -103,7 +83,7 @@ test('a matching Bearer token skips the upload limiter', async () => {
 
 test('the window resets after windowMs elapses', async () => {
     const { server, base } = await startServer((app) => {
-        app.use(limiter({ windowMs: 300, max: 1 }));
+        app.use(makeLimiter({ windowMs: 300, max: 1 }));
         app.get('/x', (req, res) => res.json({ ok: true }));
     });
     try {
