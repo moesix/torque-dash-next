@@ -268,14 +268,14 @@ class SessionController {
             const logCount = await Log.count({ where: { sessionId: session.id } });
             if(filterNumber > logCount) return res.sendStatus(200);
             
-            // Delete every log except every Nth row using a SQL window function.
-            // This keeps rows at positions filterNumber, 2*filterNumber, ... (1-indexed)
-            // and deletes the rest — same semantics as the original JS loop but
-            // executed entirely inside PostgreSQL without loading rows into Node.
+            // Keep rows at 1-indexed positions N, 2N, 3N, … and delete everything else.
+            // The subquery is the set to DELETE (rn % N != 0); `id IN` — not `id NOT IN` —
+            // is what selects it. The previous `id NOT IN` deleted the multiples and kept
+            // ~(N-1)/N of the rows (a 5x downsample kept 80%).
             await sequelize.query(`
                 DELETE FROM "Logs"
                 WHERE "sessionId" = :sessionId
-                  AND id NOT IN (
+                  AND id IN (
                       SELECT id FROM (
                           SELECT id, ROW_NUMBER() OVER (ORDER BY timestamp) as rn
                           FROM "Logs"

@@ -200,6 +200,10 @@ docker compose up -d
 Data is persisted in the `pgdata` Docker volume — it survives container
 recreations. The TimescaleDB migration runs automatically on startup if needed.
 
+Sessions filtered with `filterNumber >= 3` before v2.4 retained the wrong rows
+(all but every Nth) and the intended rows were deleted; re-upload or re-import
+the session if you need the original resolution. Filtering is not reversible.
+
 ### Admin account on upgrade
 
 On an **upgraded** deployment (users created before migration `017`), the
