@@ -36,6 +36,12 @@ jobs:
       - name: Install backend dependencies
         run: npm ci
 
+      # Runtime-only gate: a high advisory in a shipped dependency must fail CI.
+      # Dev-only advisories are excluded on purpose (see docs/development.md §10)
+      # so a permanent red gate cannot train people to ignore this one.
+      - name: Audit runtime dependencies
+        run: npm audit --omit=dev --audit-level=high
+
       - name: Run backend tests (coverage gate)
         run: npm run test:coverage
 
@@ -230,6 +236,10 @@ jobs:
       - name: Install frontend dependencies
         working-directory: apps/frontend
         run: npm ci
+
+      - name: Audit frontend runtime dependencies
+        working-directory: apps/frontend
+        run: npm audit --omit=dev --audit-level=high
 
       # Frontend lint is a deliberate placeholder that exits 0: typescript-eslint
       # does not support TypeScript >=7 yet (typescript-eslint#10940). The script
