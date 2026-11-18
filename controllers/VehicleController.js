@@ -1,5 +1,6 @@
 const Vehicle = require('../models').Vehicle;
 const Session = require('../models').Session;
+const sequelize = require('../models').sequelize;
 const { vehicleCreateSchema, vehicleUpdateSchema } = require('../lib/validators');
 
 class VehicleController {
@@ -110,20 +111,29 @@ class VehicleController {
     /** Set a vehicle as default. Unsets all others for this user. */
     static async setDefault(req, res) {
         try {
-            const vehicle = await Vehicle.findOne({
-                where: { id: req.params.vehicleId, userId: req.user.id },
-            });
-            if (!vehicle) return res.status(404).json({ error: 'Vehicle not found' });
+            // One transaction so the unset and the set cannot interleave with
+            // another request (two defaults used to be possible). The row lock
+            // serializes concurrent calls for the same vehicle; the partial
+            // unique index (migration 027) is the backstop.
+            const result = await sequelize.transaction(async (t) => {
+                const vehicle = await Vehicle.findOne({
+                    where: { id: req.params.vehicleId, userId: req.user.id },
+                    transaction: t,
+                    lock: t.LOCK.UPDATE,
+                });
+                if (!vehicle) return null;
 
-            // Unset all defaults for this user
-            await Vehicle.update(
-                { isDefault: false },
-                { where: { userId: req.user.id } }
-            );
-            // Set this one as default
-            vehicle.isDefault = true;
-            await vehicle.save();
-            res.json(vehicle);
+                // Unset all defaults for this user
+                await Vehicle.update(
+                    { isDefault: false },
+                    { where: { userId: req.user.id }, transaction: t }
+                );
+                // Set this one as default
+                await vehicle.update({ isDefault: true }, { transaction: t });
+                return vehicle;
+            });
+            if (!result) return res.status(404).json({ error: 'Vehicle not found' });
+            res.json(result);
         } catch (err) {
             console.error('[VehicleController]', err);
             res.status(500).json({ error: 'Internal server error' });
