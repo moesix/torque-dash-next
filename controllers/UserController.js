@@ -24,9 +24,20 @@ class UserController {
             if (!user) {
                 return res.status(401).json({ error: (info && info.message) || 'Invalid credentials' });
             }
-            req.logIn(user, (loginErr) => {
-                if (loginErr) return next(loginErr);
-                return res.json({ ok: true });
+            // Session fixation defence (plan 030): rotate the session id BEFORE
+            // attaching the authenticated identity, so a cookie planted before
+            // login never becomes an authenticated session. Same sequence as
+            // changePassword below — req.logIn is called exactly once and only
+            // inside this callback, on the fresh session object.
+            req.session.regenerate((regenErr) => {
+                if (regenErr) {
+                    console.error('[UserController] login session regenerate failed:', regenErr.message);
+                    return res.status(500).json({ error: 'Login failed. Please try again.' });
+                }
+                req.logIn(user, (loginErr) => {
+                    if (loginErr) return next(loginErr);
+                    return res.json({ ok: true });
+                });
             });
         })(req, res, next);
     }

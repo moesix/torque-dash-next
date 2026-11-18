@@ -286,15 +286,32 @@ describe('UserController.login wrapper', () => {
     // LocalStrategy awaits User.findOne + comparePassword), so the response is
     // emitted on a later microtask. resolveDone fires when the wrapper reaches
     // a terminal action (res.json or next(err)) and tests await it.
-    function makeLoginHarness({ body } = {}) {
-        const calls = {};
+    // Mirrors express-session's regenerate(): it REPLACES req.session with a
+    // brand-new object (so a pre-login session id can never survive) and then
+    // calls back. `beforeId` captures the id the request arrived with.
+    const PRE_LOGIN_SESSION_ID = 'sess-before-login';
+    const POST_LOGIN_SESSION_ID = 'sess-after-login';
+
+    function makeLoginHarness({ body, regenerateError = null } = {}) {
+        const calls = { regenerateCalls: 0 };
         const resCalls = { statusCode: null, body: null };
         let resolveDone;
         const donePromise = new Promise((resolve) => { resolveDone = resolve; });
         const req = {
             body: body || { email: 'user@example.com', password: 'password123' },
+            session: {
+                id: PRE_LOGIN_SESSION_ID,
+                regenerate(cb) {
+                    calls.regenerateCalls += 1;
+                    calls.regenerateError = regenerateError;
+                    if (regenerateError) return cb(regenerateError);
+                    req.session = { id: POST_LOGIN_SESSION_ID };
+                    cb(null);
+                },
+            },
             logIn(user, cb) {
                 calls.loginUser = user;
+                calls.sessionIdAtLogIn = req.session.id;
                 cb(null);
             },
         };
@@ -344,6 +361,35 @@ describe('UserController.login wrapper', () => {
         assert.strictEqual(h.nextCalls.args.length, 1, 'next must be called with the error');
         assert.strictEqual(h.nextCalls.args[0].message, 'db unavailable');
         assert.strictEqual(h.resCalls.body, null, 'no JSON response on internal error');
+    });
+
+    test('rotates the session id on login and logs in on the fresh session (plan 030)', async () => {
+        userFindOneResult = makeUser();
+        const h = makeLoginHarness();
+        const beforeId = h.req.session.id;
+        UserController.login(h.req, h.res, h.next);
+        await h.donePromise;
+
+        assert.deepStrictEqual(h.resCalls.body, { ok: true });
+        assert.strictEqual(h.calls.regenerateCalls, 1, 'regenerate must run exactly once');
+        assert.notStrictEqual(h.req.session.id, beforeId,
+            'session id after login must differ from the one presented before login');
+        assert.strictEqual(h.req.session.id, POST_LOGIN_SESSION_ID);
+        assert.strictEqual(h.calls.sessionIdAtLogIn, POST_LOGIN_SESSION_ID,
+            'req.logIn must target the regenerated session, not the pre-login one');
+        assert.strictEqual(h.calls.loginUser.id, 1);
+    });
+
+    test('does not attempt logIn when session regeneration fails', async () => {
+        userFindOneResult = makeUser();
+        const h = makeLoginHarness({ regenerateError: new Error('store unavailable') });
+        UserController.login(h.req, h.res, h.next);
+        await h.donePromise;
+
+        assert.strictEqual(h.resCalls.statusCode, 500);
+        assert.deepStrictEqual(h.resCalls.body, { error: 'Login failed. Please try again.' });
+        assert.strictEqual(h.calls.loginUser, undefined, 'no authenticated identity without a fresh session');
+        assert.strictEqual(h.nextCalls.args.length, 0);
     });
 
     test('missing credentials short-circuit to 401 without a DB hit', async () => {
