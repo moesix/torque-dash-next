@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import {
+  ApiError,
   getVehicles,
   createVehicle,
   updateVehicle,
@@ -56,8 +57,8 @@ export default function VehicleManager() {
       setShowAddForm(false);
       setFormData({ name: '', make: null, model: null, year: null, engineCc: null });
       await loadVehicles();
-    } catch {
-      setError('Failed to create vehicle.');
+    } catch (err) {
+      setError(err instanceof ApiError && err.message ? err.message : 'Failed to create vehicle.');
     }
   }
 
@@ -66,8 +67,8 @@ export default function VehicleManager() {
       await updateVehicle(id, formData);
       setEditingId(null);
       await loadVehicles();
-    } catch {
-      setError('Failed to update vehicle.');
+    } catch (err) {
+      setError(err instanceof ApiError && err.message ? err.message : 'Failed to update vehicle.');
     }
   }
 
@@ -78,8 +79,8 @@ export default function VehicleManager() {
       await deleteVehicle(id);
       setDeleteTarget(null);
       await loadVehicles();
-    } catch {
-      setError('Failed to delete vehicle.');
+    } catch (err) {
+      setError(err instanceof ApiError && err.message ? err.message : 'Failed to delete vehicle.');
     } finally {
       setDeleting(false);
     }
@@ -89,8 +90,8 @@ export default function VehicleManager() {
     try {
       await setDefaultVehicle(id);
       await loadVehicles();
-    } catch {
-      setError('Failed to set default vehicle.');
+    } catch (err) {
+      setError(err instanceof ApiError && err.message ? err.message : 'Failed to set default vehicle.');
     }
   }
 

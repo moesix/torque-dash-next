@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import * as api from '../api';
 
 describe('api module', () => {
@@ -36,6 +36,43 @@ describe('api module', () => {
         expect(err.status).toBe(404);
         expect(err.name).toBe('ApiError');
         expect(err instanceof Error).toBe(true);
+    });
+});
+
+describe('request() error body parsing', () => {
+    afterEach(() => {
+        vi.unstubAllGlobals();
+    });
+
+    it('uses the backend { error } message as ApiError.message on a 400', async () => {
+        // Any request()-based call works; getSettings is the simplest.
+        vi.stubGlobal('fetch', vi.fn(async () => new Response(
+            JSON.stringify({ error: 'Bad thing' }),
+            { status: 400, headers: { 'Content-Type': 'application/json' } },
+        )));
+
+        const err = await api.getSettings().then(
+            () => { throw new Error('expected rejection'); },
+            (e: unknown) => e,
+        );
+        expect(err).toBeInstanceOf(api.ApiError);
+        expect((err as InstanceType<typeof api.ApiError>).message).toBe('Bad thing');
+        expect((err as InstanceType<typeof api.ApiError>).status).toBe(400);
+    });
+
+    it('falls back to the status message when a 500 body is HTML', async () => {
+        vi.stubGlobal('fetch', vi.fn(async () => new Response(
+            '<html><body>Internal Server Error</body></html>',
+            { status: 500, headers: { 'Content-Type': 'text/html' } },
+        )));
+
+        const err = await api.getSettings().then(
+            () => { throw new Error('expected rejection'); },
+            (e: unknown) => e,
+        );
+        expect(err).toBeInstanceOf(api.ApiError);
+        expect((err as InstanceType<typeof api.ApiError>).message).toBe('Request failed with status 500');
+        expect((err as InstanceType<typeof api.ApiError>).status).toBe(500);
     });
 });
 
