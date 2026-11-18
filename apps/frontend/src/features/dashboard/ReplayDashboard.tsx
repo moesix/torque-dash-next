@@ -98,6 +98,10 @@ export default function ReplayDashboard() {
   // View mode: 'dash' is the default landing view; 'map' shows the
   // GPS track near-fullscreen with the playback transport beneath it.
   const [viewMode, setViewMode] = useState<'dash' | 'map'>('dash');
+  // The expanded-chart dialog stays mounted (it owns `closedby` + the ref),
+  // but its chart only exists while open: a closed <dialog> is display:none,
+  // and a chart initializing/updating there is pure waste (plan 037).
+  const [expanded, setExpanded] = useState(false);
 
   // Feature state machines, each self-contained in ./hooks (plans/017).
   // Print-to-PDF: force-expand panels → double-rAF → window.print(), reset on
@@ -154,10 +158,12 @@ export default function ReplayDashboard() {
   );
 
   const handleExpand = useCallback(() => {
+    setExpanded(true);
     dialogRef.current?.showModal();
   }, []);
 
   const handleCollapse = useCallback(() => {
+    setExpanded(false);
     dialogRef.current?.close();
   }, []);
 
@@ -460,13 +466,15 @@ export default function ReplayDashboard() {
                 ↓
               </button>
             </div>
-            <OverlayChartWithCursor
-              frames={frames}
-              sources={selectedSources}
-              epochs={epochs}
-              onCursorMove={handleCursorMove}
-              className="h-full"
-            />
+            {expanded && (
+              <OverlayChartWithCursor
+                frames={frames}
+                sources={selectedSources}
+                epochs={epochs}
+                onCursorMove={handleCursorMove}
+                className="h-full"
+              />
+            )}
           </div>
         </dialog>
       </div>
