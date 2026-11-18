@@ -37,6 +37,7 @@ describe('migration loader', () => {
             '023_user_admin_guarded.sql',
             '024_session_max_types.sql',
             '025_settings_timestamps.sql',
+            '026_session_user_created_idx.sql',
             'migrations/001_add_upload_token.sql',
             'migrations/002_backfill_pid_columns.sql',
             'migrations/003_recompute_session_summaries.sql',
