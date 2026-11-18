@@ -200,6 +200,13 @@ docker compose up -d
 Data is persisted in the `pgdata` Docker volume — it survives container
 recreations. The TimescaleDB migration runs automatically on startup if needed.
 
+### Upgrade notes
+
+> If you built a backend image locally from a checkout that contained a `.env`,
+> rotate `POSTGRES_PASSWORD`, `SESSION_KEYS`, `UPLOAD_API_TOKEN` and
+> `LLM_ENCRYPTION_KEY` — earlier `.dockerignore` versions copied that file into
+> the image.
+
 ### Admin account on upgrade
 
 On an **upgraded** deployment (users created before migration `017`), the
