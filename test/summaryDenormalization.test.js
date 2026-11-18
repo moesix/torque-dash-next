@@ -43,9 +43,9 @@ function makeMockModels(overrides = {}) {
 
 function loadWithMocks(mockModels) {
   // sessionSummaries binds ../models at load time now, so it must be purged
-  // alongside the controller; ingestBuffer pulls the same service in.
+  // with ingestBuffer (which pulls the same service in).
   return loadModuleWithMocks(
-    '../controllers/SessionController',
+    null,
     [{ path: '../models', exports: mockModels }],
     ['../services/sessionSummaries', '../services/ingestBuffer']
   );
@@ -67,7 +67,7 @@ describe('aggregateSummaries — reads from Session columns', () => {
 
     const { restore } = loadWithMocks(mockModels);
     try {
-      const { aggregateSummaries } = require('../controllers/SessionController');
+      const { aggregateSummaries } = require('../services/sessionSummaries');
       const map = await aggregateSummaries(['s1', 's2']);
 
       assert.strictEqual(map.size, 2);
@@ -107,7 +107,7 @@ describe('aggregateSummaries — reads from Session columns', () => {
 
     const { restore } = loadWithMocks(mockModels);
     try {
-      const { aggregateSummaries } = require('../controllers/SessionController');
+      const { aggregateSummaries } = require('../services/sessionSummaries');
       const map = await aggregateSummaries(['s1']);
 
       assert.strictEqual(logQueryCount, 1, 'Should fall back to Log.findAll');
@@ -145,7 +145,7 @@ describe('aggregateSummaries — reads from Session columns', () => {
 
     const { restore } = loadWithMocks(mockModels);
     try {
-      const { aggregateSummaries } = require('../controllers/SessionController');
+      const { aggregateSummaries } = require('../services/sessionSummaries');
       // Session instance (toJSON) + plain object (list/detail JSON path) both work.
       const map = await aggregateSummaries(['s1', 's2'], preloaded);
 
@@ -165,7 +165,7 @@ describe('aggregateSummaries — reads from Session columns', () => {
     const mockModels = makeMockModels();
     const { restore } = loadWithMocks(mockModels);
     try {
-      const { aggregateSummaries } = require('../controllers/SessionController');
+      const { aggregateSummaries } = require('../services/sessionSummaries');
       const map = await aggregateSummaries([]);
       assert.strictEqual(map.size, 0);
     } finally {
@@ -177,7 +177,7 @@ describe('aggregateSummaries — reads from Session columns', () => {
     const mockModels = makeMockModels();
     const { restore } = loadWithMocks(mockModels);
     try {
-      const { aggregateSummaries } = require('../controllers/SessionController');
+      const { aggregateSummaries } = require('../services/sessionSummaries');
       const map = await aggregateSummaries(null);
       assert.strictEqual(map.size, 0);
     } finally {
@@ -205,7 +205,7 @@ describe('recomputeSummary — updates Session columns', () => {
 
     const { restore } = loadWithMocks(mockModels);
     try {
-      const { recomputeSummary } = require('../controllers/SessionController');
+      const { recomputeSummary } = require('../services/sessionSummaries');
       await recomputeSummary('s1');
 
       assert.ok(updateArgs, 'Session.update should be called');
@@ -237,7 +237,7 @@ describe('recomputeSummary — updates Session columns', () => {
 
     const { restore } = loadWithMocks(mockModels);
     try {
-      const { recomputeSummary } = require('../controllers/SessionController');
+      const { recomputeSummary } = require('../services/sessionSummaries');
       await recomputeSummary('s_zero');
 
       assert.ok(updateArgs, 'Session.update should be called');
@@ -263,7 +263,7 @@ describe('recomputeSummary — updates Session columns', () => {
 
     const { restore } = loadWithMocks(mockModels);
     try {
-      const { recomputeSummary } = require('../controllers/SessionController');
+      const { recomputeSummary } = require('../services/sessionSummaries');
       await recomputeSummary('s_empty_agg');
 
       assert.ok(updateArgs, 'Session.update should be called for the aggregate row');
@@ -287,7 +287,7 @@ describe('recomputeSummary — updates Session columns', () => {
 
     const { restore } = loadWithMocks(mockModels);
     try {
-      const { recomputeSummary } = require('../controllers/SessionController');
+      const { recomputeSummary } = require('../services/sessionSummaries');
       await recomputeSummary('s_empty');
       assert.strictEqual(updateCalled, false, 'Session.update should not be called when Log.findOne returns null');
     } finally {
@@ -565,8 +565,8 @@ describe('SessionController — recomputeSummary calls', () => {
     );
     const matches = scSrc.match(/recomputeSummary/g);
     assert.ok(matches, 'recomputeSummary should appear in SessionController');
-    // 1 definition + 4 calls (copy, join, filter, cut) + 2 exports = at least 5
+    // 1 import + 4 calls (copy, join, filter, cut) = 5
     assert.ok(matches.length >= 5,
-      `Expected at least 5 occurrences of recomputeSummary (1 def + 4 calls + exports), got ${matches.length}`);
+      `Expected at least 5 occurrences of recomputeSummary (1 import + 4 calls), got ${matches.length}`);
   });
 });

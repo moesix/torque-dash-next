@@ -204,8 +204,8 @@ describe('flush integration — invalidates touched sessions on success only', (
 // The invalidation sits before the `if (!log) return;` early exit.
 
 function loadControllerWithMocks(logRow) {
-    const { module: SessionController, restore } = loadWithMocks(
-        '../controllers/SessionController',
+    const { module: sessionSummaries, restore } = loadWithMocks(
+        '../services/sessionSummaries',
         [{
             path: '../models',
             exports: {
@@ -214,12 +214,11 @@ function loadControllerWithMocks(logRow) {
                 sequelize: { fn: () => null, col: () => null, query: async () => [] },
                 Sequelize: { Op: { and: Symbol('and'), gt: Symbol('gt'), lte: Symbol('lte') } },
             },
-        }],
-        ['../services/sessionSummaries']
+        }]
     );
 
     return {
-        recomputeSummary: SessionController.recomputeSummary,
+        recomputeSummary: sessionSummaries.recomputeSummary,
         restore,
     };
 }
