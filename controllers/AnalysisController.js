@@ -360,7 +360,7 @@ class AnalysisController {
     }
   }
 
-  static async listAnalyses(req, res) {
+  static async listAnalyses(req, res, next) {
     try {
       const session = await Session.findOne({
         where: { id: req.params.sessionId, userId: req.user.id },
@@ -376,12 +376,11 @@ class AnalysisController {
 
       res.json(analyses);
     } catch (err) {
-      console.error('[AnalysisController.listAnalyses]', err);
-      res.status(500).json({ error: 'Internal server error' });
+      next(err);
     }
   }
 
-  static async deleteAnalysis(req, res) {
+  static async deleteAnalysis(req, res, next) {
     try {
       const deleted = await Analysis.destroy({
         where: { id: req.params.analysisId, userId: req.user.id },
@@ -389,12 +388,11 @@ class AnalysisController {
       if (!deleted) return res.status(404).json({ error: 'Analysis not found' });
       res.sendStatus(200);
     } catch (err) {
-      console.error('[AnalysisController.deleteAnalysis]', err);
-      res.status(500).json({ error: 'Internal server error' });
+      next(err);
     }
   }
 
-  static async listAllAnalyses(req, res) {
+  static async listAllAnalyses(req, res, next) {
     try {
       // Clamp pagination to limit [1,200] (default 50) and offset >= 0.
       // limit=0 → 50 is deliberate: 0 parses falsy and falls back to the
@@ -439,12 +437,11 @@ class AnalysisController {
       const total = await Analysis.count({ where });
       res.json({ analyses, total, limit, offset });
     } catch (err) {
-      console.error('[AnalysisController.listAllAnalyses]', err);
-      res.status(500).json({ error: 'Internal server error' });
+      next(err);
     }
   }
 
-  static async getAnalysis(req, res) {
+  static async getAnalysis(req, res, next) {
     try {
       const analysis = await Analysis.findOne({
         where: { id: req.params.analysisId, userId: req.user.id },
@@ -453,8 +450,7 @@ class AnalysisController {
       if (!analysis) return res.status(404).json({ error: 'Analysis not found' });
       res.json(analysis);
     } catch (err) {
-      console.error('[AnalysisController.getAnalysis]', err);
-      res.status(500).json({ error: 'Internal server error' });
+      next(err);
     }
   }
 

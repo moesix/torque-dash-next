@@ -5,7 +5,7 @@ const { vehicleCreateSchema, vehicleUpdateSchema } = require('../lib/validators'
 
 class VehicleController {
     /** List all vehicles for the authenticated user. */
-    static async getAll(req, res) {
+    static async getAll(req, res, next) {
         try {
             const vehicles = await Vehicle.findAll({
                 where: { userId: req.user.id },
@@ -13,13 +13,12 @@ class VehicleController {
             });
             res.json(vehicles);
         } catch (err) {
-            console.error('[VehicleController]', err);
-            res.status(500).json({ error: 'Internal server error' });
+            next(err);
         }
     }
 
     /** Get a single vehicle by ID. */
-    static async getOne(req, res) {
+    static async getOne(req, res, next) {
         try {
             const vehicle = await Vehicle.findOne({
                 where: { id: req.params.vehicleId, userId: req.user.id },
@@ -27,13 +26,12 @@ class VehicleController {
             if (!vehicle) return res.status(404).json({ error: 'Vehicle not found' });
             res.json(vehicle);
         } catch (err) {
-            console.error('[VehicleController]', err);
-            res.status(500).json({ error: 'Internal server error' });
+            next(err);
         }
     }
 
     /** Create a new vehicle. */
-    static async create(req, res) {
+    static async create(req, res, next) {
         try {
             const { error } = vehicleCreateSchema.validate(req.body);
             if (error) return res.status(400).json({ error: error.details[0].message });
@@ -52,13 +50,12 @@ class VehicleController {
             });
             res.status(201).json(vehicle);
         } catch (err) {
-            console.error('[VehicleController]', err);
-            res.status(500).json({ error: 'Internal server error' });
+            next(err);
         }
     }
 
     /** Update a vehicle. */
-    static async update(req, res) {
+    static async update(req, res, next) {
         try {
             const { error } = vehicleUpdateSchema.validate(req.body);
             if (error) return res.status(400).json({ error: error.details[0].message });
@@ -82,13 +79,12 @@ class VehicleController {
             await vehicle.save();
             res.json(vehicle);
         } catch (err) {
-            console.error('[VehicleController]', err);
-            res.status(500).json({ error: 'Internal server error' });
+            next(err);
         }
     }
 
     /** Delete a vehicle. Sessions are unassigned (SET NULL on FK). */
-    static async delete(req, res) {
+    static async delete(req, res, next) {
         try {
             const vehicle = await Vehicle.findOne({
                 where: { id: req.params.vehicleId, userId: req.user.id },
@@ -103,13 +99,12 @@ class VehicleController {
             await vehicle.destroy();
             res.sendStatus(200);
         } catch (err) {
-            console.error('[VehicleController]', err);
-            res.status(500).json({ error: 'Internal server error' });
+            next(err);
         }
     }
 
     /** Set a vehicle as default. Unsets all others for this user. */
-    static async setDefault(req, res) {
+    static async setDefault(req, res, next) {
         try {
             // One transaction so the unset and the set cannot interleave with
             // another request (two defaults used to be possible). The row lock
@@ -135,8 +130,7 @@ class VehicleController {
             if (!result) return res.status(404).json({ error: 'Vehicle not found' });
             res.json(result);
         } catch (err) {
-            console.error('[VehicleController]', err);
-            res.status(500).json({ error: 'Internal server error' });
+            next(err);
         }
     }
 }

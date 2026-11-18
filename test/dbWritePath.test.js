@@ -833,12 +833,15 @@ describe('SessionController — drain before Log mutations', () => {
     [/sequelize\.query\s*\(/, 'raw SQL (sequelize.query)'],
   ];
 
-  // Body of one static handler, up to the next class method.
+  // Body of one static handler, up to the next class method. Handlers that
+  // route unexpected failures through the error middleware take a third
+  // `next` parameter (plan 034), so accept it optionally.
   function handlerBody(src, name) {
-    const marker = `    static async ${name}(req, res) {`;
-    const start = src.indexOf(marker);
-    assert.notStrictEqual(start, -1, `handler ${name} not found in SessionController`);
-    const rest = src.slice(start + marker.length);
+    const marker = new RegExp(`    static async ${name}\\(req, res(?:, next)?\\) \\{`);
+    const match = marker.exec(src);
+    assert.notStrictEqual(match, null, `handler ${name} not found in SessionController`);
+    const start = match.index;
+    const rest = src.slice(start + match[0].length);
     const end = rest.indexOf('\n    static async ');
     return end === -1 ? rest : rest.slice(0, end);
   }

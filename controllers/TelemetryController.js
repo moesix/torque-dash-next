@@ -6,7 +6,7 @@ const { telemetryRangeSchema } = require('../lib/validators');
 class TelemetryController {
     // GET /api/sessions/:sessionId/telemetry?from&to&limit
     // Enforces ownership and returns paged frames.
-    static async range(req, res) {
+    static async range(req, res, next) {
         try {
             const { from, to } = req.query;
             if (!from || !to) {
@@ -54,8 +54,7 @@ class TelemetryController {
             });
             res.json(rows);
         } catch (err) {
-            console.error('[TelemetryController.range]', err);
-            res.status(500).json({ error: 'Internal server error' });
+            next(err);
         }
     }
 }

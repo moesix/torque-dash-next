@@ -44,8 +44,10 @@ require.cache[modelsPath] = {
 };
 
 const SessionController = require('../controllers/SessionController');
+const TelemetryController = require('../controllers/TelemetryController');
 const UploadController = require('../controllers/UploadController');
 const runtime = require('../config/runtime');
+const { errorMiddleware, badRequest } = require('../lib/httpError');
 
 // Boot the real /api router for shape-level assertions. The auth middleware is
 // stubbed to a pass-through so invalid-id requests reach the id gate instead of
@@ -269,5 +271,88 @@ describe('Error contract — backend response shapes', () => {
       const keys = Object.keys(errorBody);
       assert.deepStrictEqual(keys, ['error']);
     });
+  });
+});
+
+// ── Error middleware (plan 034) ─────────────────────────────────────
+// The middleware is registered after the JSON 404 in app.js. These tests
+// mount it directly (same order) so the contract is asserted without booting
+// the DB-backed app; the converted-route test below drives a real controller.
+describe('errorMiddleware — one JSON error contract', () => {
+  async function withServer(app, fn) {
+    const server = app.listen(0);
+    await new Promise((resolve) => server.once('listening', resolve));
+    try {
+      return await fn(server.address().port);
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  }
+
+  function appWith(...handlers) {
+    const app = express();
+    for (const h of handlers) app.get('/x', h);
+    // Mirror app.js: JSON 404, then the terminal error middleware.
+    app.use('*', (req, res) => res.status(404).json({ error: 'Not found' }));
+    app.use(errorMiddleware);
+    return app;
+  }
+
+  test('a thrown plain error answers 500 JSON and never leaks its message', async () => {
+    const app = appWith(() => { throw new Error('relation "Secrets" does not exist'); });
+    await withServer(app, async (port) => {
+      const res = await fetch(`http://127.0.0.1:${port}/x`);
+      assert.strictEqual(res.status, 500);
+      assert.match(res.headers.get('content-type') || '', /application\/json/);
+      assert.deepStrictEqual(await res.json(), { error: 'Internal server error' });
+    });
+  });
+
+  test('an HttpError answers with its status and message', async () => {
+    const app = appWith(() => { throw badRequest('retentionDays must be between 90 and 365'); });
+    await withServer(app, async (port) => {
+      const res = await fetch(`http://127.0.0.1:${port}/x`);
+      assert.strictEqual(res.status, 400);
+      assert.deepStrictEqual(await res.json(), { error: 'retentionDays must be between 90 and 365' });
+    });
+  });
+
+  test('unmatched routes still answer 404 JSON', async () => {
+    const app = appWith(() => {});
+    await withServer(app, async (port) => {
+      const res = await fetch(`http://127.0.0.1:${port}/nope`);
+      assert.strictEqual(res.status, 404);
+      assert.deepStrictEqual(await res.json(), { error: 'Not found' });
+    });
+  });
+
+  test('a converted handler (TelemetryController.range) reaches the middleware', async () => {
+    // Force the controller's DB call to throw, exercising the new
+    // `catch (err) { next(err); }` path end-to-end through Express.
+    const origFindOne = mockModels.Session.findOne;
+    const origFindAll = mockModels.Log.findAll;
+    mockModels.Session.findOne = async () => ({ id: 7, sessionId: 's1' });
+    mockModels.Log.findAll = async () => { throw new Error('db exploded'); };
+
+    const app = express();
+    app.get('/telemetry', (req, _res, next) => {
+      req.user = { id: 1 };
+      req.query = { from: '2026-01-01T00:00:00Z', to: '2026-01-02T00:00:00Z' };
+      req.params = { sessionId: '7' };
+      TelemetryController.range(req, _res, next);
+    });
+    app.use(errorMiddleware);
+
+    try {
+      await withServer(app, async (port) => {
+        const res = await fetch(`http://127.0.0.1:${port}/telemetry`);
+        assert.strictEqual(res.status, 500);
+        assert.match(res.headers.get('content-type') || '', /application\/json/);
+        assert.deepStrictEqual(await res.json(), { error: 'Internal server error' });
+      });
+    } finally {
+      mockModels.Session.findOne = origFindOne;
+      mockModels.Log.findAll = origFindAll;
+    }
   });
 });
