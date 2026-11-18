@@ -38,6 +38,7 @@ const {
   validateAnalysisRetentionDays,
   validateTileProvider,
   validateCartoApiKey,
+  settingsUpdateSchema,
   MAX_CARTO_API_KEY_LENGTH,
 } = require('../lib/validators');
 const UserController = require('../controllers/UserController');
@@ -461,8 +462,99 @@ describe('PUT /api/settings — llmModel null acceptance', () => {
   });
 });
 
-// ── Role projection (plan 030) ──────────────────────────────────────
+// ── settingsUpdateSchema — the front door (plan 033) ────────────────
+// The schema owns the accepted key list; the handler keeps only the special
+// cases (URL parsing, encrypted key, env kill-switches). Every key the SPA
+// sends must be listed, or the PUT becomes a 400.
 
+describe('settingsUpdateSchema', () => {
+  it('accepts every key the settings UI sends in one body', () => {
+    const body = {
+      disableRegistration: false,
+      uploadApiToken: null,
+      llmProvider: 'custom',
+      llmModel: 'my-model',
+      llmEndpoint: 'https://proxy.example.com/v1',
+      llmThinkingMode: true,
+      llmReasoningEffort: 'high',
+      llmMaxTokens: 16384,
+      timezoneOffset: 480,
+      retentionEnabled: true,
+      retentionDays: 180,
+      analysisRetentionDays: null,
+      tileProvider: 'carto',
+      cartoApiKey: 'carto_key',
+    };
+    const { error } = settingsUpdateSchema.validate(body);
+    assert.ifError(error);
+  });
+
+  it('accepts llmApiKey (AiProviderCard sends it only when typed)', () => {
+    assert.ifError(settingsUpdateSchema.validate({ llmApiKey: 'sk-test' }).error);
+    assert.ifError(settingsUpdateSchema.validate({ llmApiKey: null }).error);
+  });
+
+  it('accepts provider switch shapes (null provider/model/endpoint)', () => {
+    assert.ifError(settingsUpdateSchema.validate({
+      llmProvider: null, llmModel: null, llmEndpoint: null,
+    }).error);
+    assert.ifError(settingsUpdateSchema.validate({ llmProvider: 'openai', llmModel: null }).error);
+  });
+
+  it('rejects an unknown key instead of silently ignoring it', () => {
+    const { error } = settingsUpdateSchema.validate({ notAField: true });
+    assert.ok(error);
+    assert.match(error.message, /notAField/);
+  });
+
+  it('keeps the old strict shapes', () => {
+    // booleans were typeof-checked, not truthy
+    assert.ok(settingsUpdateSchema.validate({ disableRegistration: 'true' }).error);
+    assert.ok(settingsUpdateSchema.validate({ llmThinkingMode: 1 }).error);
+    assert.ok(settingsUpdateSchema.validate({ retentionEnabled: 'false' }).error);
+    // retention windows were strict integers
+    assert.ok(settingsUpdateSchema.validate({ retentionDays: '180' }).error);
+    assert.ok(settingsUpdateSchema.validate({ retentionDays: 89 }).error);
+    assert.ok(settingsUpdateSchema.validate({ analysisRetentionDays: 366 }).error);
+    // numeric-coerced fields (old Number() cast) still accept numeric strings
+    assert.ifError(settingsUpdateSchema.validate({ llmMaxTokens: '16384' }).error);
+    assert.ifError(settingsUpdateSchema.validate({ timezoneOffset: '480' }).error);
+  });
+});
+
+describe('PUT /api/settings — schema front door', () => {
+  function makeRes() {
+    const calls = { statusCode: null, body: null };
+    const res = {
+      status(code) { calls.statusCode = code; return res; },
+      json(obj) { calls.body = obj; return res; },
+    };
+    return { res, calls };
+  }
+
+  it('returns 400 for an unknown key and never writes', async () => {
+    settingsState = {};
+    const { res, calls } = makeRes();
+    await UserController.updateSettings({ user: { id: 1, isAdmin: true }, body: { nope: 1 } }, res);
+    assert.strictEqual(calls.statusCode, 400);
+    assert.match(calls.body.error, /nope/);
+    assert.deepStrictEqual(settingsState, {}, 'no upsert for a rejected body');
+  });
+
+  it('accepts a body of only UI-shaped keys', async () => {
+    settingsState = {};
+    const { res, calls } = makeRes();
+    await UserController.updateSettings({
+      user: { id: 1, isAdmin: true },
+      body: { retentionDays: 180, timezoneOffset: 60, llmProvider: null },
+    }, res);
+    assert.strictEqual(calls.statusCode, null, JSON.stringify(calls.body));
+    assert.strictEqual(settingsState.retentionDays, 180);
+    assert.strictEqual(settingsState.timezoneOffset, 60);
+  });
+});
+
+// ── Role projection (plan 030) ──────────────────────────────────────
 describe('settingsView role projection', () => {
   const row = {
     llmProvider: 'custom',

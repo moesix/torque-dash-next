@@ -5,7 +5,7 @@ const passport = require('passport');
 const crypto = require('crypto');
 const runtime = require('../config/runtime');
 const { userByIdCache } = require('../config/passport');
-const { validateLlmThinkingMode, validateLlmMaxTokens, validateRetentionEnabled, validateRetentionDays, validateAnalysisRetentionDays, validateProvider, validateTileProvider, validateCartoApiKey } = require('../lib/validators');
+const { settingsUpdateSchema } = require('../lib/validators');
 
 // Admin = first registered user (bootstrap at register time, plan 099). Any
 // admin-only mutation must call this first and return 403 when it fails.
@@ -196,6 +196,15 @@ class UserController {
     static async updateSettings(req, res) {
         try {
             if (!requireAdmin(req, res)) return;
+
+            // Front door: one schema owns the accepted key list and the plain
+            // field shapes. Anything below is special-case handling that cannot
+            // live in Joi (env-kill-switch, encrypted key, URL parsing, the
+            // runtime token holder, retention policy side effects).
+            const { error: schemaErr, value: body } = settingsUpdateSchema.validate(req.body);
+            if (schemaErr) return res.status(400).json({ error: schemaErr.details[0].message });
+            req.body = body;
+
             const { disableRegistration, uploadApiToken } = req.body;
             const envDisabled = process.env.DISABLE_REGISTRATION === 'true';
 
@@ -203,9 +212,6 @@ class UserController {
 
             // disableRegistration is optional — allows PUT with just uploadApiToken
             if (disableRegistration !== undefined) {
-                if (typeof disableRegistration !== 'boolean') {
-                    return res.status(400).json({ error: 'disableRegistration must be a boolean.' });
-                }
                 if (envDisabled) {
                     return res.status(403).json({ error: 'Registration is disabled by configuration.' });
                 }
@@ -219,12 +225,6 @@ class UserController {
                         error: 'Upload API token is managed via the UPLOAD_API_TOKEN environment variable. Unset it to use the app UI.',
                     });
                 }
-                if (uploadApiToken !== null && typeof uploadApiToken !== 'string') {
-                    return res.status(400).json({ error: 'uploadApiToken must be a string or null.' });
-                }
-                if (typeof uploadApiToken === 'string' && uploadApiToken.length === 0) {
-                    return res.status(400).json({ error: 'uploadApiToken must not be empty.' });
-                }
                 updateData.uploadApiToken = uploadApiToken;
             }
 
@@ -233,17 +233,12 @@ class UserController {
                     vehicleMake, vehicleModel, vehicleYear, engineCc } = req.body;
 
             if (llmProvider !== undefined) {
-              const r = validateProvider(llmProvider);
-              if (!r.ok) return res.status(400).json({ error: r.error });
               updateData.llmProvider = llmProvider;
             }
             if (llmModel !== undefined) {
               // null is an explicit clear: the frontend sends it when the
               // provider changes so the new provider uses its default model
               // instead of inheriting the previous provider's model name.
-              if (llmModel !== null && (typeof llmModel !== 'string' || llmModel.length > 200)) {
-                return res.status(400).json({ error: 'llmModel must be a string of at most 200 characters, or null.' });
-              }
               updateData.llmModel = llmModel || null;
             }
             if (llmEndpoint !== undefined) {
@@ -266,76 +261,43 @@ class UserController {
             }
             if (vehicleMake !== undefined) updateData.vehicleMake = vehicleMake;
             if (vehicleModel !== undefined) updateData.vehicleModel = vehicleModel;
-            if (vehicleYear !== undefined) {
-              if (vehicleYear !== null) {
-                const y = Number(vehicleYear);
-                if (!Number.isInteger(y) || y < 1900 || y > 2099) {
-                  return res.status(400).json({ error: 'Vehicle year must be between 1900 and 2099' });
-                }
-              }
-              updateData.vehicleYear = vehicleYear;
-            }
-            if (engineCc !== undefined) {
-              if (engineCc !== null) {
-                const c = Number(engineCc);
-                if (!Number.isInteger(c) || c < 50 || c > 20000) {
-                  return res.status(400).json({ error: 'Engine CC must be between 50 and 20000' });
-                }
-              }
-              updateData.engineCc = engineCc;
-            }
+            if (vehicleYear !== undefined) updateData.vehicleYear = vehicleYear;
+            if (engineCc !== undefined) updateData.engineCc = engineCc;
 
             // DeepSeek thinking mode fields
             const { llmThinkingMode, llmReasoningEffort, llmMaxTokens, timezoneOffset } = req.body;
 
             if (llmThinkingMode !== undefined) {
-              const r = validateLlmThinkingMode(llmThinkingMode);
-              if (!r.ok) return res.status(400).json({ error: r.error });
               updateData.llmThinkingMode = llmThinkingMode;
             }
             if (llmReasoningEffort !== undefined) {
-              if (llmReasoningEffort !== null && !['low', 'medium', 'high', 'max'].includes(llmReasoningEffort)) {
-                return res.status(400).json({ error: 'llmReasoningEffort must be low, medium, high, or max.' });
-              }
               updateData.llmReasoningEffort = llmReasoningEffort;
             }
             if (llmMaxTokens !== undefined) {
-              const r = validateLlmMaxTokens(llmMaxTokens);
-              if (!r.ok) return res.status(400).json({ error: r.error });
-              updateData.llmMaxTokens = r.value;
+              updateData.llmMaxTokens = llmMaxTokens;
             }
 
             // Timezone offset (minutes from UTC, e.g. 480 for UTC+8)
             if (timezoneOffset !== undefined) {
-              const off = Number(timezoneOffset);
-              if (!Number.isInteger(off) || off < -720 || off > 840) {
-                return res.status(400).json({ error: 'timezoneOffset must be an integer between -720 and 840 (minutes from UTC).' });
-              }
-              updateData.timezoneOffset = off;
+              updateData.timezoneOffset = timezoneOffset;
             }
 
             // Handle retentionEnabled if provided
             if (req.body.retentionEnabled !== undefined) {
-              const r = validateRetentionEnabled(req.body.retentionEnabled);
-              if (!r.ok) return res.status(400).json({ error: r.error });
               updateData.retentionEnabled = req.body.retentionEnabled;
             }
 
             // Handle retentionDays if provided
             if (req.body.retentionDays !== undefined) {
-              const r = validateRetentionDays(req.body.retentionDays);
-              if (!r.ok) return res.status(400).json({ error: r.error });
               updateData.retentionDays = req.body.retentionDays;
             }
 
             // Handle analysisRetentionDays if provided (nullable: null clears —
-            // disables the app-side Analyses prune job). Validated against the
-            // same 90-365 window as retentionDays; ONLY reachable behind the
-            // admin gate above. No add_retention_policy call — the Analyses
-            // prune job (services/analysesRetention.js) reads this value.
+            // disables the app-side Analyses prune job). Same 90–365 window as
+            // retentionDays; ONLY reachable behind the admin gate above. No
+            // add_retention_policy call — the Analyses prune job
+            // (services/analysesRetention.js) reads this value.
             if (req.body.analysisRetentionDays !== undefined) {
-              const r = validateAnalysisRetentionDays(req.body.analysisRetentionDays);
-              if (!r.ok) return res.status(400).json({ error: r.error });
               updateData.analysisRetentionDays = req.body.analysisRetentionDays;
             }
 
@@ -344,17 +306,13 @@ class UserController {
             // admin gate as every other PUT field — non-admins never reach
             // this code (403 above), so the CARTO API key is admin-only input.
             if (req.body.tileProvider !== undefined) {
-              const r = validateTileProvider(req.body.tileProvider);
-              if (!r.ok) return res.status(400).json({ error: r.error });
-              updateData.tileProvider = r.value;
+              updateData.tileProvider = req.body.tileProvider;
             }
             if (req.body.cartoApiKey !== undefined) {
-              const r = validateCartoApiKey(req.body.cartoApiKey);
-              if (!r.ok) return res.status(400).json({ error: r.error });
               // Setting the provider back to 'osm' is how the admin clears a
-              // leaked key — an explicit empty string normalizes to '' via
-              // trim, and 'osm' rows never expose the key anyway.
-              updateData.cartoApiKey = r.value;
+              // leaked key — an explicit empty string stays '' after trim, and
+              // 'osm' rows never expose the key anyway.
+              updateData.cartoApiKey = req.body.cartoApiKey;
             }
 
             // API key requires encryption
