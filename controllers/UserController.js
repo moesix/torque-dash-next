@@ -5,7 +5,8 @@ const passport = require('passport');
 const crypto = require('crypto');
 const runtime = require('../config/runtime');
 const { userByIdCache } = require('../config/passport');
-const { validateLlmThinkingMode, validateLlmMaxTokens, validateRetentionEnabled, validateRetentionDays, validateAnalysisRetentionDays, validateProvider, validateTileProvider, validateCartoApiKey } = require('../lib/validators');
+const { settingsUpdateSchema, preferencesSchema } = require('../lib/validators');
+const { resolveUnitSystem } = require('../lib/units');
 
 // Admin = first registered user (bootstrap at register time, plan 099). Any
 // admin-only mutation must call this first and return 403 when it fails.
@@ -24,9 +25,20 @@ class UserController {
             if (!user) {
                 return res.status(401).json({ error: (info && info.message) || 'Invalid credentials' });
             }
-            req.logIn(user, (loginErr) => {
-                if (loginErr) return next(loginErr);
-                return res.json({ ok: true });
+            // Session fixation defence (plan 030): rotate the session id BEFORE
+            // attaching the authenticated identity, so a cookie planted before
+            // login never becomes an authenticated session. Same sequence as
+            // changePassword below — req.logIn is called exactly once and only
+            // inside this callback, on the fresh session object.
+            req.session.regenerate((regenErr) => {
+                if (regenErr) {
+                    console.error('[UserController] login session regenerate failed:', regenErr.message);
+                    return res.status(500).json({ error: 'Login failed. Please try again.' });
+                }
+                req.logIn(user, (loginErr) => {
+                    if (loginErr) return next(loginErr);
+                    return res.json({ ok: true });
+                });
             });
         })(req, res, next);
     }
@@ -46,7 +58,66 @@ class UserController {
             });
         });
     }
-    static async register(req, res) {
+    // ── Per-user display preferences (plan 045) ────────────────────────
+    // The unit system is NOT a Settings key: Settings is a global singleton
+    // and this preference belongs to the authenticated user. `unitSystem`
+    // returned here is the RESOLVED value (user → env default → metric);
+    // `serverDefault` lets the UI label the "Server default" inherit option.
+    static async getPreferences(req, res, next) {
+        try {
+            if (!req.user || !req.user.id) {
+                return res.status(401).json({ error: 'Unauthorized' });
+            }
+            // config.js validated DEFAULT_UNIT_SYSTEM at boot; resolve through
+            // the single precedence helper (user → env → metric).
+            const serverDefault = resolveUnitSystem(null, process.env.DEFAULT_UNIT_SYSTEM);
+            res.set('Cache-Control', 'private, no-store');
+            res.vary('Cookie');
+            return res.json({
+                unitSystem: resolveUnitSystem(req.user.unitSystem, serverDefault),
+                serverDefault,
+                preference: req.user.unitSystem ?? null,
+            });
+        } catch (err) {
+            next(err);
+        }
+    }
+
+    // PUT { unitSystem: 'metric'|'us'|'uk'|null } — null clears the column so
+    // the user inherits DEFAULT_UNIT_SYSTEM. Display-only: no telemetry rows
+    // are touched. The passport user cache is invalidated so the very next
+    // request (including CSV default / AI prompt) reads the new value.
+    static async updatePreferences(req, res, next) {
+        try {
+            if (!req.user || !req.user.id) {
+                return res.status(401).json({ error: 'Unauthorized' });
+            }
+            const { error, value } = preferencesSchema.validate(req.body);
+            if (error) {
+                return res.status(400).json({ error: error.details[0].message });
+            }
+
+            const unitSystem = value.unitSystem ?? null;
+            await User.update({ unitSystem }, { where: { id: req.user.id } });
+
+            userByIdCache.del(req.user.id);
+            // The current request's req.user is a plain object detached from
+            // the row — keep it consistent for downstream handlers.
+            req.user.unitSystem = unitSystem;
+
+            const serverDefault = resolveUnitSystem(null, process.env.DEFAULT_UNIT_SYSTEM);
+            res.set('Cache-Control', 'private, no-store');
+            return res.json({
+                unitSystem: resolveUnitSystem(unitSystem, serverDefault),
+                serverDefault,
+                preference: unitSystem,
+            });
+        } catch (err) {
+            next(err);
+        }
+    }
+
+    static async register(req, res, next) {
         try {
             // Hard-disable via env always wins (deploy-time kill switch).
             if (process.env.DISABLE_REGISTRATION === 'true') {
@@ -82,26 +153,51 @@ class UserController {
                 return res.status(409).json({ error: 'Registration failed. Please try a different email.' });
             }
 
-            // Save new user to db. First-registered-user bootstrap (plan 099):
-            // when no user row exists yet, this account becomes the admin
-            // (isAdmin = count === 0). Count and create are not atomic together,
-            // so a theoretical simultaneous-registration race could yield two
-            // admins — acceptable for a personal deployment.
-            const userCount = await User.count();
-            user = await User.create({ email: email, password: password, isAdmin: userCount === 0 });
+            // Save new user to db. First-registered-user bootstrap (plans 099 +
+            // 030): when no user row exists yet, this account becomes the admin.
+            // The count runs inside a transaction holding a DB-scoped advisory
+            // lock, so two concurrent registrations cannot both observe zero
+            // users and both become admin. The lock is released when the
+            // transaction ends; only the count is guarded (a concurrent user
+            // delete — not possible through the API today — could still slip
+            // between the count and the create).
+            const setupToken = process.env.ADMIN_SETUP_TOKEN;
+            const isFirstUser = await sequelize.transaction(async (t) => {
+                await sequelize.query(
+                    "SELECT pg_advisory_xact_lock(hashtext('torquedash:first-admin'))",
+                    { transaction: t }
+                );
+                const count = await User.count({ transaction: t });
+                return count === 0;
+            });
+
+            // Bootstrap secret (plan 030): when the operator has set
+            // ADMIN_SETUP_TOKEN, the account that would become admin must
+            // present it — otherwise an unauthenticated visitor racing the
+            // operator on a fresh deployment wins admin rights.
+            if (isFirstUser && setupToken) {
+                const supplied = req.body ? req.body.setupToken : undefined;
+                if (supplied !== setupToken) {
+                    return res.status(403).json({ error: 'Setup token required for the first account.' });
+                }
+            }
+            if (isFirstUser && !setupToken && process.env.NODE_ENV === 'production') {
+                console.warn('[UserController] first account will become admin and ADMIN_SETUP_TOKEN is unset');
+            }
+
+            user = await User.create({ email: email, password: password, isAdmin: isFirstUser });
 
             // Send response
             return res.status(201).json({ ok: true });
 
         } catch (err) {
-            console.error('Error:', err.message);
-            res.status(500).json({ error: 'Internal server error' });
+            next(err);
         }
     }
     // Public read of site settings (the register/login pages need this to
     // decide whether to surface the signup form). The deploy-time env
     // kill-switch always wins over the runtime toggle, so we OR it in here.
-    static async getSettings(req, res) {
+    static async getSettings(req, res, next) {
         try {
             const settings = await Settings.getSingleton();
             const envDisabled = process.env.DISABLE_REGISTRATION === 'true';
@@ -120,16 +216,17 @@ class UserController {
             // may be cached in shared caches.
             if (req.user && req.user.id) {
                 res.set('Cache-Control', 'private, max-age=30');
+                // Same URL returns a different body shape per session.
+                res.vary('Cookie');
             } else {
                 res.set('Cache-Control', 'public, max-age=30');
             }
             res.json(body);
         } catch (err) {
-            console.error(err.message || err);
-            res.status(500).json({ error: 'Internal server error' });
+            next(err);
         }
     }
-    static async getSettingsFull(req, res) {
+    static async getSettingsFull(req, res, next) {
         try {
             const settings = await Settings.getSingleton();
             const envDisabled = process.env.DISABLE_REGISTRATION === 'true';
@@ -141,11 +238,17 @@ class UserController {
             if (req.user && req.user.id) {
                 extras.isAdmin = Boolean(req.user.isAdmin);
             }
-            res.set('Cache-Control', 'private, max-age=30');
-            res.json(settingsView(settings, extras));
+            // Carries session-derived isAdmin and token state, and changes as
+            // soon as an admin edits settings — never serve it from the HTTP
+            // cache.
+            res.set('Cache-Control', 'private, no-store');
+            res.vary('Cookie');
+            // Role projection (plan 030): non-admins must not learn the
+            // operator's LLM endpoint/model (the endpoint may embed URL
+            // userinfo). Session-derived, never client input.
+            res.json(settingsView(settings, extras, { isAdmin: req.user && req.user.isAdmin }));
         } catch (err) {
-            console.error(err.message || err);
-            res.status(500).json({ error: 'Internal server error' });
+            next(err);
         }
     }
     // Authenticated toggle of site settings. ADMIN-ONLY (plan 099): the first
@@ -153,9 +256,18 @@ class UserController {
     // registration toggle, rotate the upload token, or change LLM/vehicle/
     // retention/timezone config. The deploy-time DISABLE_REGISTRATION env var
     // always wins over the runtime toggle.
-    static async updateSettings(req, res) {
+    static async updateSettings(req, res, next) {
         try {
             if (!requireAdmin(req, res)) return;
+
+            // Front door: one schema owns the accepted key list and the plain
+            // field shapes. Anything below is special-case handling that cannot
+            // live in Joi (env-kill-switch, encrypted key, URL parsing, the
+            // runtime token holder, retention policy side effects).
+            const { error: schemaErr, value: body } = settingsUpdateSchema.validate(req.body);
+            if (schemaErr) return res.status(400).json({ error: schemaErr.details[0].message });
+            req.body = body;
+
             const { disableRegistration, uploadApiToken } = req.body;
             const envDisabled = process.env.DISABLE_REGISTRATION === 'true';
 
@@ -163,9 +275,6 @@ class UserController {
 
             // disableRegistration is optional — allows PUT with just uploadApiToken
             if (disableRegistration !== undefined) {
-                if (typeof disableRegistration !== 'boolean') {
-                    return res.status(400).json({ error: 'disableRegistration must be a boolean.' });
-                }
                 if (envDisabled) {
                     return res.status(403).json({ error: 'Registration is disabled by configuration.' });
                 }
@@ -179,12 +288,6 @@ class UserController {
                         error: 'Upload API token is managed via the UPLOAD_API_TOKEN environment variable. Unset it to use the app UI.',
                     });
                 }
-                if (uploadApiToken !== null && typeof uploadApiToken !== 'string') {
-                    return res.status(400).json({ error: 'uploadApiToken must be a string or null.' });
-                }
-                if (typeof uploadApiToken === 'string' && uploadApiToken.length === 0) {
-                    return res.status(400).json({ error: 'uploadApiToken must not be empty.' });
-                }
                 updateData.uploadApiToken = uploadApiToken;
             }
 
@@ -193,96 +296,71 @@ class UserController {
                     vehicleMake, vehicleModel, vehicleYear, engineCc } = req.body;
 
             if (llmProvider !== undefined) {
-              const r = validateProvider(llmProvider);
-              if (!r.ok) return res.status(400).json({ error: r.error });
               updateData.llmProvider = llmProvider;
             }
             if (llmModel !== undefined) {
-              if (typeof llmModel !== 'string' || llmModel.length > 200) {
-                return res.status(400).json({ error: 'llmModel must be a string of at most 200 characters.' });
-              }
-              updateData.llmModel = llmModel;
+              // null is an explicit clear: the frontend sends it when the
+              // provider changes so the new provider uses its default model
+              // instead of inheriting the previous provider's model name.
+              updateData.llmModel = llmModel || null;
             }
             if (llmEndpoint !== undefined) {
               if (llmEndpoint !== null) {
-                try { new URL(llmEndpoint); } catch {
+                let parsed;
+                try { parsed = new URL(llmEndpoint); } catch {
                   return res.status(400).json({ error: 'Invalid endpoint URL' });
+                }
+                // Plan 030: `https://user:pass@host` would round-trip
+                // credentials through the settings response, and non-HTTP(S)
+                // schemes are not endpoints the LLM client can use.
+                if (parsed.username || parsed.password) {
+                  return res.status(400).json({ error: 'Endpoint URL must not contain credentials.' });
+                }
+                if (!/^https?:$/.test(parsed.protocol)) {
+                  return res.status(400).json({ error: 'Endpoint URL must be http or https.' });
                 }
               }
               updateData.llmEndpoint = llmEndpoint;
             }
             if (vehicleMake !== undefined) updateData.vehicleMake = vehicleMake;
             if (vehicleModel !== undefined) updateData.vehicleModel = vehicleModel;
-            if (vehicleYear !== undefined) {
-              if (vehicleYear !== null) {
-                const y = Number(vehicleYear);
-                if (!Number.isInteger(y) || y < 1900 || y > 2099) {
-                  return res.status(400).json({ error: 'Vehicle year must be between 1900 and 2099' });
-                }
-              }
-              updateData.vehicleYear = vehicleYear;
-            }
-            if (engineCc !== undefined) {
-              if (engineCc !== null) {
-                const c = Number(engineCc);
-                if (!Number.isInteger(c) || c < 50 || c > 20000) {
-                  return res.status(400).json({ error: 'Engine CC must be between 50 and 20000' });
-                }
-              }
-              updateData.engineCc = engineCc;
-            }
+            if (vehicleYear !== undefined) updateData.vehicleYear = vehicleYear;
+            if (engineCc !== undefined) updateData.engineCc = engineCc;
 
             // DeepSeek thinking mode fields
             const { llmThinkingMode, llmReasoningEffort, llmMaxTokens, timezoneOffset } = req.body;
 
             if (llmThinkingMode !== undefined) {
-              const r = validateLlmThinkingMode(llmThinkingMode);
-              if (!r.ok) return res.status(400).json({ error: r.error });
               updateData.llmThinkingMode = llmThinkingMode;
             }
             if (llmReasoningEffort !== undefined) {
-              if (llmReasoningEffort !== null && !['low', 'medium', 'high', 'max'].includes(llmReasoningEffort)) {
-                return res.status(400).json({ error: 'llmReasoningEffort must be low, medium, high, or max.' });
-              }
               updateData.llmReasoningEffort = llmReasoningEffort;
             }
             if (llmMaxTokens !== undefined) {
-              const r = validateLlmMaxTokens(llmMaxTokens);
-              if (!r.ok) return res.status(400).json({ error: r.error });
-              updateData.llmMaxTokens = r.value;
+              updateData.llmMaxTokens = llmMaxTokens;
             }
 
             // Timezone offset (minutes from UTC, e.g. 480 for UTC+8)
             if (timezoneOffset !== undefined) {
-              const off = Number(timezoneOffset);
-              if (!Number.isInteger(off) || off < -720 || off > 840) {
-                return res.status(400).json({ error: 'timezoneOffset must be an integer between -720 and 840 (minutes from UTC).' });
-              }
-              updateData.timezoneOffset = off;
+              updateData.timezoneOffset = timezoneOffset;
             }
 
             // Handle retentionEnabled if provided
             if (req.body.retentionEnabled !== undefined) {
-              const r = validateRetentionEnabled(req.body.retentionEnabled);
-              if (!r.ok) return res.status(400).json({ error: r.error });
               updateData.retentionEnabled = req.body.retentionEnabled;
             }
 
             // Handle retentionDays if provided
             if (req.body.retentionDays !== undefined) {
-              const r = validateRetentionDays(req.body.retentionDays);
-              if (!r.ok) return res.status(400).json({ error: r.error });
               updateData.retentionDays = req.body.retentionDays;
             }
 
             // Handle analysisRetentionDays if provided (nullable: null clears —
-            // disables the app-side Analyses prune job). Validated against the
-            // same 90-365 window as retentionDays; ONLY reachable behind the
-            // admin gate above. No add_retention_policy call — the Analyses
-            // prune job (services/analysesRetention.js) reads this value.
+            // disables the app-side Analyses prune job). Same 90–365 window as
+            // retentionDays; ONLY reachable behind the admin gate above. No
+            // add_retention_policy call — the Analyses prune job
+            // (services/analysesRetention.js) reads this value.
             if (req.body.analysisRetentionDays !== undefined) {
-              const r = validateAnalysisRetentionDays(req.body.analysisRetentionDays);
-              if (!r.ok) return res.status(400).json({ error: r.error });
               updateData.analysisRetentionDays = req.body.analysisRetentionDays;
             }
 
@@ -291,17 +369,13 @@ class UserController {
             // admin gate as every other PUT field — non-admins never reach
             // this code (403 above), so the CARTO API key is admin-only input.
             if (req.body.tileProvider !== undefined) {
-              const r = validateTileProvider(req.body.tileProvider);
-              if (!r.ok) return res.status(400).json({ error: r.error });
-              updateData.tileProvider = r.value;
+              updateData.tileProvider = req.body.tileProvider;
             }
             if (req.body.cartoApiKey !== undefined) {
-              const r = validateCartoApiKey(req.body.cartoApiKey);
-              if (!r.ok) return res.status(400).json({ error: r.error });
               // Setting the provider back to 'osm' is how the admin clears a
-              // leaked key — an explicit empty string normalizes to '' via
-              // trim, and 'osm' rows never expose the key anyway.
-              updateData.cartoApiKey = r.value;
+              // leaked key — an explicit empty string stays '' after trim, and
+              // 'osm' rows never expose the key anyway.
+              updateData.cartoApiKey = req.body.cartoApiKey;
             }
 
             // API key requires encryption
@@ -356,20 +430,21 @@ class UserController {
 
             // Re-fetch the full settings row to return complete state
             const current = await Settings.getSingleton();
+            // This handler is admin-gated above, so the response keeps the
+            // admin projection (the settings card writes state from it).
             res.json(settingsView(current, {
                 disableRegistration: current.disableRegistration || envDisabled,
                 retentionPolicyApplied: policyApplied,
-            }));
+            }, { isAdmin: true }));
         } catch (err) {
-            console.error(err.message || err);
-            res.status(500).json({ error: 'Internal server error' });
+            next(err);
         }
     }
     // Generate a new upload API token (64 hex chars). Returns the full token
     // to the caller exactly once; subsequent reads via getSettings expose only
     // a Boolean indicating presence. The token is persisted to the Settings row
     // and also held in the runtime in-memory holder for fast rate-limiter checks.
-    static async generateUploadToken(req, res) {
+    static async generateUploadToken(req, res, next) {
         try {
             // Admin-only: rotating the shared upload token locks out every
             // configured Torque client, so only the operator may do it.
@@ -386,13 +461,12 @@ class UserController {
             runtime.setUploadApiToken(token);
             res.json({ uploadApiToken: token });
         } catch (err) {
-            console.error(err.message || err);
-            res.status(500).json({ error: 'Internal server error' });
+            next(err);
         }
     }
 
     // Change password endpoint. Regenerates session to invalidate all other sessions.
-    static async changePassword(req, res) {
+    static async changePassword(req, res, next) {
         try {
             const { currentPassword, newPassword } = req.body;
 
@@ -443,8 +517,7 @@ class UserController {
                 });
             });
         } catch (err) {
-            console.error('[UserController]', err.message || err);
-            res.status(500).json({ error: 'Internal server error' });
+            next(err);
         }
     }
 }
@@ -453,15 +526,24 @@ class UserController {
 // Single source of truth for the settings response shape. Callers pass extras
 // (e.g. disableRegistration override, retentionPolicyApplied) via the second
 // argument which is spread on top of the base fields.
-function settingsView(settings, extras = {}) {
+//
+// The third argument is the VIEWER and is optional (plan 030): omitting it
+// projects the non-admin shape, so existing two-argument callers never leak
+// provider config. Only admins receive the concrete provider/model/endpoint;
+// everyone else gets `hasLlmProvider` (the settings page renders a
+// "configured" state from the booleans).
+function settingsView(settings, extras = {}, viewer = {}) {
+    const isAdmin = Boolean(viewer.isAdmin);
     return {
         disableRegistration: settings.disableRegistration || false,
         hasUploadApiToken: Boolean(settings.uploadApiToken || runtime.isFromEnv()),
         tokenFromEnv: runtime.isFromEnv(),
         hasLlmProvider: Boolean(settings.llmProvider),
-        llmProvider: settings.llmProvider || null,
-        llmModel: settings.llmModel || null,
-        llmEndpoint: settings.llmEndpoint || null,
+        ...(isAdmin ? {
+            llmProvider: settings.llmProvider || null,
+            llmModel: settings.llmModel || null,
+            llmEndpoint: settings.llmEndpoint || null,
+        } : {}),
         hasLlmApiKey: Boolean(settings.llmApiKeyEnc),
         vehicleMake: settings.vehicleMake || null,
         vehicleModel: settings.vehicleModel || null,

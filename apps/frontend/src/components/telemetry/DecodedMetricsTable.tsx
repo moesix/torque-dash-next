@@ -1,20 +1,22 @@
 /**
  * "What was uploaded" table — shows all decoded PIDs with their stats.
  *
- * Uses pre-computed memoized series data (no re-scan of frames).
+ * Receives pre-computed stats (folded in one pass, no tuple arrays).
  */
 
 import { useMemo } from 'react';
 import type { SeriesSource } from '@/lib/types';
-import { computeStats } from '@/lib/pidDecode';
+import type { SeriesStats } from '@/lib/pidDecode';
+import { useUnits } from '@/app/unitSystem';
+import { convert, unitLabel } from '@/lib/units';
 
 // ── Props ────────────────────────────────────────────────────────────────
 
 interface Props {
   /** All available sources (columns + PIDs). */
   sources: SeriesSource[];
-  /** Pre-computed time-series data keyed by pid (NOT re-scanned). */
-  seriesData: Map<string, [number, number | null][]>;
+  /** Pre-computed aggregate stats keyed by pid (NOT re-scanned). */
+  stats: Map<string, SeriesStats | null>;
 }
 
 // ── Format helpers ───────────────────────────────────────────────────────
@@ -26,20 +28,24 @@ function fmtNum(v: number): string {
 
 // ── Component ────────────────────────────────────────────────────────────
 
-export default function DecodedMetricsTable({ sources, seriesData }: Props) {
+export default function DecodedMetricsTable({ sources, stats }: Props) {
+  const { system } = useUnits();
   const rows = useMemo(() => {
-    return sources.map((src) => {
-      const data = seriesData.get(src.pid);
-      const stats = data ? computeStats(data) : null;
-      return { src, stats };
-    });
-  }, [sources, seriesData]);
+    return sources.map((src) => ({
+      src,
+      stats: stats.get(src.pid) ?? null,
+    }));
+  }, [sources, stats]);
 
   const summary = `${sources.length} metrics decoded`;
 
+  /** Convert the stat into the current display system, then apply the table's
+   *  existing numeric formatting (precision stays as today). */
+  const fmtStat = (src: SeriesSource, v: number) => fmtNum(convert(v, src.unit, system) ?? v);
+
   // Separate column sources from pid sources for display clarity
   const columnRows = rows.filter((r) => r.src.source === 'column');
-  const pidRows = rows.filter((r) => r.src.source === 'pid');
+  const pidRows = rows.filter((r) => r.src.source !== 'column');
 
   return (
     <div className="overflow-hidden card">
@@ -74,18 +80,18 @@ export default function DecodedMetricsTable({ sources, seriesData }: Props) {
                   <td className="py-1 pr-2 font-mono text-gray-400 dark:text-[var(--text-muted)]">
                     {src.pid}
                   </td>
-                  <td className="py-1 pr-2 text-gray-400 dark:text-[var(--text-muted)]">{src.unit}</td>
+                  <td className="py-1 pr-2 text-gray-400 dark:text-[var(--text-muted)]">{unitLabel(src.unit, system) || src.unit}</td>
                   <td className="py-1 pr-2 text-right tabular-nums">
-                    {stats ? fmtNum(stats.min) : '—'}
+                    {stats ? fmtStat(src, stats.min) : '—'}
                   </td>
                   <td className="py-1 pr-2 text-right tabular-nums">
-                    {stats ? fmtNum(stats.max) : '—'}
+                    {stats ? fmtStat(src, stats.max) : '—'}
                   </td>
                   <td className="py-1 pr-2 text-right tabular-nums">
-                    {stats ? fmtNum(stats.avg) : '—'}
+                    {stats ? fmtStat(src, stats.avg) : '—'}
                   </td>
                   <td className="py-1 text-right tabular-nums">
-                    {stats?.last != null ? fmtNum(stats.last) : '—'}
+                    {stats?.last != null ? fmtStat(src, stats.last) : '—'}
                   </td>
                 </tr>
               ))}
@@ -109,18 +115,18 @@ export default function DecodedMetricsTable({ sources, seriesData }: Props) {
                   <td className="py-1 pr-2 font-mono text-gray-400 dark:text-[var(--text-muted)]">
                     {src.pid}
                   </td>
-                  <td className="py-1 pr-2 text-gray-400 dark:text-[var(--text-muted)]">{src.unit}</td>
+                  <td className="py-1 pr-2 text-gray-400 dark:text-[var(--text-muted)]">{unitLabel(src.unit, system) || src.unit}</td>
                   <td className="py-1 pr-2 text-right tabular-nums">
-                    {stats ? fmtNum(stats.min) : '—'}
+                    {stats ? fmtStat(src, stats.min) : '—'}
                   </td>
                   <td className="py-1 pr-2 text-right tabular-nums">
-                    {stats ? fmtNum(stats.max) : '—'}
+                    {stats ? fmtStat(src, stats.max) : '—'}
                   </td>
                   <td className="py-1 pr-2 text-right tabular-nums">
-                    {stats ? fmtNum(stats.avg) : '—'}
+                    {stats ? fmtStat(src, stats.avg) : '—'}
                   </td>
                   <td className="py-1 text-right tabular-nums">
-                    {stats?.last != null ? fmtNum(stats.last) : '—'}
+                    {stats?.last != null ? fmtStat(src, stats.last) : '—'}
                   </td>
                 </tr>
               ))}

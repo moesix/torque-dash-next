@@ -19,7 +19,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node-version: ['20.19', '22']
+        node-version: ['22', '24']
     env:
       DATABASE_URL: postgres://ci:ci@localhost:5432/ci
       SESSION_KEYS: ci-test-key-for-config-loading
@@ -36,11 +36,20 @@ jobs:
       - name: Install backend dependencies
         run: npm ci
 
-      - name: Run backend tests (coverage gate)
-        run: npm run test:coverage
+      # Runtime-only gate: a high advisory in a shipped dependency must fail CI.
+      # Dev-only advisories are excluded on purpose (see docs/development.md §10)
+      # so a permanent red gate cannot train people to ignore this one.
+      - name: Audit runtime dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+      # Coverage (floors + structural guards) runs on the primary leg only;
+      # the second leg still proves the suite is green on the newer runtime
+      # without paying for instrumentation twice.
+      - name: Run backend tests
+        run: ${{ matrix.node-version == '22' && 'npm run test:coverage' || 'npm test' }}
 
       - name: Publish coverage summary
-        if: always()
+        if: always() && matrix.node-version == '22'
         run: |
           if [ ! -f coverage/coverage-summary.json ]; then
             echo "No coverage summary produced." >> "$GITHUB_STEP_SUMMARY"
@@ -209,10 +218,20 @@ jobs:
       # Boot suite migrates twice (fresh + idempotent re-run) and asserts the
       # schema/hypertable; ingest suite drives upload → drain → sessions →
       # telemetry → CSV → rename → delete(cascade) → re-upload over HTTP.
-      - name: Run integration suite
-        run: npm run test:integration
+      # Runs once under c8 so the integration coverage is published instead of
+      # the same suite being executed twice; it is visibility-only (no floors).
+      - name: Run integration suite (with coverage report)
+        run: npm run test:coverage:integration
         env:
           NODE_ENV: test
+
+      - name: Upload integration coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-coverage
+          path: coverage-integration/
+          retention-days: 7
 
   frontend-checks:
     runs-on: ubuntu-latest
@@ -231,6 +250,10 @@ jobs:
         working-directory: apps/frontend
         run: npm ci
 
+      - name: Audit frontend runtime dependencies
+        working-directory: apps/frontend
+        run: npm audit --omit=dev --audit-level=high
+
       # Frontend lint is a deliberate placeholder that exits 0: typescript-eslint
       # does not support TypeScript >=7 yet (typescript-eslint#10940). The script
       # prints the reason on every run. Re-enable when support ships.
@@ -238,13 +261,17 @@ jobs:
         working-directory: apps/frontend
         run: npm run lint
 
-      - name: Test frontend
+      - name: Test frontend (coverage gate)
         working-directory: apps/frontend
-        run: npm test
+        run: npm run test:coverage
 
-      - name: Typecheck frontend
-        working-directory: apps/frontend
-        run: npx tsc --noEmit
+      - name: Upload frontend coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-coverage
+          path: apps/frontend/coverage/
+          retention-days: 7
 
       - name: Build frontend
         working-directory: apps/frontend

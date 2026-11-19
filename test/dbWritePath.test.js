@@ -8,20 +8,15 @@ const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');
 
-// ── 1. Test that join SQL includes ON CONFLICT DO NOTHING ─────────────
-describe('SessionController join — ON CONFLICT DO NOTHING', () => {
-  test('join INSERT…SELECT includes ON CONFLICT clause', () => {
-    const src = fs.readFileSync(
-      path.resolve(__dirname, '../controllers/SessionController.js'),
-      'utf8'
-    );
-    const matches = src.match(/ON CONFLICT \("sessionId", timestamp\) DO NOTHING/g);
-    assert.ok(matches, 'Expected ON CONFLICT clause in join SQL');
-    assert.ok(matches.length >= 2, `Expected ≥2 ON CONFLICT matches, got ${matches.length}`);
-  });
-});
+// sessionSummaries binds ../models at load time; every harness below replaces
+// the models module, so drop the service too or it keeps the previous mock.
+function purgeSessionSummaries() {
+  delete require.cache[require.resolve('../services/sessionSummaries')];
+}
 
-// ── 2. Test that flush chunks rows into ≤1000-row batches ────────────
+// Join ON CONFLICT is asserted behaviourally in integration/sessionMutations.test.js.
+
+// ── 1. Test that flush chunks rows into ≤1000-row batches ────────────
 describe('ingestBuffer.flush — chunked bulkCreate', () => {
   test('flush with >1000 rows calls bulkCreate multiple times (ceil(rows/1000))', async () => {
     let bulkCreateCallCount = 0;
@@ -48,6 +43,7 @@ describe('ingestBuffer.flush — chunked bulkCreate', () => {
     const ingestBufferPath = require.resolve('../services/ingestBuffer');
     const originalIngestBufferCache = require.cache[ingestBufferPath];
     delete require.cache[ingestBufferPath];
+    purgeSessionSummaries();
 
     try {
       const { ingest, flush } = require('../services/ingestBuffer');
@@ -115,6 +111,7 @@ describe('ingestBuffer.flush — chunked bulkCreate', () => {
     const ingestBufferPath = require.resolve('../services/ingestBuffer');
     const originalIngestBufferCache = require.cache[ingestBufferPath];
     delete require.cache[ingestBufferPath];
+    purgeSessionSummaries();
 
     try {
       const { ingest, flush } = require('../services/ingestBuffer');
@@ -195,6 +192,7 @@ describe('SessionController exportCsv — drain backpressure', () => {
     const sessionControllerPath = require.resolve('../controllers/SessionController');
     const originalSCCache = require.cache[sessionControllerPath];
     delete require.cache[sessionControllerPath];
+    purgeSessionSummaries();
 
     try {
       const SessionController = require('../controllers/SessionController');
@@ -303,6 +301,7 @@ describe('SessionController exportCsv — HEAD short-circuit', () => {
     const sessionControllerPath = require.resolve('../controllers/SessionController');
     const originalSCCache = require.cache[sessionControllerPath];
     delete require.cache[sessionControllerPath];
+    purgeSessionSummaries();
 
     try {
       const SessionController = require('../controllers/SessionController');
@@ -357,7 +356,7 @@ describe('ingestBuffer.flush — failure isolation', () => {
   // Build a fresh ingestBuffer whose Log.bulkCreate delegates to `impl`
   // (throw to fail a write) and whose Session summary merge is recorded.
   function loadFlushHarness({ bulkCreate, findByPk, update }) {
-    const calls = { bulkCreate: [], findByPk: [], update: [] };
+    const calls = { bulkCreate: [], query: [], findByPk: [], update: [] };
     const mockModels = {
       Log: {
         async bulkCreate(rows, opts) {
@@ -375,6 +374,13 @@ describe('ingestBuffer.flush — failure isolation', () => {
           return update ? update(vals, opts) : [1];
         },
       },
+      // The summary merge is one monotonic UPDATE per session; record it.
+      sequelize: {
+        async query(sql, opts) {
+          calls.query.push({ sql, opts });
+          return [];
+        },
+      },
     };
 
     const modelsPath = require.resolve('../models');
@@ -389,6 +395,7 @@ describe('ingestBuffer.flush — failure isolation', () => {
     const ibPath = require.resolve('../services/ingestBuffer');
     const originalIBCache = require.cache[ibPath];
     delete require.cache[ibPath];
+    purgeSessionSummaries();
 
     return {
       ingestBuffer: require('../services/ingestBuffer'),
@@ -471,10 +478,9 @@ describe('ingestBuffer.flush — failure isolation', () => {
         'only the succeeding chunk (500 rows) reached the DB');
       assert.strictEqual(ingestBuffer.size(), 1000,
         'exactly the failing chunk is back in the buffer');
-      assert.deepStrictEqual(calls.findByPk.map((c) => c.id), [SESSION_B],
+      assert.deepStrictEqual(calls.query.map((c) => c.opts.replacements.id), [SESSION_B],
         'summary merge must run for the written session only');
-      assert.deepStrictEqual(calls.update.map((c) => c.opts.where), [{ id: SESSION_B }],
-        'Session.update must target the written session only');
+      assert.strictEqual(calls.query.length, 1, 'one summary UPDATE for the written session only');
     } finally {
       restore();
     }
@@ -503,12 +509,12 @@ describe('ingestBuffer.flush — failure isolation', () => {
       await ingestBuffer.flush(); // first failure: whole chunk re-queued
       assert.strictEqual(ingestBuffer.size(), 6, 'first failure re-queues the whole chunk');
       assert.strictEqual(writtenRowCount, 0, 'nothing written on the first failure');
-      assert.strictEqual(calls.findByPk.length, 0, 'no summary merge when nothing was written');
+      assert.strictEqual(calls.query.length, 0, 'no summary merge when nothing was written');
 
       await ingestBuffer.flush(); // repeat failure: bisect
       assert.strictEqual(writtenRowCount, 5, 'five healthy rows written');
       assert.strictEqual(ingestBuffer.size(), 1, 'only the poison row is re-queued');
-      assert.deepStrictEqual(calls.findByPk.map((c) => c.id), [SESSION],
+      assert.deepStrictEqual(calls.query.map((c) => c.opts.replacements.id), [SESSION],
         'summary merge runs for the written session');
 
       // The poison row alone advances its attempt counter once per cycle.
@@ -570,6 +576,7 @@ describe('ingestBuffer.drain — quiesce before Log mutations', () => {
     const ibPath = require.resolve('../services/ingestBuffer');
     const originalIBCache = require.cache[ibPath];
     delete require.cache[ibPath];
+    purgeSessionSummaries();
     return {
       ingestBuffer: require('../services/ingestBuffer'),
       restore() {
@@ -771,6 +778,7 @@ describe('ingestBuffer.flush — deleted session mid-buffer', () => {
     const ibPath = require.resolve('../services/ingestBuffer');
     const originalIBCache = require.cache[ibPath];
     delete require.cache[ibPath];
+    purgeSessionSummaries();
 
     try {
       const { ingest, flush, size } = require('../services/ingestBuffer');
@@ -833,12 +841,15 @@ describe('SessionController — drain before Log mutations', () => {
     [/sequelize\.query\s*\(/, 'raw SQL (sequelize.query)'],
   ];
 
-  // Body of one static handler, up to the next class method.
+  // Body of one static handler, up to the next class method. Handlers that
+  // route unexpected failures through the error middleware take a third
+  // `next` parameter (plan 034), so accept it optionally.
   function handlerBody(src, name) {
-    const marker = `    static async ${name}(req, res) {`;
-    const start = src.indexOf(marker);
-    assert.notStrictEqual(start, -1, `handler ${name} not found in SessionController`);
-    const rest = src.slice(start + marker.length);
+    const marker = new RegExp(`    static async ${name}\\(req, res(?:, next)?\\) \\{`);
+    const match = marker.exec(src);
+    assert.notStrictEqual(match, null, `handler ${name} not found in SessionController`);
+    const start = match.index;
+    const rest = src.slice(start + match[0].length);
     const end = rest.indexOf('\n    static async ');
     return end === -1 ? rest : rest.slice(0, end);
   }
@@ -905,15 +916,16 @@ describe('SessionController.delete — drain and evictSession wiring', () => {
 
     const ibPath = require.resolve('../services/ingestBuffer');
     const originalIBCache = require.cache[ibPath];
+    purgeSessionSummaries();
     require.cache[ibPath] = {
       id: ibPath, filename: ibPath, loaded: true,
       exports: { async drain() { events.push('drain'); } },
     };
 
-    const uploadPath = require.resolve('../controllers/UploadController');
-    const originalUploadCache = require.cache[uploadPath];
-    require.cache[uploadPath] = {
-      id: uploadPath, filename: uploadPath, loaded: true,
+    const hotCachesPath = require.resolve('../lib/hotCaches');
+    const originalHotCachesCache = require.cache[hotCachesPath];
+    require.cache[hotCachesPath] = {
+      id: hotCachesPath, filename: hotCachesPath, loaded: true,
       exports: { evictSession(...args) { events.push(['evict', ...args]); } },
     };
 
@@ -925,8 +937,8 @@ describe('SessionController.delete — drain and evictSession wiring', () => {
       else delete require.cache[modelsPath];
       if (originalIBCache) require.cache[ibPath] = originalIBCache;
       else delete require.cache[ibPath];
-      if (originalUploadCache) require.cache[uploadPath] = originalUploadCache;
-      else delete require.cache[uploadPath];
+      if (originalHotCachesCache) require.cache[hotCachesPath] = originalHotCachesCache;
+      else delete require.cache[hotCachesPath];
       if (originalSCCache) require.cache[scPath] = originalSCCache;
       else delete require.cache[scPath];
     }

@@ -10,11 +10,12 @@ the React/Vite frontend (`apps/frontend/`).
 
 ## 1. Prerequisites
 
-- **Node.js 22** (LTS) and npm — the Docker images are built on
-  `node:22-bookworm-slim` and CI runs Node 22 (plus a 20.19 leg for the backend
-  checks). Vite 8 requires Node **20.19+ / 22.12+**, so Node 20.19 is the
-  supported floor: both `package.json` files declare `"engines": {"node":
-  ">=20.19"}` (a warning only — engine-strict is deliberately not enabled).
+- **Node.js 22.22+** (LTS) and npm — the Docker images are built on
+  `node:22-bookworm-slim` and CI runs a Node 22/24 matrix for the backend checks.
+  The real floor is Node **22.22.0**: `react-router@8.3.0` requires
+  `>=22.22.0`, so both `package.json` files declare `"engines": {"node":
+  ">=22.22.0"}` (a warning only — engine-strict is deliberately not enabled) and
+  `.nvmrc` pins 22.23. Node 20 (EOL 2026-04-30) and Node 22.12 are unsupported.
   `node --watch` (used by `npm run dev` and the dev compose stack) needs
   ≥18.11, well below the floor.
 - **PostgreSQL** with the **TimescaleDB** extension (`CREATE EXTENSION timescaledb;`)
@@ -55,14 +56,14 @@ pin). No Tremor — all UI uses native Tailwind utilities (Plan 049).
 
 ## 3. Environment Variables
 
-Set these at the backend repo root (`.env` or exported in the shell).
+The backend does not read .env outside Docker (no dotenv). For host runs, `export` the variables; Compose reads `.env`.
 
 | Variable | Required | Default | Description |
 | --- | --- | --- | --- |
 | `DATABASE_URL` | **yes** | **REQUIRED** — no default | Postgres/TimescaleDB connection string. App **crashes on startup** if missing. Also used by `scripts/migrate.js`. |
 | `CORS_ORIGINS` | prod | `''` (empty) | Comma-separated list of SPA origins allowed to call `/api` **with cookies** (e.g. `https://app.example.com`). An empty value blocks all cross-origin SPA calls (see Known Issues, LOW). |
 | `COOKIE_SECURE` | prod | unset (`lax`) | Set `true` in production to set `sameSite:none; secure` on the session cookie (required for cross-origin SPA auth). Dev (same-origin) keeps `lax` and works without HTTPS. `SameSite` is derived from this variable in `app.js` — there is no separate `COOKIE_SAMESITE`. **Set `COOKIE_SECURE=true` / terminate TLS at the edge before using BYOK LLM keys** — an unencrypted deployment would ship LLM API keys over plain HTTP. |
-| `NODE_ENV` | no | unset | Optional. `production` skips the **app-internal** `sequelize.sync()` in `app.js`; any other value runs it on boot. This does NOT stop the Docker CMD bootstrap — the image runs an idempotent `sequelize.sync()` before `scripts/migrate.js` on **every** boot regardless of NODE_ENV. Migrations are authoritative for the schema objects they define (base tables and TimescaleDB-specific DDL); the CMD's sync step is belt-and-braces only. |
+| `NODE_ENV` | no | unset | Optional. `production` skips the **app-internal** `sequelize.sync()` in `app.js`; any other value runs it on boot. The Docker CMD does not sync at all — it runs `node scripts/migrate.js && node app.js`, independent of NODE_ENV. Migrations are the sole owner of the schema in production. |
 | `PORT` | no | `3000` | Backend listen port. |
 | `SESSION_KEYS` | **yes** | **REQUIRED** — no default | express-session secrets (array accepted via comma-separated string). App **crashes on startup** if missing or if a placeholder value is used. Generate with `openssl rand -hex 24`. |
 | `PUBLIC_ORIGIN` | no | unset | Optional. Overrides the expected CSRF origin. Set to the browser-visible origin (e.g. `https://app.example.com`) when nginx terminates HTTPS but forwards HTTP to the backend, so `X-Forwarded-Proto` doesn't mislead the origin check. |
@@ -99,16 +100,16 @@ and `022` (it had to drop the sync-created UNIQUE *constraint* before its index
 — every statement is `IF EXISTS`, so re-runs are no-ops).
 
 **In Docker, migrations run automatically.** The backend container's CMD
-(`Dockerfile`) executes `node scripts/migrate.js` at every container start,
-so `docker compose up -d` applies any pending migrations — no manual step
-needed for Docker deployments. The CMD first runs an idempotent
-`sequelize.sync()` bootstrap **unconditionally** (regardless of NODE_ENV) as
-belt-and-braces; migrations also create the `Logs` baseline themselves
+(`Dockerfile`) runs `node scripts/migrate.js && node app.js` at every container
+start, so `docker compose up -d` applies any pending migrations — no manual
+step needed for Docker deployments. The migrations are the sole owner of the
+production schema: the `000` files create the `Logs` baseline
 (`000_baseline_tables.sql`) and `Users`/`Sessions`
-(`000_users_sessions_baseline.sql`), so an empty database migrates with or
-without that sync. migrate.js then applies the TimescaleDB-specific DDL (`Logs` hypertable, continuous
-aggregate) and seeds Settings. A manual run is only required for **non-Docker
-(manual) setups**:
+(`000_users_sessions_baseline.sql`), `001` applies the TimescaleDB-specific DDL
+(`Logs` hypertable, continuous aggregate), and the later files seed and extend
+Settings. Production boots migrations-only; `sequelize.sync()` runs only when
+`NODE_ENV != production` (`app.js`). A manual run is only required for
+**non-Docker (manual) setups**:
 
 ```sh
 node scripts/migrate.js
@@ -126,23 +127,28 @@ The script:
    missing relation aborts the run. Every base table has an owning migration
    (`000_baseline_tables.sql` for `Logs`, `000_users_sessions_baseline.sql` for
    `Users`/`Sessions`, then `002`/`004`/`009`), and those files sort before the
-   migrations that reference them, so **fresh installs are supported in both
-   boot shapes**: with a preceding `sequelize.sync()` (Docker; the SQL then
-   no-ops) and sync-less (`node scripts/migrate.js` on an empty database). The
-   CI `migrate-checks` job runs the sync-less path twice on every push/PR to
-   `development`. A file is marked applied in the tracker only once all its
-   statements succeed.
+   migrations that reference them, so **fresh installs work sync-less**
+   (`node scripts/migrate.js` on an empty database), which is exactly what
+   production does. The CI `migrate-checks` job runs that path twice on every
+   push/PR to `development`. A file is marked applied in the tracker only once
+   all its statements succeed **and** its post-conditions hold (`001`'s
+   constraints/indexes are verified after the file runs; a benign skip alone is
+   never recorded as success).
 
 **Upgrading a migrations-only database:** before booting a release that adds the
 `Logs.sessionId` foreign key (`000_users_sessions_baseline.sql`), check for orphaned rows:
 `SELECT count(*) FROM "Logs" l LEFT JOIN "Sessions" s ON s.id = l."sessionId" WHERE s.id IS NULL;`
 A non-zero count makes the validating FK add fail (non-benign) and the container will not start;
-clean the orphans first. Sync-created databases already carry the constraint and skip benignly.
+clean the orphans first. Sync-created databases (dev/test only) already carry the
+constraint and skip benignly. Databases created by a pre-025 image may carry the
+sync-shaped `Sessions.userId` constraint (`ON DELETE SET NULL`); new installs get
+`ON DELETE CASCADE` from the baseline migration. Sessions still cascade when a
+user row is deleted — that is the migration's contract.
 
 **Known model ↔ migration differences (accepted).** These predate this
 ordering baseline and are recorded rather than silently changed:
 
-| Difference | Sync-created database | Migration-created database |
+| Difference | Dev/test sync shape (`app.js` non-prod only) | Migration-created database (production) |
 | --- | --- | --- |
 | `Sessions.userId` foreign key | `ON DELETE SET NULL` (Sequelize `belongsTo` default) | `ON DELETE CASCADE` (`013` / `000_users_sessions_baseline`) |
 | `Sessions.vehicleId` foreign key | present, `ON DELETE SET NULL` (from `Session.belongsTo(Vehicle)` — `009`'s `ADD COLUMN IF NOT EXISTS` then skips) | absent: `009`'s `ADD COLUMN IF NOT EXISTS` skips because the baseline already created the column, so no FK is ever added |
@@ -151,9 +157,11 @@ ordering baseline and are recorded rather than silently changed:
 | `Settings.id` default | `DEFAULT 1` (model) | no column default; `002` seeds the singleton row explicitly |
 
 Changing any of these means a new numbered migration (never an edit to `009` /
-`013`); the sync-created shape only exists for dev/test builds.
+`013`). Production boots migrations-only (`Dockerfile` CMD); `sequelize.sync()`
+runs only when `NODE_ENV != production` (`app.js`), so the sync shape is dev/test
+only and never the schema a deployment runs.
 
-**Current migration files** — top-level series `000`–`024` (in execution order):
+**Current migration files** — top-level series `000`–`025` (in execution order):
 
 | File | Purpose |
 | --- | --- |
@@ -183,6 +191,7 @@ Changing any of these means a new numbered migration (never an edit to `009` /
 | `022_remove_share_surface.sql` | Drops the retired `Users.shareId` column and its unique index (pre-existing databases; a no-op on fresh installs) |
 | `023_user_admin_guarded.sql` | Re-runs 017's lowest-id promotion only when no admin exists, so a fresh-install re-run cannot promote a second account |
 | `024_session_max_types.sql` | Retypes `Sessions.maxRpm` / `maxSpeed` to `DOUBLE PRECISION` where an older sync created them as `INTEGER` (`016`'s `ADD COLUMN IF NOT EXISTS` cannot) |
+| `025_settings_timestamps.sql` | Adds `Settings."createdAt"` / `"updatedAt"` on databases whose `002` was applied before those columns existed (idempotent; no-op on fresh installs) |
 
 Nested under `migrations/`: `001_add_upload_token.sql` (no-op placeholder) and
 `002_backfill_pid_columns.sql` — the legacy `engine_rpm`/`vehicle_speed`
@@ -208,9 +217,8 @@ built into Node, so local dev and the container behave identically.
 
 - In non-production, the server runs its own `sequelize.sync()` then listens on `PORT`.
 - In production (`NODE_ENV=production`), the server skips its own `sequelize.sync()`.
-- When run from the Docker image, the CMD additionally runs an idempotent
-  `sequelize.sync()` bootstrap before `scripts/migrate.js` on every boot —
-  regardless of NODE_ENV (see §4).
+- The Docker image's CMD runs `node scripts/migrate.js` before `node app.js` and
+  never syncs — migrations own the schema in production (see §4).
 - `/health` returns `{ status: 'ok', ts }` for probes.
 
 ---
@@ -344,10 +352,11 @@ cd apps/frontend
 npm run build      # runs `tsc --noEmit && vite build` → apps/frontend/dist
 ```
 
-> The backend does **not** currently serve `apps/frontend/dist` (it serves the
-> legacy `public/`). In production the SPA is expected to be served by a separate
-> origin/CDN or an nginx layer that proxies `/api` to the backend. See Known
-> Issues (LOW).
+> The backend does not serve the SPA: `app.js` has no `express.static` handler.
+> In production the frontend nginx image (`apps/frontend/Dockerfile`) serves the
+> built SPA and proxies `/api` to the backend (same origin). A separate
+> origin/CDN deployment also works, but then `CORS_ORIGINS` and `COOKIE_SECURE`
+> must be set. See Known Issues (LOW).
 
 ### Frontend API client (`lib/api.ts`)
 
@@ -373,7 +382,8 @@ analysis/settings wrappers were added with those features:
 | `exportSessionCsv(sessionId)` | `GET /api/sessions/:sessionId/export/csv` | HEAD pre-check then native `<a>` download |
 
 All functions use `request()` with `credentials: 'include'` for cookie-based
-auth. Vehicle types (`Vehicle`, `UpdateVehicle`) and the extended `Session`
+auth. `login()` probes `GET /api/sessions`; only a 401 there is treated as a
+login failure (a 500/429/network hiccup after a 2xx POST resolves as success). Vehicle types (`Vehicle`, `UpdateVehicle`) and the extended `Session`
 type (with `notes`, `vehicleId`, `vehicleName`) are defined in `lib/types.ts`;
 `PublicSettings` (anonymous two-field shape) and `Settings` (full, with
 optional `isAdmin`) are separate interfaces so callers can't accidentally read
@@ -542,20 +552,29 @@ on every commit:
 ### 9.3 Test Commands
 
 **One-command verification:** run `npm run verify` from the repo root before
-every commit — it executes the backend suite + lint, then the frontend suite +
-TypeScript check:
+every commit — it runs the exact gates CI runs: backend coverage suite (floors +
+structural guards) + lint, then the frontend suite + production build (the build
+runs `tsc --noEmit`, so the typecheck is not repeated):
 
 ```sh
-npm run verify   # npm test && npm run lint && (cd apps/frontend && npm test && npx tsc --noEmit)
+npm run verify     # npm run test:coverage && npm run lint && (cd apps/frontend && npm test && npm run build)
+npm run verify:db  # npm run verify + npm run test:integration (needs a dev DB)
 ```
 
 **Backend** (Node built-in test runner):
 ```sh
-npm test              # node --test test/ + scripts/checkMirrors.js + scripts/checkTestIntegrity.js
-npm run test:coverage # same suite under c8; enforces the floors in .c8rc.json
+npm test              # node --test test/*.test.js only — no guards, no floors
+npm run test:coverage # the same suite under c8 + scripts/checkMirrors.js +
+                      # scripts/checkTestIntegrity.js; enforces .c8rc.json floors
 ```
 
-Every file directly under `test/` must be named `*.test.js` — Node 20.19's
+**Run one file or one test name** (no coverage, so the guards do not run):
+```sh
+node --test test/sessionController.test.js            # one file
+node --test --test-name-pattern="join" test/*.test.js # one test name
+```
+
+Every file directly under `test/` must be named `*.test.js` — Node 20.x's
 `node --test test/` executes *all* `.js` files in the directory while Node 22+
 runs only `*.test.js`, so a stray helper would silently be a test on one runtime
 and a no-op on the other. `scripts/checkTestIntegrity.js` fails the run if one
@@ -568,7 +587,8 @@ exclude list is deliberately narrow and each entry is non-runtime code:
 
 - `eslint.config.js` — tooling config, never executed at runtime.
 - `scripts/checkMirrors.js`, `scripts/checkTestIntegrity.js` — gate scripts run
-  as standalone `node` processes from `npm test`, outside the instrumented run.
+  as standalone `node` processes from `npm run test:coverage`, outside the
+  instrumented run.
 - `scripts/seed-demo.js` — DB-writing CLI demo seeder.
 - `test/**`, `integration/**`, `apps/frontend/**`, `node_modules/**` — not
   backend runtime code (the SPA has its own Vitest coverage).
@@ -580,11 +600,19 @@ app. Keeping it in the gate means the entry point's own lines are measured
 instead of hidden; since the unit suite never imports it, its lines count as 0%
 under `all: true`, which is already priced into the floors above.
 
+**Integration coverage** (`c8.integration.json`, visibility only):
+```sh
+npm run test:coverage:integration   # needs a dev DB; writes coverage-integration/
+```
+The 82/85 gate above is **unit-suite only**; integration coverage is published
+for visibility, not gating (`check-coverage: false`) — it needs a stable
+baseline across two releases before it can become a gate.
+
 **Frontend** (Vitest):
 ```sh
 cd apps/frontend
 npm test            # runs: vitest run
-npm run test:coverage  # vitest run --coverage (@vitest/coverage-v8; no floors yet)
+npm run test:coverage  # vitest run --coverage (@vitest/coverage-v8; enforces vitest.config.ts floors)
 npm run test:watch  # runs: vitest (watch mode)
 ```
 
@@ -595,15 +623,24 @@ need a DOM (chart/render tests, the print-flow regression) opt in per file with
 environment. Vitest 5 also lifted the peer-range conflict that previously
 forced `--legacy-peer-deps` in CI.
 
+The coverage thresholds in `vitest.config.ts` are a **ratchet**, not a target:
+each is the measured baseline minus 2 points. Raise them by ~2 points per
+release once the baseline is stable — never pad tests just to clear a number.
+
 ### 9.4 CI Pipeline
 
 A **GitHub Actions** workflow (`.github/workflows/ci.yml`) runs on every push
 or pull request to the `development` branch:
 
-- **Backend checks:** `npm ci` → `npm run test:coverage` (the test suite plus the
-  c8 floor gate in one run) → `npm run lint`; the coverage table is published to
-  the job summary and `coverage/` is uploaded as a short-lived artifact.
-- **Frontend checks:** `npm ci` → `npm run lint` (placeholder) → `npm test` (vitest) → `npx tsc --noEmit` (typecheck) → `npm run build`.
+- **Backend checks:** `npm ci` → `npm audit --omit=dev --audit-level=high` (the
+  runtime-only advisory gate; dev advisories are deliberately excluded — see
+  §10) → `npm run test:coverage` on the primary matrix leg (`npm test` on the
+  second leg) → `npm run lint`; the coverage table is published to the job summary
+  and the primary leg's `coverage/` is uploaded as a short-lived artifact.
+- **Frontend checks:** `npm ci` → `npm audit --omit=dev --audit-level=high` →
+  `npm run lint` (placeholder) → `npm run test:coverage` (vitest plus the floor
+  gate) → `npm run build` (`tsc --noEmit && vite build`, so the typecheck runs
+  exactly once); `apps/frontend/coverage/` is uploaded as a short-lived artifact.
 
 CI installs with plain `npm ci` — **no `--legacy-peer-deps`** (the Vitest 5
 upgrade removed the need). `CLAUDE.md` / `AGENTS.md` are **not tracked** (they
@@ -619,13 +656,13 @@ by restoring the flat config, reinstalling `typescript-eslint` / `@eslint/js` / 
 and flipping the script back to `eslint src/`.
 
 The workflow uses `actions/checkout@v7` and `actions/setup-node@v7` with npm
-caching. `backend-checks` runs a Node matrix (**20.19** and **22**): 20.19 is
-the declared `engines.node` floor in both `package.json` files, 22 matches the
-`node:22-bookworm-slim` runtime images and is the leg that publishes the
-coverage artifact. `migrate-checks`, `integration-checks`, and
-`frontend-checks` stay on Node 22. The backend lint step is **enforced** — the
-previous `continue-on-error: true` has been removed, so ESLint failures
-correctly block the build.
+caching. `backend-checks` runs a Node matrix (**22** and **24**): both satisfy
+`engines.node >=22.22.0`, and 22 matches the `node:22-bookworm-slim` runtime
+images and is the leg that runs the coverage gate and publishes the artifact;
+the 24 leg runs the plain suite to prove forward compatibility. `migrate-checks`,
+`integration-checks`, and `frontend-checks` stay on Node 22. The backend lint
+step is **enforced** — the previous `continue-on-error: true` has been removed,
+so ESLint failures correctly block the build.
 
 Dependency updates are automated by `.github/dependabot.yml`: weekly npm
 updates for both packages (minor/patch grouped into one PR, limit 5) and
@@ -689,14 +726,35 @@ pinned deployments.
 
 These are documented issues from code reviews. Severity is assigned per the review.
 
+### Accepted dependency advisories
+
+- **`picomatch` 4.0.7 ReDoS (GHSA-fc5q-39xc-vjpf) — accepted, dev-only.**
+  The advisory covers `<= 4.0.7` and 4.0.7 is the only published version
+  (verified 2026-11-19: `npm view picomatch version` → `4.0.7`; patched
+  versions: none). It reaches us through `lint-staged`, `vite`, `vitest`,
+  `fdir` and `tinyglobby`, all build/test tooling; nothing in the shipped
+  bundle parses attacker-controlled globs. `npm audit` propagates it to those
+  five packages, which is why the frontend reports 6 high dev advisories; the
+  runtime-only gate (`npm audit --omit=dev --audit-level=high`, the CI
+  "Audit runtime dependencies" step) is unaffected. Re-check on every
+  toolchain bump and remove this note when `picomatch > 4.0.7` is available.
+  Do **not** downgrade `vite`/`vitest` to satisfy `npm audit fix` — npm's
+  suggested "fix" here is `vite@6.2.7` / `vitest@3.1.4`, a real toolchain
+  regression for a fake mitigation.
+  - Note (2026-11-19): GitHub withdrew this advisory on Nov 18, 2026, but the
+    npm audit feed the registry serves has not caught up and still flags it.
+    Expect the frontend dev-audit count to drop to zero without a dependency
+    change once that propagates; delete the note then.
+
 ### Integration coverage / Express 5 prerequisite ✅ RESOLVED
 
 `npm run test:integration` (CI job `integration-checks`) boots a real
 TimescaleDB through `node scripts/migrate.js` only — no `sequelize.sync()` — and
 drives upload → ingest → sessions → telemetry → CSV → delete → re-upload over
 the real routers and models. The migrate boot path is covered end-to-end and
-sync remains dev-only belt-and-braces (the dev `sequelize.sync()` path exercises
-the same model contracts, so the Express 5 migration prerequisite is met).
+sync is dev-only (`app.js` runs it when `NODE_ENV != production`; the path
+exercises the same model contracts, so the Express 5 migration prerequisite is
+met).
 The suite is fail-closed in CI: `CI=true` turns a missing `DATABASE_URL` /
 `SESSION_KEYS` or an unreachable database into a failure instead of a skip.
 
@@ -707,8 +765,9 @@ blockers are resolved and re-reviewed as PASS:
 
 1. ✅ `app.js` now registers `express.json({ limit: '1mb' })` on `/api`
    (before the api router) so JSON bodies populate `req.body`.
-2. ✅ `middleware/auth.js` branches on `req.originalUrl.startsWith('/api')`
-   and returns **401 JSON**; legacy HTML routes keep the redirect.
+2. ✅ `middleware/auth.js` always returns **401 JSON**. Every protected route is
+   mounted under `/api` (SPA and Torque uploads), so there is no HTML-redirect
+   branch to preserve.
 3. ✅ `models/User.js` `confirmPassword` is now `.optional()` (still validated
    when present).
 4. ✅ `UserController.register`/`login` return **JSON** for `/api` requests
@@ -775,14 +834,16 @@ blockers are resolved and re-reviewed as PASS:
 
 ### Low priority
 
-- **Empty `CORS_ORIGINS` blocks the cross-origin SPA.** `app.js` builds the CORS
-  origin allowlist from `process.env.CORS_ORIGINS`. If unset/empty, the allowlist
-  is `[]` and **all** cross-origin `/api` requests are refused. Must be set in
-  production.
-- **SPA build not served by Express.** `app.js` serves the legacy `public/`
-  directory; `apps/frontend/dist` is not served. Confirm the deploy topology
-  (separate origin/CDN, or an nginx layer proxying `/api` to the backend) — both
-  are acceptable, but the choice affects cookie/CSRF handling.
+- **`CORS_ORIGINS` is only needed for a cross-origin SPA.** In the shipped
+  topology the frontend nginx serves the SPA and proxies `/api` on the same
+  origin, so the allowlist can stay empty. If the SPA is deployed on a different
+  origin, set `CORS_ORIGINS` to that origin: `app.js` builds the allowlist from
+  `process.env.CORS_ORIGINS`, and an empty value refuses every cross-origin
+  `/api` request.
+- **SPA is served by nginx, not Express (by design).** `app.js` has no static
+  handler; the frontend image's nginx serves the build and proxies `/api` to the
+  backend. A separate origin/CDN is also supported but requires `CORS_ORIGINS`
+  (and `COOKIE_SECURE=true` for cookie auth over HTTPS).
 - **`log_1min` continuous aggregate is unused.** The 1-minute continuous
   aggregate exists but no endpoint reads from it. Consider serving dashboard
   overviews from it to reduce load on the raw hypertable.
@@ -823,7 +884,11 @@ blockers are resolved and re-reviewed as PASS:
 - **Admin model & analysis retention (Plans 099 + 121).** The first registered
   user is promoted to `isAdmin` at register time (migration 017 also backfills
   the lowest-id user on upgraded deployments; `scripts/promote-admin.js
-  [--demote] <email>` recovers a mis-promoted account). `PUT /api/settings` and
+  [--demote] <email>` recovers a mis-promoted account). The first-admin count
+  runs under `pg_advisory_xact_lock(hashtext('torquedash:first-admin'))`, so
+  concurrent registrations cannot both win, and setting `ADMIN_SETUP_TOKEN`
+  requires the first registration to supply the matching `setupToken`
+  (plan 030). `PUT /api/settings` and
   `POST /api/settings/upload-token` return `403` for non-admins. Settings gains
   `analysisRetentionDays` (Off/90/120/180/365, migration 019); the app-side
   pruner in `services/analysesRetention.js` sweeps stale `Analysis` rows across
@@ -854,11 +919,13 @@ blockers are resolved and re-reviewed as PASS:
   React replay dashboard (overlay chart + imperative Leaflet marker), CSV export,
   session management, BYOK AI analysis.
 - **Auth contract resolved and re-reviewed PASS.**
-- **Verification:** `npm run verify` from the repo root (backend tests + lint,
-  then frontend vitest + `tsc --noEmit`); `npm run build` for the frontend
-  bundle. Backend tests run under Node's built-in test runner
-  (`node --test test/`) plus `scripts/checkMirrors.js` / `scripts/checkTestIntegrity.js`
-  checks.
+- **Verification:** `npm run verify` from the repo root (backend coverage suite —
+  floors + structural guards — and lint, then frontend vitest and the production
+  build, which subsumes the TypeScript check); `npm run build` alone for the
+  frontend bundle. Backend tests run under Node's built-in test runner
+  (`node --test test/*.test.js`); `scripts/checkMirrors.js` /
+  `scripts/checkTestIntegrity.js` and the c8 floors run as part of
+  `npm run test:coverage`.
 - **Additional features implemented:**
   - Env-tunable upload rate limit with token-based burst exemption (a matching Bearer token bypasses the limiter).
   - Runtime-toggleable registration (`Settings` singleton +
@@ -948,18 +1015,17 @@ docker compose -f docker-compose.dev.yml exec backend node scripts/seed-demo.js 
 ```bash
 git clone https://github.com/moesix/torque-dash-next.git
 cd torque-dash-next
-
-# **Required:** generate session keys (app crashes on startup if missing)
-export SESSION_KEYS="$(openssl rand -hex 24)"
-# **Required for production (2026 baseline):** upload API token for Torque
-# Pro authentication. Alternatively generate from the Settings UI after first
-# login (an env-set token overrides and locks the UI).
-export UPLOAD_API_TOKEN="$(openssl rand -hex 24)"
-
-docker compose up -d --build
+cp .env.example .env
+# edit .env: POSTGRES_PASSWORD, SESSION_KEYS (>=32 chars), UPLOAD_API_TOKEN
+docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 ```
 
 Then open **http://localhost:8080**.
+
+`docker-compose.build.yml` is a Compose override: it builds the backend and
+frontend images from this checkout instead of pulling them from GHCR. It must be
+passed *after* the base file (as above) so the `db` service and volumes from
+`docker-compose.yml` are included.
 
 - On first boot the backend creates the database tables, turns the `Logs` table
   into a TimescaleDB hypertable, and seeds the `Settings` row. Data is persisted
@@ -976,6 +1042,8 @@ Then open **http://localhost:8080**.
 > TLS-terminating proxy. The compose defaults are for local/http use.
 
 ### Manual setup (fallback, without Docker)
+
+> Prefer Docker? Use the build override in [Build from source](#build-from-source) instead — it produces the same schema and services.
 
 **Backend**
 
@@ -1037,3 +1105,23 @@ boots a real migrations-only TimescaleDB and drives upload → ingest → sessio
 → telemetry → CSV → delete → re-upload over the real models, so the
 `app.use('*')` wildcard in `app.js` (the only breaking pattern) can move behind
 that net.
+
+## Adding a new unit (plan 045)
+
+1. Add the factor(s) and any preset label to
+   `apps/frontend/src/lib/units.json` (single source for both runtimes) and
+   bump its `version`.
+2. Add the alias(es) to **both** `CANONICAL` tables: `apps/frontend/src/lib/units.ts`
+   and `lib/units.js`. Keep non-convertible units out — they must stay `none`
+   and pass through (`rpm`, `%`, `V`, `g`, `:1`, bare `°`, `g/s`).
+3. Extend the matrix in `test/units.test.js` **and**
+   `apps/frontend/src/lib/__tests__/units.test.ts` (both assert the JSON
+   `version`).
+4. Never emit a bare `MPG` or `gal`: use `MPG (US)`/`MPG (UK)` and
+   `gal (US)`/`gal (UK)`.
+
+**CSV-export limitation:** a PID whose runtime unit came from Torque metadata
+(`userUnit*`/`defaultUnit*`) is not persisted. Exports therefore declare and
+convert using the `lib/pidRegistry.js` fallback unit only; a session recorded
+in mph because Torque was configured that way still exports with the registry
+assumption.

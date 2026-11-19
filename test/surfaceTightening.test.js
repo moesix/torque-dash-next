@@ -105,6 +105,10 @@ function makeStubRes() {
     json(obj) { calls.body = obj; return res; },
     sendStatus(code) { calls.statusCode = code; return res; },
     set(key, val) { calls.headers[key] = val; return res; },
+    vary(field) {
+      calls.headers.Vary = calls.headers.Vary ? `${calls.headers.Vary}, ${field}` : field;
+      return res;
+    },
     send(data) { calls.body = data; return res; },
   };
   return { res, calls };
@@ -157,7 +161,10 @@ describe('GET /api/settings — public endpoint trimmed', () => {
 describe('GET /api/settings/full — authenticated full settings', () => {
   it('returns all expected fields', async () => {
     const UserController = require('../controllers/UserController');
-    const req = {};
+    // Plan 030: llmProvider/llmModel/llmEndpoint are admin-only, so the
+    // "full shape" caller must be an admin (this route is authenticate-gated
+    // in the real router; the old empty req simulated a non-admin).
+    const req = { user: { id: 1, isAdmin: true } };
     const { res, calls } = makeStubRes();
 
     await UserController.getSettingsFull(req, res);
@@ -234,14 +241,17 @@ describe('GET /api/settings/full — authenticated full settings', () => {
     }
   });
 
-  it('sets private Cache-Control', async () => {
+  it('sets private, non-cacheable Cache-Control keyed by the cookie', async () => {
     const UserController = require('../controllers/UserController');
     const req = {};
     const { res, calls } = makeStubRes();
 
     await UserController.getSettingsFull(req, res);
 
-    assert.strictEqual(calls.headers['Cache-Control'], 'private, max-age=30');
+    // plan 031 — was `private, max-age=30`; a browser-cached copy showed a
+    // stale isAdmin/token state for up to 30s.
+    assert.strictEqual(calls.headers['Cache-Control'], 'private, no-store');
+    assert.strictEqual(calls.headers.Vary, 'Cookie');
   });
 });
 

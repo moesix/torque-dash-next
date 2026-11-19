@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { updateLlmSettings, testLlmConnection } from '@/lib/api';
+import { ApiError, updateLlmSettings, testLlmConnection } from '@/lib/api';
 import type { Settings } from '@/lib/types';
 import Button from '@/components/ui/Button';
 import Badge from '@/components/ui/Badge';
@@ -38,8 +38,16 @@ export default function AiProviderCard({ settings, onUpdate }: Props) {
     try {
       const body: Record<string, unknown> = { llmProvider: provider || null };
       if (apiKey) body.llmApiKey = apiKey;
-      if (model) body.llmModel = model;
-      if (endpoint) body.llmEndpoint = endpoint;
+      // Always send the model for a selected provider so a switch cannot
+      // inherit the previous provider's model; null clears it server-side
+      // (the provider then falls back to its default model).
+      if (provider) body.llmModel = model || null;
+      // Custom endpoints only exist for the OpenAI-compatible and Ollama
+      // providers; clear else, so switching away from them cannot leave a
+      // stale endpoint (and its embedded userinfo) stored.
+      body.llmEndpoint = (provider === 'custom' || provider === 'ollama')
+        ? (endpoint || null)
+        : null;
       body.llmMaxTokens = maxTokens; // general setting, applies to all providers
       if (provider === 'deepseek') {
         body.llmThinkingMode = thinkingMode;
@@ -49,8 +57,8 @@ export default function AiProviderCard({ settings, onUpdate }: Props) {
       if (updated) onUpdate(updated);
       setApiKey('');
       setTestResult(null);
-    } catch {
-      setError('Failed to save settings.');
+    } catch (err) {
+      setError(err instanceof ApiError && err.message ? err.message : 'Failed to save settings.');
     } finally {
       setBusy(false);
     }
@@ -69,8 +77,8 @@ export default function AiProviderCard({ settings, onUpdate }: Props) {
       } else {
         setError(res.error || 'Test failed');
       }
-    } catch {
-      setError('Connection test failed.');
+    } catch (err) {
+      setError(err instanceof ApiError && err.message ? err.message : 'Connection test failed.');
     } finally {
       setBusy(false);
     }
@@ -124,7 +132,8 @@ export default function AiProviderCard({ settings, onUpdate }: Props) {
           <p className="text-sm leading-relaxed font-medium mb-1">Provider</p>
           <select
             value={provider}
-            onChange={(e) => { setProvider(e.target.value); setModel(''); }}
+            onChange={(e) => { setProvider(e.target.value); setModel(''); setEndpoint(''); }}
+            aria-label="Provider"
             className="w-full rounded border bg-white px-3 py-2 text-sm dark:border-[var(--border-default)] dark:bg-[var(--bg-surface)]"
           >
             <option value="">Select provider...</option>

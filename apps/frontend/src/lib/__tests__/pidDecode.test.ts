@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { coerceScalar, getAvailableSeries, getSeriesData, computeTotalTrim, precomputeEpochs, computeStats, findNearestFrameIndex } from '../pidDecode';
+import { coerceScalar, getAvailableSeries, getSeriesData, getSeriesStats, computeTotalTrim, precomputeEpochs, computeStats, findNearestFrameIndex, computeFuelEconomy } from '../pidDecode';
+import { convert } from '../units';
+import type { TelemetryFrame } from '../types';
 
 describe('coerceScalar', () => {
     it('returns null for null/undefined', () => {
@@ -218,4 +220,66 @@ describe('findNearestFrameIndex', () => {
         expect(findNearestFrameIndex([0, 10000, 20000], 16000)).toBe(2);
         expect(findNearestFrameIndex([0, 10000, 20000], 4000)).toBe(0);
     });
+});
+
+// ── Derived fuel economy (plan 045) ────────────────────────────────────────
+
+describe('derived fuel economy', () => {
+  const T1 = Date.parse('2026-11-18T10:00:00.000Z');
+  function econFrame(i: number, speed: number | null, ccMin: number | null): TelemetryFrame {
+    return {
+      timestamp: new Date(T1 + i * 1000).toISOString(),
+      lon: null,
+      lat: null,
+      values: ccMin == null ? {} : { kff125a: ccMin },
+      engineRpm: 2000,
+      vehicleSpeed: speed,
+    };
+  }
+
+  it('is exposed only when both fuel flow and speed exist', () => {
+    const both = getAvailableSeries([econFrame(0, 100, 250)]);
+    const src = both.find((s) => s.pid === '__fuelEconomy');
+    expect(src).toBeTruthy();
+    expect(src!.unit).toBe('L/100km');
+    expect(src!.short).toBe('Fuel econ');
+
+    const noFuel = getAvailableSeries([econFrame(0, 100, null)]);
+    expect(noFuel.some((s) => s.pid === '__fuelEconomy')).toBe(false);
+
+    const noSpeed = getAvailableSeries([
+      { ...econFrame(0, null, 250) },
+    ]);
+    expect(noSpeed.some((s) => s.pid === '__fuelEconomy')).toBe(false);
+  });
+
+  it('computes L/100km from cc/min and speed, excluding idle frames', () => {
+    const frames = [
+      econFrame(0, 100, 250), // 15 L/h @ 100 km/h → 15 L/100km
+      econFrame(1, 0, 250), // idle → excluded
+      econFrame(2, 100, null), // missing fuel flow → excluded
+    ];
+    const data = computeFuelEconomy(frames);
+    expect(data[0][1]).toBeCloseTo(15, 6);
+    expect(data[1][1]).toBeNull();
+    expect(data[2][1]).toBeNull();
+  });
+
+  it('US and UK MPG differ by the gallon ratio', () => {
+    const mpgUs = convert(15, 'L/100km', 'us')!;
+    const mpgUk = convert(15, 'L/100km', 'uk')!;
+    expect(mpgUs).toBeCloseTo(235.214583 / 15, 4);
+    expect(mpgUk).toBeCloseTo(282.480936 / 15, 4);
+    expect(mpgUk / mpgUs).toBeCloseTo(282.480936 / 235.214583, 6);
+  });
+
+  it('getSeriesStats folds the derived series like any other source', () => {
+    const frames = [econFrame(0, 100, 250), econFrame(1, 120, 250)];
+    const src = getAvailableSeries(frames).find((s) => s.pid === '__fuelEconomy')!;
+    const stats = getSeriesStats(frames, src);
+    expect(stats).not.toBeNull();
+    expect(stats!.count).toBe(2);
+    expect(stats!.min).toBeCloseTo(12.5, 6); // 15 L/h @ 120 km/h
+    expect(stats!.max).toBeCloseTo(15, 6);
+  });
 });

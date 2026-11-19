@@ -18,7 +18,7 @@
 const path = require('path');
 const fs = require('fs');
 
-const MARKERS = ['reproduce', 'replicate', 'mirror of', 'local fallback'];
+const MARKERS = ['reproduce', 'replicate', 'mirror of', 'local fallback', 'fallback for when', 'identical shape'];
 const JUSTIFICATION = 'NOTE: intentionally standalone';
 const TEST_DIR = path.join(__dirname, '..', 'test');
 

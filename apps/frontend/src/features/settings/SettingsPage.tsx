@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { getFullSettings, updateSettings, generateUploadToken } from '@/lib/api';
+import { ApiError, getFullSettings, updateSettings, generateUploadToken } from '@/lib/api';
 import { useVersion } from '@/lib/useVersion';
 import type { Settings } from '@/lib/types';
 import Toggle from '@/components/ui/Toggle';
@@ -8,9 +8,12 @@ import Badge from '@/components/ui/Badge';
 import AiProviderCard from './AiProviderCard';
 import MapBasemapCard from './MapBasemapCard';
 import VehicleManager from './VehicleManager';
+import UnitsCard from './UnitsCard';
 import AnalysisHistory from '@/components/ai/AnalysisHistory';
+import { useUnits } from '@/app/unitSystem';
 
 export default function SettingsPage() {
+  const { serverDefault } = useUnits();
   const [disableRegistration, setDisableRegistration] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -78,8 +81,8 @@ export default function SettingsPage() {
       const s = await updateSettings({ disableRegistration: next });
       if (s) setDisableRegistration(s.disableRegistration);
       setSaved(true);
-    } catch {
-      setError('Failed to save settings.');
+    } catch (err) {
+      setError(err instanceof ApiError && err.message ? err.message : 'Failed to save settings.');
     } finally {
       setBusy(false);
     }
@@ -139,6 +142,9 @@ export default function SettingsPage() {
         <p className="mt-1 text-sm leading-relaxed dark:text-[var(--text-secondary)]">Global site configuration.</p>
       </div>
 
+      {/* Per-user units — rendered for every user, admins or not. */}
+      <UnitsCard />
+
       {isAdmin === false ? (
         <div className="card">
           <p className="text-sm leading-relaxed font-medium">Account</p>
@@ -172,6 +178,11 @@ export default function SettingsPage() {
         {saved ? (
           <p className="mt-3 text-sm leading-relaxed text-emerald-600 dark:text-emerald-400">Saved.</p>
         ) : null}
+        <p className="mt-3 text-xs leading-relaxed text-gray-500 dark:text-[var(--text-muted)]">
+          Server default:{' '}
+          {serverDefault === 'us' ? 'US customary' : serverDefault === 'uk' ? 'UK' : 'Metric'}{' '}
+          (<code className="font-mono">DEFAULT_UNIT_SYSTEM</code>)
+        </p>
       </div>
 
       <div className="card">
@@ -287,8 +298,8 @@ export default function SettingsPage() {
                 try {
                   await updateSettings({ timezoneOffset: llmSettings.timezoneOffset ?? 0 });
                   setSaved(true);
-                } catch {
-                  setError('Failed to save timezone.');
+                } catch (err) {
+                  setError(err instanceof ApiError && err.message ? err.message : 'Failed to save timezone.');
                 }
               }}
               className="w-24 rounded border bg-white px-3 py-1.5 text-sm font-mono dark:border-[var(--border-default)] dark:bg-[var(--bg-surface)] dark:text-[var(--text-primary)]"
@@ -321,8 +332,8 @@ export default function SettingsPage() {
                 const next = { ...llmSettings, retentionEnabled: checked };
                 setLlmSettings(next);
                 setRetentionError(null);
-                updateSettings({ retentionEnabled: checked }).catch(() => {
-                  setRetentionError('Failed to save retention setting.');
+                updateSettings({ retentionEnabled: checked }).catch((err) => {
+                  setRetentionError(err instanceof ApiError && err.message ? err.message : 'Failed to save retention setting.');
                   getFullSettings().then((s) => {
                     if (s) setLlmSettings(s);
                   });
@@ -349,8 +360,8 @@ export default function SettingsPage() {
                   const next = { ...llmSettings, retentionDays: days };
                   setLlmSettings(next);
                   setRetentionError(null);
-                  updateSettings({ retentionDays: days }).catch(() => {
-                    setRetentionError('Failed to save retention days.');
+                  updateSettings({ retentionDays: days }).catch((err) => {
+                    setRetentionError(err instanceof ApiError && err.message ? err.message : 'Failed to save retention days.');
                     getFullSettings().then((s) => {
                       if (s) setLlmSettings(s);
                     });
@@ -404,8 +415,8 @@ export default function SettingsPage() {
                 const next = { ...llmSettings, analysisRetentionDays: days };
                 setLlmSettings(next);
                 setRetentionError(null);
-                updateSettings({ analysisRetentionDays: days }).catch(() => {
-                  setRetentionError('Failed to save analysis retention days.');
+                updateSettings({ analysisRetentionDays: days }).catch((err) => {
+                  setRetentionError(err instanceof ApiError && err.message ? err.message : 'Failed to save analysis retention days.');
                   getFullSettings().then((s) => {
                     if (s) setLlmSettings(s);
                   });

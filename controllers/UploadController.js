@@ -3,21 +3,29 @@ const User = require('../models').User;
 const Session = require('../models').Session;
 const Vehicle = require('../models').Vehicle;
 const Settings = require('../models').Settings;
-const userCache = require('../lib/userCache');
+const { userCache, vehicleCache, sessionCache } = require('../lib/hotCaches');
 const ingestBuffer = require('../services/ingestBuffer');
 const runtime = require('../config/runtime');
-
-// Dedicated hot-path caches for the per-frame identity lookups. When the
-// loaded userCache module doesn't expose the class (slim test doubles inject
-// a plain get/set/del object), fall back to using that object as the backend.
-const UserCacheClass = userCache.UserCache || null;
-const vehicleCache = UserCacheClass ? new UserCacheClass({ ttl: 300_000, max: 1000 }) : userCache;
-const sessionCache = UserCacheClass ? new UserCacheClass({ ttl: 60_000, max: 5000 }) : userCache;
 
 // Express turns repeated query params (`kc=100&kc=200`) into arrays. Scalar
 // fields that are coerced or stored as single values take the first element,
 // matching the device's intent (a repeated param is a retry artefact).
 const scalar = (v) => (Array.isArray(v) ? v[0] : v);
+
+// Upload rejections are the primary troubleshooting signal for Torque Pro
+// integrations. Log the reason + identifying params; NEVER the Authorization
+// header or any token value.
+function logRejection(reason, req, extra = {}) {
+    const q = req.query || {};
+    console.warn('[upload] rejected', JSON.stringify({
+        reason,
+        ip: req.ip,
+        session: typeof q.session === 'string' ? q.session.slice(0, 64) : undefined,
+        eml: typeof q.eml === 'string' ? q.eml.toLowerCase().slice(0, 254) : undefined,
+        vehicle: typeof q.v === 'string' ? q.v.slice(0, 64) : undefined,
+        ...extra,
+    }));
+}
 
 // Resolve an email to a User, using the positive + negative TTL cache.
 // Returns the user, or null if unknown (unknown emails are cached as negatives).
@@ -32,7 +40,7 @@ async function resolveUser(eml) {
 }
 
 class UploadController {
-    static async processUpload(req, res) {
+    static async processUpload(req, res, next) {
         try {
             // ── AUTHENTICATION ──────────────────────────────────────────────
             // When UPLOAD_API_TOKEN is configured, bearer token is REQUIRED.
@@ -41,6 +49,7 @@ class UploadController {
             if (configuredToken) {
                 const authHeader = req.headers.authorization || '';
                 if (!authHeader.startsWith('Bearer ')) {
+                    logRejection('missing_bearer', req);
                     return res.status(401).json({
                         error: 'Authorization header required',
                         hint: 'Set Authorization: Bearer <your-token> in Torque Pro'
@@ -50,6 +59,7 @@ class UploadController {
                 const tokenBuf = Buffer.from(token, 'utf8');
                 const expectedBuf = Buffer.from(configuredToken, 'utf8');
                 if (tokenBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(tokenBuf, expectedBuf)) {
+                    logRejection('invalid_bearer', req);
                     return res.status(401).json({ error: 'Invalid upload token' });
                 }
             }
@@ -61,6 +71,7 @@ class UploadController {
             // Validate `session` BEFORE any DB access — a missing/garbage value
             // must never reach Sequelize (it would throw → 500 → device retry storm).
             if (!session || typeof session !== 'string' || session.length > 255) {
+                logRejection('invalid_session_param', req);
                 return res.status(400).json({
                     error: 'session parameter is required and must be a string (max 255 chars).'
                 });
@@ -79,6 +90,7 @@ class UploadController {
             const rawTs = t == null ? Date.now() : Number(t);
             const tsDate = new Date(rawTs);
             if (!Number.isFinite(rawTs) || !Number.isFinite(tsDate.getTime())) {
+                logRejection('invalid_time_param', req);
                 return res.status(400).json({ error: 'Invalid time parameter.' });
             }
 
@@ -88,7 +100,10 @@ class UploadController {
             // Resolve user (positive + negative cache). Keep the 403 gate:
             // unknown emails are NEVER buffered or forwarded.
             let user = await resolveUser(eml);
-            if (!user) return res.status(403).json({ error: 'Invalid user account.' });
+            if (!user) {
+                logRejection('unknown_email', req);
+                return res.status(403).json({ error: 'Invalid user account.' });
+            }
 
             // Resolve vehicle from Torque's `v` param (vehicle profile name).
             // Falls back to the user's default vehicle when `v` is missing or
@@ -171,8 +186,7 @@ class UploadController {
             // Respond immediately — do NOT await the DB flush.
             res.status(200).send('OK!');
         } catch (err) {
-            res.status(500).json({ error: 'Internal server error' });
-            console.error(err.message || err);
+            next(err);
         }
     }
 }
@@ -180,12 +194,3 @@ class UploadController {
 module.exports = UploadController;
 // Exported for direct unit testing of the module-private resolver.
 module.exports.resolveUser = resolveUser;
-
-// Drop the cached device-session → numeric FK mapping for one session. Called
-// after a session row is deleted so the next upload re-resolves (and recreates)
-// it instead of buffering frames against a nonexistent FK.
-function evictSession(sessionKey, userId) {
-    if (sessionKey == null || userId == null) return;
-    sessionCache.del(`s:${userId}:${sessionKey}`);
-}
-module.exports.evictSession = evictSession;

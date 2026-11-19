@@ -13,23 +13,35 @@
  * row normalizer (`summaryFromAggregateRow`), so a column/filter change cannot
  * land on one side only.
  *
+ * There are exactly TWO writers of the denormalized columns, and both live in
+ * this module:
+ *  - `mergeWrittenRows` — ingest-side, monotonic: one UPDATE per flushed
+ *    session using LEAST/GREATEST, so it can only widen the window and raise
+ *    the maxima. It never reads the row first (no read-modify-write, so it
+ *    cannot resurrect pre-delete values).
+ *  - `recomputeSummary` — authoritative: recomputes from `Logs` after every
+ *    cut/filter/copy/join.
+ * Both run through `withSummaryWriteLock`, which serializes them within this
+ * process.
+ *
  * Contracts preserved from the controller copies:
  *  - `aggregateSummaries` keeps the denormalized fast path: the Log scan runs
  *    ONLY for ids whose `firstTimestamp` is NULL, never on the list path.
- *  - `recomputeSummary` stays the SOLE writer of the denormalized columns.
  *  - Query shapes stay as they were: one grouped query for the batched list
  *    fallback, one aggregate `findOne` for the single-session writer (the
  *    list path must not re-scan Logs per session).
  *
- * Models are resolved lazily on each call: the test suites inject a mocked
- * `../models` into require.cache and re-require the controller (the pattern
- * this module inherited), so a module-load-time binding would go stale.
+ * Models and the PID-key registry are bound once at load time: a test that
+ * injects a mocked `../models` must purge this module (see
+ * test/support/loadWithMocks.js) so the mock is what gets bound.
  */
 
 const { formatDuration } = require('../lib/csvExport');
+const modelsModule = require('../models');
+const pidRegistry = require('../lib/pidRegistry');
 
 function models() {
-    return require('../models');
+    return modelsModule;
 }
 
 // internal — exported for tests
@@ -99,18 +111,30 @@ async function loadAggregateRange(sessionId) {
  * Aggregated session summary (start/end time + max speed/RPM) for a batch of
  * session ids. Reads the denormalized `Sessions` columns first and falls back
  * to the grouped Log aggregate only for the ids that are still NULL.
+ *
+ * `preloadedRows` (optional) are Sessions rows the caller has already loaded
+ * (instances or plain objects): when given, they replace the summary `SELECT`,
+ * so the list/detail paths never re-read the rows they just fetched. They MUST
+ * carry `id`, `firstTimestamp`, `lastTimestamp`, `maxRpm`, `maxSpeed` — the
+ * list/detail queries select every Sessions column. Behaviour is otherwise
+ * identical: NULL-summary rows still go through `loadAggregateRanges`.
  */
-async function aggregateSummaries(sessionIds) {
+async function aggregateSummaries(sessionIds, preloadedRows) {
     const map = new Map();
     if (!sessionIds || sessionIds.length === 0) return map;
 
-    const { Session } = models();
-    // Read denormalized columns from Session first
-    const sessions = await Session.findAll({
-        where: { id: sessionIds },
-        attributes: ['id', 'firstTimestamp', 'lastTimestamp', 'maxRpm', 'maxSpeed'],
-        raw: true,
-    });
+    let sessions;
+    if (preloadedRows) {
+        sessions = preloadedRows.map(s => (typeof s.toJSON === 'function' ? s.toJSON() : s));
+    } else {
+        const { Session } = models();
+        // Read denormalized columns from Session first
+        sessions = await Session.findAll({
+            where: { id: sessionIds },
+            attributes: ['id', 'firstTimestamp', 'lastTimestamp', 'maxRpm', 'maxSpeed'],
+            raw: true,
+        });
+    }
 
     const missingIds = [];
     for (const s of sessions) {
@@ -147,40 +171,108 @@ function decorateWithSummaries(session, summary) {
     return out;
 }
 
+// Serializes summary writers within this process. ingest merges and
+// recompute-from-Logs both mutate the same four columns; without this, a flush
+// that read the pre-delete maxima can write them back after a cut/filter
+// recompute. Single-instance deployment is the supported topology (see
+// docker-compose.yml); a multi-instance deployment would need a DB-level guard.
+let summaryWriteChain = Promise.resolve();
+function withSummaryWriteLock(fn) {
+    const run = summaryWriteChain.then(fn, fn);
+    summaryWriteChain = run.then(() => undefined, () => undefined);
+    return run;
+}
+
 /**
- * Recompute and persist one session's denormalized summary columns. Sole
- * writer of the columns; called after every Log mutation (cut/filter/copy/join).
+ * Merge rows that were just written to Logs into the denormalized columns.
+ * Monotonic in one SQL statement (no read-modify-write): LEAST/GREATEST can
+ * only widen the window and raise the maxima. Called by ingestBuffer after a
+ * successful flush; recomputeSummary remains the from-scratch writer.
+ *
+ * `rows` have the written-Log shape `{ timestamp, engine_rpm, vehicle_speed }`
+ * with nullable values. A column whose batch contributes nothing (every value
+ * null) is omitted from the SET clause entirely, so it is never cleared.
+ */
+async function mergeWrittenRows(sessionId, rows) {
+    if (!sessionId || !rows || rows.length === 0) return;
+
+    let minTs;
+    let maxTs;
+    let maxRpm;
+    let maxSpeed;
+    for (const r of rows) {
+        if (r.timestamp != null) {
+            if (minTs === undefined || r.timestamp < minTs) minTs = r.timestamp;
+            if (maxTs === undefined || r.timestamp > maxTs) maxTs = r.timestamp;
+        }
+        if (r.engine_rpm != null && (maxRpm === undefined || r.engine_rpm > maxRpm)) {
+            maxRpm = r.engine_rpm;
+        }
+        if (r.vehicle_speed != null && (maxSpeed === undefined || r.vehicle_speed > maxSpeed)) {
+            maxSpeed = r.vehicle_speed;
+        }
+    }
+
+    const setFragments = [];
+    const replacements = { id: sessionId };
+    if (minTs !== undefined) {
+        setFragments.push('"firstTimestamp" = LEAST(COALESCE("firstTimestamp", :minTs), :minTs)');
+        replacements.minTs = minTs;
+    }
+    if (maxTs !== undefined) {
+        setFragments.push('"lastTimestamp" = GREATEST(COALESCE("lastTimestamp", :maxTs), :maxTs)');
+        replacements.maxTs = maxTs;
+    }
+    if (maxRpm !== undefined) {
+        setFragments.push('"maxRpm" = GREATEST(COALESCE("maxRpm", :maxRpm), :maxRpm)');
+        replacements.maxRpm = maxRpm;
+    }
+    if (maxSpeed !== undefined) {
+        setFragments.push('"maxSpeed" = GREATEST(COALESCE("maxSpeed", :maxSpeed), :maxSpeed)');
+        replacements.maxSpeed = maxSpeed;
+    }
+    if (setFragments.length === 0) return;
+
+    const sql = `UPDATE "Sessions" SET ${setFragments.join(', ')} WHERE id = :id`;
+    await withSummaryWriteLock(() =>
+        models().sequelize.query(sql, { replacements })
+    );
+}
+
+/**
+ * Recompute and persist one session's denormalized summary columns from the
+ * `Logs` aggregate. Authoritative writer: called after every Log mutation
+ * (cut/filter/copy/join). Ingest merges monotonically through
+ * `mergeWrittenRows`; both are serialized by `withSummaryWriteLock`.
  */
 async function recomputeSummary(sessionId) {
     if (!sessionId) return;
-    // Drop the cached PID key-set BEFORE reading the aggregate: cut/filter can
-    // remove every row, in which case the cache is the most wrong (it still
-    // carries PIDs that no longer exist) and the early return below would skip
-    // invalidation entirely.
-    //
-    // Resolved lazily, like the models above: some suites stub `lib/pidRegistry`
-    // in require.cache with a partial surface (`discoverPidKeys` only), so a
-    // load-time destructure would bind `undefined` for the whole process.
-    const { invalidatePidKeys } = require('../lib/pidRegistry');
-    invalidatePidKeys(sessionId);
-    const log = await loadAggregateRange(sessionId);
-    if (!log) return;
-    const { Session } = models();
-    await Session.update(
-        {
-            firstTimestamp: log.start || null,
-            lastTimestamp: log.end || null,
-            maxRpm: log.maxRpm ?? null,
-            maxSpeed: log.maxSpeed ?? null,
-        },
-        { where: { id: sessionId } }
-    );
+    await withSummaryWriteLock(async () => {
+        // Cut/filter can remove every row, in which case the cache is the most
+        // wrong (it still carries PIDs that no longer exist) and the early
+        // return below would skip invalidation entirely.
+        pidRegistry.invalidatePidKeys(sessionId);
+        const log = await loadAggregateRange(sessionId);
+        if (!log) return;
+        const { Session } = models();
+        await Session.update(
+            {
+                firstTimestamp: log.start || null,
+                lastTimestamp: log.end || null,
+                maxRpm: log.maxRpm ?? null,
+                maxSpeed: log.maxSpeed ?? null,
+            },
+            { where: { id: sessionId } }
+        );
+    });
 }
 
 module.exports = {
     aggregateSummaries,
     decorateWithSummaries,
     recomputeSummary,
+    mergeWrittenRows,
+    withSummaryWriteLock,
     loadAggregateRanges,
     loadAggregateRange,
     summaryFromAggregateRow,

@@ -10,3 +10,8 @@ npm-debug.log
 *.log
 .DS_Store
 .husky
+.env
+.env.*
+!.env.example
+plans/
+coverage/

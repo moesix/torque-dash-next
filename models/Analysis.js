@@ -39,6 +39,12 @@ module.exports = (sequelize, DataTypes) => {
             type: DataTypes.TEXT,
             allowNull: true,
         },
+        // Descriptive metadata: the unit system the prose was generated in.
+        // NULL = unknown (historical rows). Not used to render the prose.
+        unitSystem: {
+            type: DataTypes.STRING(16),
+            allowNull: true,
+        },
     }, {
         tableName: 'Analyses',
         timestamps: true,

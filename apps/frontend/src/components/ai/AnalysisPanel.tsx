@@ -7,8 +7,10 @@ import { analyzeSession, listAnalyses, deleteAnalysis, getAnalysis, getFullSetti
 import { Link } from 'react-router';
 import StreamRenderer from './StreamRenderer';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
+import Badge from '@/components/ui/Badge';
 import type { Analysis, AnalysisPreview, Settings } from '@/lib/types';
 import { stripMarkdown } from '@/lib/utils';
+import { unitBadgeLabel } from '@/lib/units';
 
 export interface AnalysisPanelHandle {
   triggerAnalysis: () => void;
@@ -276,8 +278,13 @@ export default function AnalysisPanel({ sessionId, ref, printMode = false }: Pro
                         toggleExpand(a);
                       }}
                     >
-                      <span className="min-w-0 truncate">
-                        {isLoading ? 'Loading...' : `${a.provider}/${a.model} — ${new Date(a.createdAt).toLocaleString()}`}
+                      <span className="flex min-w-0 items-center gap-2 truncate">
+                        <span className="min-w-0 truncate">
+                          {isLoading ? 'Loading...' : `${a.provider}/${a.model} — ${new Date(a.createdAt).toLocaleString()}`}
+                        </span>
+                        {unitBadgeLabel(a.unitSystem) && (
+                          <Badge tone="neutral">{unitBadgeLabel(a.unitSystem)}</Badge>
+                        )}
                       </span>
                       <button
                         type="button"

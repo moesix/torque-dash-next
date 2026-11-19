@@ -11,6 +11,8 @@ import type {
   TestLlmResponse,
   Vehicle,
   UpdateVehicle,
+  UnitSystem,
+  UserPreferences,
 } from './types';
 
 /**
@@ -49,7 +51,17 @@ async function request<T>(url: string, init?: RequestInit): Promise<T | undefine
     throw new ApiError('Unauthorized', 401);
   }
   if (!res.ok) {
-    throw new ApiError(`Request failed with status ${res.status}`, res.status);
+    // Prefer the backend's `{ error }` message (it is user-actionable, e.g.
+    // "retentionDays must be between 90 and 365") over a bare status string.
+    // res.json() consumes the body; nothing below reads it on this path.
+    let message = `Request failed with status ${res.status}`;
+    try {
+      const body = await res.json();
+      if (body && typeof body.error === 'string' && body.error) message = body.error;
+    } catch {
+      // non-JSON body (e.g. a proxy's HTML error page) — keep the status message
+    }
+    throw new ApiError(message, res.status);
   }
 
   const contentType = res.headers.get('content-type') ?? '';
@@ -94,13 +106,16 @@ export async function login(email: string, password: string): Promise<boolean> {
     }
     throw new ApiError(message, res.status);
   }
-  // Cookie sanity probe (kept from the previous design).
+  // Cookie sanity probe. The POST already succeeded (2xx) and the cookie is set;
+  // a failure here (500, 429, proxy hiccup) must NOT be reported as bad
+  // credentials. Only a 401 from the probe means the cookie did not stick.
   try {
     await getSessions();
-    return true;
-  } catch {
-    return false;
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) return false;
+    // fall through: the route's own data fetch will surface a real outage
   }
+  return true;
 }
 
 export async function register(email: string, password: string): Promise<void> {
@@ -220,6 +235,22 @@ export async function getSettings(): Promise<PublicSettings | undefined> {
  *  hasLlmProvider / llmProvider / hasLlmApiKey MUST use this one. */
 export async function getFullSettings(): Promise<Settings | undefined> {
   return request<Settings>('/api/settings/full');
+}
+
+/** Per-user display preferences (plan 045). `unitSystem` is resolved; the
+ *  raw choice is `preference` (null = inherit the server default). */
+export async function getPreferences(): Promise<UserPreferences | undefined> {
+  return request<UserPreferences>('/api/users/preferences');
+}
+
+/** Save the unit system. `null` clears it back to inherit DEFAULT_UNIT_SYSTEM. */
+export async function updatePreferences(
+  unitSystem: UnitSystem | null,
+): Promise<UserPreferences | undefined> {
+  return request<UserPreferences>('/api/users/preferences', {
+    method: 'PUT',
+    body: JSON.stringify({ unitSystem }),
+  });
 }
 
 export async function updateSettings(

@@ -1,0 +1,10 @@
+# Local image build from this checkout (the production compose pulls GHCR).
+services:
+  backend:
+    image: torquedash-backend:local
+    build:
+      context: .
+  frontend:
+    image: torquedash-frontend:local
+    build:
+      context: ./apps/frontend

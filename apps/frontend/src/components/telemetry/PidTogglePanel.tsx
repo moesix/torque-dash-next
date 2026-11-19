@@ -13,6 +13,8 @@ import { useMemo, useState } from 'react';
 import type { ChangeEvent } from 'react';
 import type { SeriesSource } from '@/lib/types';
 import { SERIES_COLORS } from '@/lib/chartColors';
+import { useUnits } from '@/app/unitSystem';
+import { kindOf, unitLabel } from '@/lib/units';
 import ChevronIcon from '@/components/ui/ChevronIcon';
 
 // ── Color swatches come from lib/chartColors.ts (must match OverlayChart) ─
@@ -46,7 +48,7 @@ function categorize(src: SeriesSource): string {
   }
   if (
     /rpm|speed|km\/h|drivetrain|gear|odometer/.test(text) ||
-    src.unit === 'km/h' ||
+    kindOf(src.unit) === 'speed' ||
     src.unit === 'rpm'
   ) {
     return 'Drivetrain';
@@ -96,6 +98,7 @@ export default function PidTogglePanel({
   onClear,
   onReset,
 }: Props) {
+  const { system } = useUnits();
   const [search, setSearch] = useState('');
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(
     () => new Set(['Engine']),
@@ -244,7 +247,7 @@ export default function PidTogglePanel({
                         />
                         <span className="truncate flex-1">{src.short}</span>
                         <span className="text-[10px] shrink-0 text-fg-muted">
-                          {src.unit}
+                          {unitLabel(src.unit, system) || src.unit}
                         </span>
                       </label>
                     );

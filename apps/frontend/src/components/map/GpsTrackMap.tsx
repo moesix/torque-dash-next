@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { MapContainer, TileLayer, Polyline, Marker } from 'react-leaflet';
+import { MapContainer, TileLayer, Polyline, Marker, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import { usePlaybackStore } from '@/app/playbackStore';
 import { findNearestFrameIndex } from '@/lib/pidDecode';
@@ -294,6 +294,30 @@ interface Props {
 }
 
 /**
+ * Frame the driven track once the map has mounted. `MapContainer`'s
+ * `center`/`zoom` props are read only at mount, so a long drive would
+ * otherwise sit at street zoom on its first frame. This child deliberately
+ * lives INSIDE the container: it uses `useMap()` to reach the existing
+ * instance, so fitting never remounts the Leaflet map (which would drop the
+ * marker/cursor subscription below).
+ *
+ * `positions` is the memoized array from the parent — the effect re-fits only
+ * when the frame list (hence the track) changes, not on cursor ticks.
+ */
+export function FitBounds({ positions }: { positions: Array<[number, number]> }) {
+  const map = useMap();
+  useEffect(() => {
+    if (positions.length === 0) return;
+    if (positions.length === 1) {
+      map.setView(positions[0], 15);
+      return;
+    }
+    map.fitBounds(L.latLngBounds(positions), { padding: [24, 24], maxZoom: 16 });
+  }, [map, positions]);
+  return null;
+}
+
+/**
  * GPS track replay. The <MapContainer> is mounted ONCE and must never be
  * re-rendered by cursor changes (doing so would destroy/recreate the Leaflet
  * map). Instead we subscribe to the playback store OUTSIDE React render and
@@ -442,6 +466,20 @@ export default function GpsTrackMap({ frames, className }: Props) {
     return unsubscribe;
   }, [frames, timestamps]);
 
+  // No GPS at all in this session: an empty world map at (0,0) is noise.
+  // Say so explicitly instead. This branch is rendered AFTER all hooks so the
+  // hook order is identical across renders; it also omits `data-map-provider`
+  // (there is no tile pane to scope).
+  if (positions.length === 0) {
+    return (
+      <div
+        className={`flex items-center justify-center ${heightClass} rounded border border-[var(--border-default)] text-sm text-fg-muted`}
+      >
+        No GPS data in this session.
+      </div>
+    );
+  }
+
   return (
     <div
       // `'osm'` only while the keyless OpenStreetMap provider is effectively
@@ -458,6 +496,9 @@ export default function GpsTrackMap({ frames, className }: Props) {
         scrollWheelZoom
         className="h-full w-full"
       >
+        {/* Initial view only: `center`/`zoom` are mount-time props. The real
+            framing happens here, on the mounted instance. */}
+        <FitBounds positions={positions} />
         <TileLayer
           // Key includes provider AND theme: a provider flip (or theme swap)
           // recreates the layer so the attribution control re-renders with
@@ -488,3 +529,4 @@ export default function GpsTrackMap({ frames, className }: Props) {
     </div>
   );
 }
+

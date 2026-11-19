@@ -1,5 +1,14 @@
 @import 'leaflet/dist/leaflet.css';
 @import "tailwindcss";
+/* Self-hosted webfonts (@fontsource) — Vite fingerprints the .woff2 files,
+   so the CSP needs no third-party font origins and there is no Google request. */
+@import '@fontsource/space-grotesk/400.css';
+@import '@fontsource/space-grotesk/500.css';
+@import '@fontsource/space-grotesk/600.css';
+@import '@fontsource/space-grotesk/700.css';
+@import '@fontsource/martian-mono/400.css';
+@import '@fontsource/martian-mono/500.css';
+@import '@fontsource/martian-mono/700.css';
 @plugin "@tailwindcss/typography";
 
 @source "../node_modules/react-leaflet/**/*.{js,ts,jsx,tsx}";

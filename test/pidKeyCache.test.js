@@ -17,6 +17,7 @@ const { test, describe } = require('node:test');
 const assert = require('node:assert');
 
 const { discoverPidKeys, invalidatePidKeys } = require('../lib/pidRegistry');
+const { loadWithMocks } = require('./support/loadWithMocks');
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -42,36 +43,16 @@ function makeSequelizeSpy(rowsBySession) {
 }
 
 // Load services/ingestBuffer fresh (empty buffer, new timer) against mocked
-// models. Returns restore() to put the original module caches back.
+// models. sessionSummaries now binds ../models at load, so it is purged too;
+// pidRegistry stays the SHARED singleton on purpose (the invalidation
+// assertions compare against this file's top-level `discoverPidKeys`).
 function loadFreshIngestBuffer(mockModels) {
-    const modelsPath = require.resolve('../models');
-    const originalModelsCache = require.cache[modelsPath];
-    require.cache[modelsPath] = {
-        id: modelsPath,
-        filename: modelsPath,
-        loaded: true,
-        exports: mockModels,
-    };
-
-    const ibPath = require.resolve('../services/ingestBuffer');
-    const originalIBCache = require.cache[ibPath];
-    delete require.cache[ibPath];
-
-    return {
-        ingestBuffer: require('../services/ingestBuffer'),
-        restore() {
-            if (originalModelsCache) {
-                require.cache[modelsPath] = originalModelsCache;
-            } else {
-                delete require.cache[modelsPath];
-            }
-            if (originalIBCache) {
-                require.cache[ibPath] = originalIBCache;
-            } else {
-                delete require.cache[ibPath];
-            }
-        },
-    };
+    const { module: ingestBuffer, restore } = loadWithMocks(
+        '../services/ingestBuffer',
+        [{ path: '../models', exports: mockModels }],
+        ['../services/sessionSummaries']
+    );
+    return { ingestBuffer, restore };
 }
 
 function makeMockModels({ bulkCreate }) {
@@ -223,38 +204,22 @@ describe('flush integration — invalidates touched sessions on success only', (
 // The invalidation sits before the `if (!log) return;` early exit.
 
 function loadControllerWithMocks(logRow) {
-    const modelsPath = require.resolve('../models');
-    const originalModelsCache = require.cache[modelsPath];
-    require.cache[modelsPath] = {
-        id: modelsPath,
-        filename: modelsPath,
-        loaded: true,
-        exports: {
-            Session: { update: async () => [1] },
-            Log: { findOne: async () => logRow },
-            sequelize: { fn: () => null, col: () => null, query: async () => [] },
-            Sequelize: { Op: { and: Symbol('and'), gt: Symbol('gt'), lte: Symbol('lte') } },
-        },
-    };
-
-    const scPath = require.resolve('../controllers/SessionController');
-    const originalSCCache = require.cache[scPath];
-    delete require.cache[scPath];
+    const { module: sessionSummaries, restore } = loadWithMocks(
+        '../services/sessionSummaries',
+        [{
+            path: '../models',
+            exports: {
+                Session: { update: async () => [1] },
+                Log: { findOne: async () => logRow },
+                sequelize: { fn: () => null, col: () => null, query: async () => [] },
+                Sequelize: { Op: { and: Symbol('and'), gt: Symbol('gt'), lte: Symbol('lte') } },
+            },
+        }]
+    );
 
     return {
-        recomputeSummary: require('../controllers/SessionController').recomputeSummary,
-        restore() {
-            if (originalModelsCache) {
-                require.cache[modelsPath] = originalModelsCache;
-            } else {
-                delete require.cache[modelsPath];
-            }
-            if (originalSCCache) {
-                require.cache[scPath] = originalSCCache;
-            } else {
-                delete require.cache[scPath];
-            }
-        },
+        recomputeSummary: sessionSummaries.recomputeSummary,
+        restore,
     };
 }
 

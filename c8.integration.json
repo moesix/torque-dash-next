@@ -1,0 +1,8 @@
+{
+  "all": true,
+  "check-coverage": false,
+  "include": ["controllers/**", "services/**", "lib/**", "models/**", "routes/**", "app.js"],
+  "exclude": ["test/**", "integration/**", "apps/frontend/**", "scripts/**"],
+  "reporter": ["text-summary", "json-summary"],
+  "reports-dir": "coverage-integration"
+}

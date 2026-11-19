@@ -66,14 +66,20 @@ function makeStubReq(overrides = {}) {
 }
 
 function makeStubRes() {
-  const calls = { status: null, body: null, statusCode: null };
+  const calls = { status: null, body: null, statusCode: null, headers: {} };
+  const varyValues = [];
   const res = {
     status(code) { calls.statusCode = code; calls.status = code; return res; },
     json(obj) { calls.body = obj; return res; },
     sendStatus(code) { calls.statusCode = code; calls.status = code; return res; },
     send(data) { calls.body = data; return res; },
-    setHeader() { return res; },
-    set() { return res; },
+    setHeader(name, value) { calls.headers[name.toLowerCase()] = value; return res; },
+    set(name, value) { calls.headers[name.toLowerCase()] = value; return res; },
+    vary(field) {
+      varyValues.push(field);
+      calls.headers.vary = varyValues.join(', ');
+      return res;
+    },
     write() { return res; },
     end() { return res; },
   };
@@ -83,6 +89,26 @@ function makeStubRes() {
 // ── Tests ───────────────────────────────────────────────────────────
 
 describe('SessionController (with mocked models)', () => {
+
+  // ── getAll — per-user cache headers ─────────────────────────────
+  // The list is personal and mutation-sensitive; a browser-cached copy made
+  // renames/deletes look like they silently failed (plan 031).
+
+  test('getAll sends Cache-Control: private, no-store and Vary: Cookie', async () => {
+    const originalFindOne = mockModels.User.findOne;
+    try {
+      mockModels.User.findOne = async () => ({ id: 1 });
+      const req = makeStubReq();
+      const { res, calls } = makeStubRes();
+      await SessionController.getAll(req, res);
+
+      assert.strictEqual(calls.statusCode, null, 'happy path must not set an error status');
+      assert.match(calls.headers['cache-control'] || '', /no-store/);
+      assert.match(calls.headers.vary || '', /\bCookie\b/);
+    } finally {
+      mockModels.User.findOne = originalFindOne;
+    }
+  });
 
   // ── rename ──────────────────────────────────────────────────────
 
@@ -141,6 +167,45 @@ describe('SessionController (with mocked models)', () => {
     assert.strictEqual(calls.statusCode, 400);
   });
 
+  // Structural guard against re-inverting the delete predicate. The original
+  // bug was a one-word `id NOT IN` that deleted the multiples instead of the
+  // rest — a stubbed-models behavioural test cannot see it, and the integration
+  // test is DB-gated. Read the actual SQL the handler builds.
+  test('filter DELETE selects the non-Nth rows with `id IN`, never `id NOT IN`', async () => {
+    const originals = {
+      sessionFindOne: mockModels.Session.findOne,
+      logCount: mockModels.Log.count,
+      sequelizeQuery: mockModels.sequelize.query,
+    };
+    const queries = [];
+    try {
+      mockModels.Session.findOne = async () => ({ id: 's1', userId: 1 });
+      mockModels.Log.count = async () => 20; // > filterNumber so the SQL runs
+      mockModels.sequelize.query = async (sql, opts) => {
+        queries.push({ sql, opts });
+        return [[], 0];
+      };
+
+      const req = makeStubReq({ body: { filterNumber: 5 } });
+      const { res, calls } = makeStubRes();
+      await SessionController.filter(req, res);
+
+      assert.strictEqual(calls.statusCode, 200);
+      assert.strictEqual(queries.length, 1, 'exactly one DELETE for one filter call');
+      const { sql, opts } = queries[0];
+      assert.match(sql, /id IN \(/, 'the subquery is the DELETE set, so `id IN` must select it');
+      assert.doesNotMatch(sql, /id NOT IN \(/, '`id NOT IN` keeps the rows it should delete');
+      assert.match(sql, /rn % :filterNumber != 0/, 'the DELETE set is every non-Nth row');
+      // Reviewer contract: the DELETE stays session-scoped and bound.
+      assert.match(sql, /WHERE "sessionId" = :sessionId/);
+      assert.deepStrictEqual(opts.replacements, { sessionId: 's1', filterNumber: 5 });
+    } finally {
+      mockModels.Session.findOne = originals.sessionFindOne;
+      mockModels.Log.count = originals.logCount;
+      mockModels.sequelize.query = originals.sequelizeQuery;
+    }
+  });
+
   // ── delete ──────────────────────────────────────────────────────
   // Fix: now returns 404 JSON (not 401) when session is not found.
 
@@ -185,6 +250,113 @@ describe('SessionController (with mocked models)', () => {
     } finally {
       mockModels.Session.findOne = originals.findOne;
       mockModels.Session.destroy = originals.destroy;
+    }
+  });
+});
+
+// ── getAll — list query shape ───────────────────────────────────────
+// The list path must not duplicate work: req.user is already the authenticated
+// user (no User.findOne), one page query + one count, and the summary decorator
+// reuses the page rows instead of re-selecting Sessions.
+
+describe('SessionController.getAll (query shape)', () => {
+  const originals = {
+    sessionFindOne: mockModels.Session.findOne,
+    sessionFindAll: mockModels.Session.findAll,
+    sessionCount: mockModels.Session.count,
+    userFindOne: mockModels.User.findOne,
+    logFindAll: mockModels.Log.findAll,
+  };
+
+  function restoreAll() {
+    mockModels.Session.findOne = originals.sessionFindOne;
+    mockModels.Session.findAll = originals.sessionFindAll;
+    mockModels.Session.count = originals.sessionCount;
+    mockModels.User.findOne = originals.userFindOne;
+    mockModels.Log.findAll = originals.logFindAll;
+  }
+
+  function installListMocks({ sessions = [], total = 0, logRows = [] } = {}) {
+    const calls = { userFindOne: 0, sessionFindAll: 0, sessionCount: 0, logFindAll: 0 };
+    mockModels.User.findOne = async () => { calls.userFindOne++; return { id: 1 }; };
+    mockModels.Session.findAll = async () => { calls.sessionFindAll++; return sessions; };
+    mockModels.Session.count = async () => { calls.sessionCount++; return total; };
+    mockModels.Log.findAll = async (opts) => {
+      calls.logFindAll++;
+      mockModels.Log.findAll.__lastOpts = opts;
+      return logRows;
+    };
+    return calls;
+  }
+
+  function pageRow(id, overrides = {}) {
+    return {
+      id,
+      createdAt: new Date('2026-01-01T00:00:00Z'),
+      firstTimestamp: new Date('2026-01-01T00:10:00Z'),
+      lastTimestamp: new Date('2026-01-01T01:10:00Z'),
+      maxRpm: 5000,
+      maxSpeed: 120,
+      vehicleId: null,
+      Vehicle: null,
+      ...overrides,
+    };
+  }
+
+  test('issues one page query + one count and no User.findOne', async () => {
+    try {
+      const calls = installListMocks({ sessions: [pageRow(1), pageRow(2)], total: 40 });
+
+      const { res, calls: out } = makeStubRes();
+      await SessionController.getAll(makeStubReq(), res);
+
+      assert.ok(out.body, 'response body written');
+      assert.strictEqual(calls.userFindOne, 0, 'authenticated user must not be re-fetched');
+      assert.strictEqual(calls.sessionFindAll, 1, 'exactly one Sessions page query (no summary re-select)');
+      assert.strictEqual(calls.sessionCount, 1, 'exactly one count');
+      assert.strictEqual(calls.logFindAll, 0, 'denormalized summaries need no Log scan');
+      assert.strictEqual(out.body.total, 40);
+      assert.strictEqual(out.body.sessions.length, 2);
+      assert.strictEqual(new Date(out.body.sessions[0].startDate).toISOString(), '2026-01-01T00:10:00.000Z');
+      assert.strictEqual(out.body.sessions[0].duration, '1h 0s');
+      assert.strictEqual(out.body.sessions[0].maxRpm, 5000);
+    } finally {
+      restoreAll();
+    }
+  });
+
+  test('reuses page rows for a NULL-summary session (fallback still runs)', async () => {
+    try {
+      // One denormalized row + one legacy NULL row: the decorator must take the
+      // preloaded rows AND still run the single grouped Log fallback for the
+      // NULL one — never a second Sessions query, never a per-session scan.
+      const legacy = pageRow(3, {
+        firstTimestamp: null, lastTimestamp: null, maxRpm: null, maxSpeed: null,
+      });
+      const logRows = [{
+        sessionId: 3,
+        start: '2026-02-01T00:00:00Z',
+        end: '2026-02-01T02:00:00Z',
+        maxSpeed: 90,
+        maxRpm: 3000,
+      }];
+      const calls = installListMocks({ sessions: [pageRow(1), legacy], total: 2, logRows });
+
+      const { res, calls: out } = makeStubRes();
+      await SessionController.getAll(makeStubReq(), res);
+
+      assert.strictEqual(calls.sessionFindAll, 1, 'preloaded rows must satisfy the summary read');
+      assert.strictEqual(calls.logFindAll, 1, 'one grouped fallback for the NULL-summary id');
+      const fallbackOpts = mockModels.Log.findAll.__lastOpts;
+      assert.ok(fallbackOpts, 'fallback query observed');
+      assert.deepStrictEqual(fallbackOpts.where, { sessionId: [3] },
+        'fallback is scoped to only the NULL-summary ids');
+      const byId = new Map(out.body.sessions.map((s) => [s.id, s]));
+      assert.strictEqual(new Date(byId.get(1).startDate).toISOString(), '2026-01-01T00:10:00.000Z');
+      assert.strictEqual(new Date(byId.get(3).startDate).toISOString(), '2026-02-01T00:00:00.000Z');
+      assert.strictEqual(byId.get(3).maxRpm, 3000);
+    } finally {
+      restoreAll();
     }
   });
 });

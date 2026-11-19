@@ -13,6 +13,18 @@
  * frames are still fetched separately via `GET /api/sessions/:id/telemetry`.
  */
 
+/** Display unit system. Stored telemetry is always metric-canonical. */
+export type UnitSystem = 'metric' | 'us' | 'uk';
+
+/** GET/PUT /api/users/preferences response. `unitSystem` is the resolved
+ *  value (user → DEFAULT_UNIT_SYSTEM → metric); `preference` is the raw user
+ *  choice (null = inherit the server default). */
+export interface UserPreferences {
+  unitSystem: UnitSystem;
+  serverDefault: UnitSystem;
+  preference: UnitSystem | null;
+}
+
 /** Normalized telemetry frame as consumed by the UI. */
 export interface TelemetryFrame {
   timestamp: string;
@@ -109,10 +121,14 @@ export interface Settings {
   isAdmin?: boolean;
 
   // ── BYOK LLM fields ────────────────────────────────────────────────
+  /** True when a provider is configured. Visible to every authenticated user. */
   hasLlmProvider: boolean;
-  llmProvider: string | null;
-  llmModel: string | null;
-  llmEndpoint: string | null;
+  /** Provider/model/endpoint are ADMIN-ONLY (plan 030): the server omits these
+   *  keys entirely for non-admin sessions, so they are optional here. Only the
+   *  admin-gated settings cards read them. */
+  llmProvider?: string | null;
+  llmModel?: string | null;
+  llmEndpoint?: string | null;
   hasLlmApiKey: boolean;
   vehicleMake: string | null;
   vehicleModel: string | null;
@@ -173,7 +189,13 @@ export interface ColumnMeta {
 }
 
 /** Union of every discoverable metric source. */
-export type SeriesSource = PidMeta | ColumnMeta;
+export type SeriesSource = PidMeta | ColumnMeta | {
+  pid: string;
+  full: string;
+  short: string;
+  unit: string;
+  source: 'computed';
+};
 
 // ── BYOK LLM Analysis types ───────────────────────────────────────────
 
@@ -190,6 +212,8 @@ export interface Analysis {
    *  marks an analysis cut off mid-stream (partial answer kept). */
   tokenUsage?: Record<string, unknown> | null;
   createdAt: string;
+  /** Unit system the prose was generated in. NULL/absent = historical unknown. */
+  unitSystem?: UnitSystem | null;
 }
 
 /** Preview of an analysis (no response body — used in listings). */
@@ -199,6 +223,8 @@ export interface AnalysisPreview {
   provider: string;
   model: string;
   createdAt: string;
+  /** Unit system the prose was generated in (NULL = unknown). */
+  unitSystem?: UnitSystem | null;
   Session?: {
     id: number;
     name: string | null;

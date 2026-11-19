@@ -8,12 +8,22 @@ const { describe, it } = require('node:test');
 const assert = require('node:assert');
 
 // Pre-populate require.cache for ../models so the controller can load
-// without connecting to a real database.
+// without connecting to a real database. `settingsState` backs the singleton
+// row so updateSettings' re-fetch projection can be asserted.
+let settingsState = {};
 const mockModels = {
   Session: { findOne: async () => null, findAll: async () => [], count: async () => 0, update: async () => [0] },
   Log: { count: async () => 0, findAll: async () => [], destroy: async () => 0 },
   User: { findOne: async () => null },
   Vehicle: { findOne: async () => null },
+  Settings: {
+    getSingleton: async () => settingsState,
+    upsert: async (data) => {
+      Object.assign(settingsState, data);
+      return settingsState;
+    },
+    invalidateCache: () => {},
+  },
   sequelize: { transaction: async (fn) => fn({}), query: async () => [], fn: () => {}, col: () => {} },
   Sequelize: { Op: {} },
 };
@@ -28,9 +38,11 @@ const {
   validateAnalysisRetentionDays,
   validateTileProvider,
   validateCartoApiKey,
+  settingsUpdateSchema,
   MAX_CARTO_API_KEY_LENGTH,
 } = require('../lib/validators');
-const { settingsView } = require('../controllers/UserController');
+const UserController = require('../controllers/UserController');
+const { settingsView } = UserController;
 
 // ── LLM thinking mode ──────────────────────────────────────────────
 
@@ -340,5 +352,245 @@ describe('settings response shape — map tile provider (real settingsView)', ()
   it('treats a null key under carto as absent-but-exposed empty string', () => {
     const res = settingsView({ tileProvider: 'carto', cartoApiKey: null });
     assert.strictEqual(res.cartoApiKey, '');
+  });
+});
+
+// ── LLM endpoint URL validation (plan 030) ──────────────────────────
+// Drives the REAL controller so the route's admin gate + validator +
+// projection are exercised together (the HTTP-level counterparts live in
+// adminGate.test.js).
+
+describe('PUT /api/settings — llmEndpoint URL rejection', () => {
+  function makeRes() {
+    const calls = { statusCode: null, body: null };
+    const res = {
+      status(code) { calls.statusCode = code; return res; },
+      json(obj) { calls.body = obj; return res; },
+    };
+    return { res, calls };
+  }
+
+  function makeReq(body) {
+    // updateSettings is admin-gated; the gate itself is covered elsewhere.
+    settingsState = {};
+    return { user: { id: 1, isAdmin: true }, body };
+  }
+
+  it('rejects a URL carrying userinfo even when it parses', async () => {
+    const { res, calls } = makeRes();
+    await UserController.updateSettings(makeReq({ llmEndpoint: 'https://u:p@example.com/v1' }), res);
+    assert.strictEqual(calls.statusCode, 400);
+    assert.deepStrictEqual(calls.body, { error: 'Endpoint URL must not contain credentials.' });
+  });
+
+  it('rejects a username-only userinfo URL too', async () => {
+    const { res, calls } = makeRes();
+    await UserController.updateSettings(makeReq({ llmEndpoint: 'https://user@example.com/v1' }), res);
+    assert.strictEqual(calls.statusCode, 400);
+    assert.deepStrictEqual(calls.body, { error: 'Endpoint URL must not contain credentials.' });
+  });
+
+  it('rejects non-http(s) schemes', async () => {
+    const { res, calls } = makeRes();
+    await UserController.updateSettings(makeReq({ llmEndpoint: 'ftp://example.com' }), res);
+    assert.strictEqual(calls.statusCode, 400);
+    assert.deepStrictEqual(calls.body, { error: 'Endpoint URL must be http or https.' });
+  });
+
+  it('rejects values that do not parse as a URL', async () => {
+    const { res, calls } = makeRes();
+    await UserController.updateSettings(makeReq({ llmEndpoint: 'not a url' }), res);
+    assert.strictEqual(calls.statusCode, 400);
+    assert.deepStrictEqual(calls.body, { error: 'Invalid endpoint URL' });
+  });
+
+  it('accepts an https endpoint with a path', async () => {
+    const { res, calls } = makeRes();
+    await UserController.updateSettings(makeReq({ llmEndpoint: 'https://example.com/v1' }), res);
+    assert.strictEqual(calls.statusCode, null, 'no error status was set');
+    assert.strictEqual(calls.body.llmEndpoint, 'https://example.com/v1');
+  });
+
+  it('accepts a plain-http endpoint (self-hosted ollama) and null (clear)', async () => {
+    const http = makeRes();
+    await UserController.updateSettings(makeReq({ llmEndpoint: 'http://ollama.local:11434/v1' }), http.res);
+    assert.strictEqual(http.calls.statusCode, null);
+    assert.strictEqual(http.calls.body.llmEndpoint, 'http://ollama.local:11434/v1');
+
+    const cleared = makeRes();
+    await UserController.updateSettings(makeReq({ llmEndpoint: null }), cleared.res);
+    assert.strictEqual(cleared.calls.statusCode, null);
+    assert.strictEqual(cleared.calls.body.llmEndpoint, null);
+  });
+});
+
+// ── llmModel acceptance (plan 032) ─────────────────────────────────
+// null is an explicit clear: the settings card sends it when the provider
+// changes so the new provider falls back to its default model.
+
+describe('PUT /api/settings — llmModel null acceptance', () => {
+  function makeRes() {
+    const calls = { statusCode: null, body: null };
+    const res = {
+      status(code) { calls.statusCode = code; return res; },
+      json(obj) { calls.body = obj; return res; },
+    };
+    return { res, calls };
+  }
+
+  function makeReq(body) {
+    settingsState = {};
+    return { user: { id: 1, isAdmin: true }, body };
+  }
+
+  it('accepts null, persists null, and returns null', async () => {
+    const { res, calls } = makeRes();
+    await UserController.updateSettings(makeReq({ llmModel: null }), res);
+    assert.strictEqual(calls.statusCode, null, 'no error status was set');
+    assert.strictEqual(settingsState.llmModel, null, 'persisted value must be null');
+    assert.strictEqual(calls.body.llmModel, null);
+  });
+
+  it('still rejects a non-string model and an over-long string', async () => {
+    const number = makeRes();
+    await UserController.updateSettings(makeReq({ llmModel: 42 }), number.res);
+    assert.strictEqual(number.calls.statusCode, 400);
+
+    const long = makeRes();
+    await UserController.updateSettings(makeReq({ llmModel: 'm'.repeat(201) }), long.res);
+    assert.strictEqual(long.calls.statusCode, 400);
+  });
+});
+
+// ── settingsUpdateSchema — the front door (plan 033) ────────────────
+// The schema owns the accepted key list; the handler keeps only the special
+// cases (URL parsing, encrypted key, env kill-switches). Every key the SPA
+// sends must be listed, or the PUT becomes a 400.
+
+describe('settingsUpdateSchema', () => {
+  it('accepts every key the settings UI sends in one body', () => {
+    const body = {
+      disableRegistration: false,
+      uploadApiToken: null,
+      llmProvider: 'custom',
+      llmModel: 'my-model',
+      llmEndpoint: 'https://proxy.example.com/v1',
+      llmThinkingMode: true,
+      llmReasoningEffort: 'high',
+      llmMaxTokens: 16384,
+      timezoneOffset: 480,
+      retentionEnabled: true,
+      retentionDays: 180,
+      analysisRetentionDays: null,
+      tileProvider: 'carto',
+      cartoApiKey: 'carto_key',
+    };
+    const { error } = settingsUpdateSchema.validate(body);
+    assert.ifError(error);
+  });
+
+  it('accepts llmApiKey (AiProviderCard sends it only when typed)', () => {
+    assert.ifError(settingsUpdateSchema.validate({ llmApiKey: 'sk-test' }).error);
+    assert.ifError(settingsUpdateSchema.validate({ llmApiKey: null }).error);
+  });
+
+  it('accepts provider switch shapes (null provider/model/endpoint)', () => {
+    assert.ifError(settingsUpdateSchema.validate({
+      llmProvider: null, llmModel: null, llmEndpoint: null,
+    }).error);
+    assert.ifError(settingsUpdateSchema.validate({ llmProvider: 'openai', llmModel: null }).error);
+  });
+
+  it('rejects an unknown key instead of silently ignoring it', () => {
+    const { error } = settingsUpdateSchema.validate({ notAField: true });
+    assert.ok(error);
+    assert.match(error.message, /notAField/);
+  });
+
+  it('keeps the old strict shapes', () => {
+    // booleans were typeof-checked, not truthy
+    assert.ok(settingsUpdateSchema.validate({ disableRegistration: 'true' }).error);
+    assert.ok(settingsUpdateSchema.validate({ llmThinkingMode: 1 }).error);
+    assert.ok(settingsUpdateSchema.validate({ retentionEnabled: 'false' }).error);
+    // retention windows were strict integers
+    assert.ok(settingsUpdateSchema.validate({ retentionDays: '180' }).error);
+    assert.ok(settingsUpdateSchema.validate({ retentionDays: 89 }).error);
+    assert.ok(settingsUpdateSchema.validate({ analysisRetentionDays: 366 }).error);
+    // numeric-coerced fields (old Number() cast) still accept numeric strings
+    assert.ifError(settingsUpdateSchema.validate({ llmMaxTokens: '16384' }).error);
+    assert.ifError(settingsUpdateSchema.validate({ timezoneOffset: '480' }).error);
+  });
+});
+
+describe('PUT /api/settings — schema front door', () => {
+  function makeRes() {
+    const calls = { statusCode: null, body: null };
+    const res = {
+      status(code) { calls.statusCode = code; return res; },
+      json(obj) { calls.body = obj; return res; },
+    };
+    return { res, calls };
+  }
+
+  it('returns 400 for an unknown key and never writes', async () => {
+    settingsState = {};
+    const { res, calls } = makeRes();
+    await UserController.updateSettings({ user: { id: 1, isAdmin: true }, body: { nope: 1 } }, res);
+    assert.strictEqual(calls.statusCode, 400);
+    assert.match(calls.body.error, /nope/);
+    assert.deepStrictEqual(settingsState, {}, 'no upsert for a rejected body');
+  });
+
+  it('accepts a body of only UI-shaped keys', async () => {
+    settingsState = {};
+    const { res, calls } = makeRes();
+    await UserController.updateSettings({
+      user: { id: 1, isAdmin: true },
+      body: { retentionDays: 180, timezoneOffset: 60, llmProvider: null },
+    }, res);
+    assert.strictEqual(calls.statusCode, null, JSON.stringify(calls.body));
+    assert.strictEqual(settingsState.retentionDays, 180);
+    assert.strictEqual(settingsState.timezoneOffset, 60);
+  });
+});
+
+// ── Role projection (plan 030) ──────────────────────────────────────
+describe('settingsView role projection', () => {
+  const row = {
+    llmProvider: 'custom',
+    llmModel: 'operator-model',
+    llmEndpoint: 'https://llm.internal/v1',
+    llmApiKeyEnc: 'enc',
+  };
+
+  it('omits provider/model/endpoint for the default (two-argument) call', () => {
+    const res = settingsView(row);
+    for (const key of ['llmProvider', 'llmModel', 'llmEndpoint']) {
+      assert.strictEqual(Object.prototype.hasOwnProperty.call(res, key), false,
+        `${key} must not appear in the non-admin projection`);
+    }
+    assert.strictEqual(res.hasLlmProvider, true);
+    assert.strictEqual(res.hasLlmApiKey, true);
+  });
+
+  it('omits provider/model/endpoint for an explicit non-admin viewer', () => {
+    const res = settingsView(row, {}, { isAdmin: false });
+    assert.strictEqual(res.llmEndpoint, undefined);
+    assert.strictEqual(res.llmModel, undefined);
+    assert.strictEqual(res.llmProvider, undefined);
+  });
+
+  it('includes provider/model/endpoint for an admin viewer', () => {
+    const res = settingsView(row, {}, { isAdmin: true });
+    assert.strictEqual(res.llmProvider, 'custom');
+    assert.strictEqual(res.llmModel, 'operator-model');
+    assert.strictEqual(res.llmEndpoint, 'https://llm.internal/v1');
+  });
+
+  it('still spreads extras on top for both projections', () => {
+    const nonAdmin = settingsView(row, { retentionPolicyApplied: true }, { isAdmin: false });
+    assert.strictEqual(nonAdmin.retentionPolicyApplied, true);
+    const admin = settingsView(row, { retentionPolicyApplied: true }, { isAdmin: true });
+    assert.strictEqual(admin.retentionPolicyApplied, true);
   });
 });

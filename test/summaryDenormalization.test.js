@@ -6,6 +6,7 @@ process.env.SESSION_KEYS = process.env.SESSION_KEYS || 'abc123';
 
 const { test, describe } = require('node:test');
 const assert = require('node:assert');
+const { loadWithMocks: loadModuleWithMocks } = require('./support/loadWithMocks');
 
 // ── Pre-populate require.cache for ../models ────────────────────────
 // We mock Session/Log/sequelize so we can test the logic without a DB.
@@ -41,44 +42,13 @@ function makeMockModels(overrides = {}) {
 }
 
 function loadWithMocks(mockModels) {
-  const modelsPath = require.resolve('../models');
-  const originalCache = require.cache[modelsPath];
-  require.cache[modelsPath] = {
-    id: modelsPath,
-    filename: modelsPath,
-    loaded: true,
-    exports: mockModels,
-  };
-
-  const scPath = require.resolve('../controllers/SessionController');
-  const originalSCCache = require.cache[scPath];
-  delete require.cache[scPath];
-
-  // Also manage the ingestBuffer module cache so tests can drive the REAL
-  // flush() against mocked models (fresh module => fresh empty buffer).
-  const ibPath = require.resolve('../services/ingestBuffer');
-  const originalIBCache = require.cache[ibPath];
-  delete require.cache[ibPath];
-
-  return {
-    restore() {
-      if (originalCache) {
-        require.cache[modelsPath] = originalCache;
-      } else {
-        delete require.cache[modelsPath];
-      }
-      if (originalSCCache) {
-        require.cache[scPath] = originalSCCache;
-      } else {
-        delete require.cache[scPath];
-      }
-      if (originalIBCache) {
-        require.cache[ibPath] = originalIBCache;
-      } else {
-        delete require.cache[ibPath];
-      }
-    }
-  };
+  // sessionSummaries binds ../models at load time now, so it must be purged
+  // with ingestBuffer (which pulls the same service in).
+  return loadModuleWithMocks(
+    null,
+    [{ path: '../models', exports: mockModels }],
+    ['../services/sessionSummaries', '../services/ingestBuffer']
+  );
 }
 
 // ── Tests ───────────────────────────────────────────────────────────
@@ -97,7 +67,7 @@ describe('aggregateSummaries — reads from Session columns', () => {
 
     const { restore } = loadWithMocks(mockModels);
     try {
-      const { aggregateSummaries } = require('../controllers/SessionController');
+      const { aggregateSummaries } = require('../services/sessionSummaries');
       const map = await aggregateSummaries(['s1', 's2']);
 
       assert.strictEqual(map.size, 2);
@@ -137,7 +107,7 @@ describe('aggregateSummaries — reads from Session columns', () => {
 
     const { restore } = loadWithMocks(mockModels);
     try {
-      const { aggregateSummaries } = require('../controllers/SessionController');
+      const { aggregateSummaries } = require('../services/sessionSummaries');
       const map = await aggregateSummaries(['s1']);
 
       assert.strictEqual(logQueryCount, 1, 'Should fall back to Log.findAll');
@@ -150,11 +120,52 @@ describe('aggregateSummaries — reads from Session columns', () => {
     }
   });
 
+  test('preloaded rows replace the summary SELECT; NULL rows still fall back', async () => {
+    let sessionFindAllCalls = 0;
+    let logCalls = 0;
+    const preloaded = [
+      new (class Row {
+        constructor(v) { this.dataValues = v; }
+        toJSON() { return this.dataValues; }
+      })({ id: 's1', firstTimestamp: '2026-01-01T00:00:00Z', lastTimestamp: '2026-01-01T01:00:00Z', maxRpm: 5000, maxSpeed: 120 }),
+      // Legacy row: denormalized columns still NULL (pre-backfill / failed merge).
+      { id: 's2', firstTimestamp: null, lastTimestamp: null, maxRpm: null, maxSpeed: null },
+    ];
+    const mockModels = makeMockModels({
+      Session: { findAll: async () => { sessionFindAllCalls++; return []; } },
+      Log: {
+        findAll: async () => {
+          logCalls++;
+          return [{
+            dataValues: { sessionId: 's2', start: '2026-03-01T00:00:00Z', end: '2026-03-01T03:00:00Z', maxSpeed: 200, maxRpm: 7000 },
+          }];
+        },
+      },
+    });
+
+    const { restore } = loadWithMocks(mockModels);
+    try {
+      const { aggregateSummaries } = require('../services/sessionSummaries');
+      // Session instance (toJSON) + plain object (list/detail JSON path) both work.
+      const map = await aggregateSummaries(['s1', 's2'], preloaded);
+
+      assert.strictEqual(sessionFindAllCalls, 0, 'preloaded rows must avoid the summary SELECT');
+      assert.strictEqual(logCalls, 1, 'only the NULL-summary id needs the fallback');
+      assert.strictEqual(map.get('s1').start, '2026-01-01T00:00:00Z');
+      assert.strictEqual(map.get('s1').maxRpm, 5000);
+      assert.strictEqual(map.get('s2').start, '2026-03-01T00:00:00Z');
+      assert.strictEqual(map.get('s2').maxSpeed, 200);
+      assert.strictEqual(map.get('s2').maxRpm, 7000);
+    } finally {
+      restore();
+    }
+  });
+
   test('returns empty map for empty sessionIds', async () => {
     const mockModels = makeMockModels();
     const { restore } = loadWithMocks(mockModels);
     try {
-      const { aggregateSummaries } = require('../controllers/SessionController');
+      const { aggregateSummaries } = require('../services/sessionSummaries');
       const map = await aggregateSummaries([]);
       assert.strictEqual(map.size, 0);
     } finally {
@@ -166,7 +177,7 @@ describe('aggregateSummaries — reads from Session columns', () => {
     const mockModels = makeMockModels();
     const { restore } = loadWithMocks(mockModels);
     try {
-      const { aggregateSummaries } = require('../controllers/SessionController');
+      const { aggregateSummaries } = require('../services/sessionSummaries');
       const map = await aggregateSummaries(null);
       assert.strictEqual(map.size, 0);
     } finally {
@@ -194,7 +205,7 @@ describe('recomputeSummary — updates Session columns', () => {
 
     const { restore } = loadWithMocks(mockModels);
     try {
-      const { recomputeSummary } = require('../controllers/SessionController');
+      const { recomputeSummary } = require('../services/sessionSummaries');
       await recomputeSummary('s1');
 
       assert.ok(updateArgs, 'Session.update should be called');
@@ -226,7 +237,7 @@ describe('recomputeSummary — updates Session columns', () => {
 
     const { restore } = loadWithMocks(mockModels);
     try {
-      const { recomputeSummary } = require('../controllers/SessionController');
+      const { recomputeSummary } = require('../services/sessionSummaries');
       await recomputeSummary('s_zero');
 
       assert.ok(updateArgs, 'Session.update should be called');
@@ -252,7 +263,7 @@ describe('recomputeSummary — updates Session columns', () => {
 
     const { restore } = loadWithMocks(mockModels);
     try {
-      const { recomputeSummary } = require('../controllers/SessionController');
+      const { recomputeSummary } = require('../services/sessionSummaries');
       await recomputeSummary('s_empty_agg');
 
       assert.ok(updateArgs, 'Session.update should be called for the aggregate row');
@@ -276,7 +287,7 @@ describe('recomputeSummary — updates Session columns', () => {
 
     const { restore } = loadWithMocks(mockModels);
     try {
-      const { recomputeSummary } = require('../controllers/SessionController');
+      const { recomputeSummary } = require('../services/sessionSummaries');
       await recomputeSummary('s_empty');
       assert.strictEqual(updateCalled, false, 'Session.update should not be called when Log.findOne returns null');
     } finally {
@@ -317,8 +328,42 @@ describe('Migration 016 — idempotent SQL', () => {
   });
 });
 
+describe('Migration 003 — post-backfill summary recompute', () => {
+  test('exists in the nested dir and only widens via LEAST/GREATEST', () => {
+    const fs = require('fs');
+    const path = require('path');
+    const migrationPath = path.resolve(
+      __dirname,
+      '../infra/timescale/migrations/003_recompute_session_summaries.sql'
+    );
+    assert.ok(fs.existsSync(migrationPath), 'Migration 003 should exist');
+    const sql = fs.readFileSync(migrationPath, 'utf8');
+
+    assert.match(sql, /UPDATE "Sessions"/);
+    for (const col of ['firstTimestamp', 'lastTimestamp', 'maxRpm', 'maxSpeed']) {
+      assert.ok(sql.includes(`"${col}"`), `Should recompute ${col}`);
+    }
+    assert.strictEqual(
+      (sql.match(/LEAST\(COALESCE/g) || []).length, 1,
+      'firstTimestamp must be widened monotonically (LEAST)'
+    );
+    assert.strictEqual(
+      (sql.match(/GREATEST\(COALESCE/g) || []).length, 3,
+      'lastTimestamp/maxRpm/maxSpeed must each be widened monotonically (GREATEST)'
+    );
+    // No unconditional assignment: every SET value is guarded by COALESCE + min/max.
+    for (const col of ['firstTimestamp', 'lastTimestamp', 'maxRpm', 'maxSpeed']) {
+      assert.doesNotMatch(
+        sql,
+        new RegExp(`"${col}"\\s*=\\s*agg\\.`),
+        `${col} must never be assigned unconditionally from the aggregate`
+      );
+    }
+  });
+});
+
 describe('ingestBuffer — summary merge shape guards', () => {
-  test('merges in JS with bound parameters — no SQL literal fragments', () => {
+  test('has no SQL literal fragments (merge owns its SQL)', () => {
     const fs = require('fs');
     const path = require('path');
     const bufSrc = fs.readFileSync(
@@ -326,8 +371,9 @@ describe('ingestBuffer — summary merge shape guards', () => {
       'utf8'
     );
     // Regression guards for plan 073: the old literal-SQL block referenced a
-    // nonexistent "sub" alias and silently failed every flush. The merge must
-    // stay in JS with plain bound parameters — no SQL literal fragments.
+    // nonexistent "sub" alias and silently failed every flush. The merge SQL
+    // now lives in sessionSummaries.mergeWrittenRows; ingestBuffer itself must
+    // stay free of SQL literal fragments and aliases.
     assert.ok(!bufSrc.includes('sequelize.literal'),
       'ingestBuffer must not use sequelize.literal (broken sub-alias history)');
     assert.ok(!bufSrc.includes('sub.'),
@@ -335,71 +381,60 @@ describe('ingestBuffer — summary merge shape guards', () => {
   });
 });
 
-describe('flush — real-path summary merge through ingestBuffer', () => {
-  // Drives the ACTUAL flush() with mocked models capturing arguments.
-  function makeFlushMocks({ findByPkResult, bulkCreateError } = {}) {
-    const updateCalls = [];
-    const findByPkCalls = [];
+describe('flush — ingest routes the summary merge through mergeWrittenRows', () => {
+  // Drives the ACTUAL flush() with mocked models. The merge is now one SQL
+  // UPDATE per session (LEAST/GREATEST), so assertions are on the generated
+  // statement and bound replacements — the old findByPk read-modify-write is
+  // gone (that is the defect plan 026 removes).
+  function makeFlushMocks({ bulkCreateError } = {}) {
+    const queryCalls = [];
     let bulkCreateCalls = 0;
-    return {
-      updateCalls,
-      findByPkCalls,
-      mockModels: {
-        Session: {
-          findByPk: async (id, opts) => {
-            findByPkCalls.push({ id, opts });
-            return typeof findByPkResult === 'function' ? findByPkResult(id) : findByPkResult;
-          },
-          update: async (vals, opts) => { updateCalls.push({ vals, opts }); return [1]; },
-        },
-        Log: {
-          bulkCreate: async (rows) => {
-            if (bulkCreateError) throw bulkCreateError;
-            bulkCreateCalls += rows.length;
-            return rows;
-          },
+    const mockModels = makeMockModels({
+      Session: { update: async () => [1] },
+      Log: {
+        bulkCreate: async (rows) => {
+          if (bulkCreateError) throw bulkCreateError;
+          bulkCreateCalls += rows.length;
+          return rows;
         },
       },
-      getBulkCreateCalls: () => bulkCreateCalls,
-    };
+      sequelize: {
+        query: async (sql, opts) => { queryCalls.push({ sql, opts }); return []; },
+      },
+    });
+    return { mockModels, queryCalls, getBulkCreateCalls: () => bulkCreateCalls };
   }
 
-  test('wider batch bounds merge into existing session — exact update args', async () => {
-    const T1 = new Date('2026-05-01T10:00:00Z'); // existing firstTimestamp
-    const T2 = new Date('2026-05-01T12:00:00Z'); // existing lastTimestamp
+  test('wider batch bounds merge monotonically in ONE update per session', async () => {
     const before = new Date('2026-05-01T09:00:00Z');
     const after = new Date('2026-05-01T13:00:00Z');
 
-    const { mockModels, updateCalls, findByPkCalls } = makeFlushMocks({
-      // Plan spec: existing row has narrower bounds and smaller maxima.
-      findByPkResult: { id: 7, firstTimestamp: T1, lastTimestamp: T2, maxRpm: 3000, maxSpeed: 80 },
-    });
-
+    const { mockModels, queryCalls } = makeFlushMocks();
     const { restore } = loadWithMocks(mockModels);
     try {
       const { ingest, flush } = require('../services/ingestBuffer');
 
-      // Three rows spanning wider bounds than the existing columns:
-      // one timestamp before T1, one after T2, rpm 5000 (>3000), speed 120 (>80).
       ingest({ userId: 1, sessionId: 7, time: before, lon: 0, lat: 0, values: {}, engineRpm: 5000, vehicleSpeed: 60 });
-      ingest({ userId: 1, sessionId: 7, time: T2, lon: 0, lat: 0, values: {}, engineRpm: 1000, vehicleSpeed: 120 });
+      ingest({ userId: 1, sessionId: 7, time: after, lon: 0, lat: 0, values: {}, engineRpm: 1000, vehicleSpeed: 120 });
       ingest({ userId: 1, sessionId: 7, time: after, lon: 0, lat: 0, values: {}, engineRpm: 2500, vehicleSpeed: 90 });
 
       await flush();
 
-      assert.strictEqual(findByPkCalls.length, 1, 'one findByPk per affected session');
-      assert.strictEqual(findByPkCalls[0].id, 7);
-      assert.deepStrictEqual(findByPkCalls[0].opts.attributes,
-        ['id', 'firstTimestamp', 'lastTimestamp', 'maxRpm', 'maxSpeed']);
-
-      assert.strictEqual(updateCalls.length, 1, 'Session.update called exactly ONCE');
-      assert.deepStrictEqual(updateCalls[0].vals, {
-        firstTimestamp: before, // min(batch, existing)
-        lastTimestamp: after,   // max(batch, existing)
-        maxRpm: 5000,           // GREATEST(3000, 5000)
-        maxSpeed: 120,          // GREATEST(80, 120)
+      assert.strictEqual(queryCalls.length, 1, 'Session summary update is exactly ONE statement');
+      const { sql, opts } = queryCalls[0];
+      assert.match(sql, /^UPDATE "Sessions" SET /);
+      assert.match(sql, /"firstTimestamp" = LEAST\(COALESCE\("firstTimestamp", :minTs\), :minTs\)/);
+      assert.match(sql, /"lastTimestamp" = GREATEST\(COALESCE\("lastTimestamp", :maxTs\), :maxTs\)/);
+      assert.match(sql, /"maxRpm" = GREATEST\(COALESCE\("maxRpm", :maxRpm\), :maxRpm\)/);
+      assert.match(sql, /"maxSpeed" = GREATEST\(COALESCE\("maxSpeed", :maxSpeed\), :maxSpeed\)/);
+      assert.match(sql, /WHERE id = :id$/);
+      assert.deepStrictEqual(opts.replacements, {
+        id: 7,
+        minTs: before,
+        maxTs: after,
+        maxRpm: 5000,
+        maxSpeed: 120,
       });
-      assert.deepStrictEqual(updateCalls[0].opts, { where: { id: 7 } });
     } finally {
       restore();
     }
@@ -409,11 +444,7 @@ describe('flush — real-path summary merge through ingestBuffer', () => {
     const tA = new Date('2026-06-01T08:15:00Z');
     const tB = new Date('2026-06-01T09:45:00Z');
 
-    const { mockModels, updateCalls } = makeFlushMocks({
-      // Never-backfilled session: all denormalized columns NULL.
-      findByPkResult: { id: 8, firstTimestamp: null, lastTimestamp: null, maxRpm: null, maxSpeed: null },
-    });
-
+    const { mockModels, queryCalls } = makeFlushMocks();
     const { restore } = loadWithMocks(mockModels);
     try {
       const { ingest, flush } = require('../services/ingestBuffer');
@@ -423,14 +454,14 @@ describe('flush — real-path summary merge through ingestBuffer', () => {
 
       await flush();
 
-      assert.strictEqual(updateCalls.length, 1, 'Session.update called exactly ONCE');
-      assert.deepStrictEqual(updateCalls[0].vals, {
-        firstTimestamp: tA,  // COALESCE(NULL, batchMin) -> batchMin
-        lastTimestamp: tB,   // COALESCE(NULL, batchMax) -> batchMax
-        maxRpm: 4500,        // COALESCE(NULL, 4500)     -> 4500
-        maxSpeed: 95,        // COALESCE(NULL, 95)       -> 95
-      }, 'NULL columns must be replaced by batch stats verbatim');
-      assert.deepStrictEqual(updateCalls[0].opts, { where: { id: 8 } });
+      assert.strictEqual(queryCalls.length, 1);
+      assert.deepStrictEqual(queryCalls[0].opts.replacements, {
+        id: 8,
+        minTs: tA,
+        maxTs: tB,
+        maxRpm: 4500,
+        maxSpeed: 95,
+      }, 'COALESCE(NULL, batchStat) must yield the batch stat');
     } finally {
       restore();
     }
@@ -440,12 +471,7 @@ describe('flush — real-path summary merge through ingestBuffer', () => {
     const earlier = new Date('2026-06-02T07:00:00Z');
     const later = new Date('2026-06-02T08:30:00Z');
 
-    const { mockModels, updateCalls } = makeFlushMocks({
-      // Existing row already holds the later bound; the batch adds the earlier
-      // frame and repeats the later one.
-      findByPkResult: { id: 9, firstTimestamp: later, lastTimestamp: later, maxRpm: null, maxSpeed: null },
-    });
-
+    const { mockModels, queryCalls } = makeFlushMocks();
     const { restore } = loadWithMocks(mockModels);
     try {
       const { ingest, flush } = require('../services/ingestBuffer');
@@ -455,42 +481,37 @@ describe('flush — real-path summary merge through ingestBuffer', () => {
 
       await flush();
 
-      assert.strictEqual(updateCalls.length, 1, 'Session.update called exactly ONCE');
-      assert.strictEqual(updateCalls[0].vals.firstTimestamp, earlier,
-        'firstTimestamp must collapse to the earliest frame, not the first ingested');
-      assert.strictEqual(updateCalls[0].vals.lastTimestamp, later,
-        'lastTimestamp must collapse to the latest frame');
+      assert.strictEqual(queryCalls.length, 1);
+      assert.strictEqual(queryCalls[0].opts.replacements.minTs, earlier);
+      assert.strictEqual(queryCalls[0].opts.replacements.maxTs, later);
+      assert.strictEqual(queryCalls[0].opts.replacements.maxRpm, 2100);
+      assert.strictEqual(queryCalls[0].opts.replacements.maxSpeed, 70);
     } finally {
       restore();
     }
   });
 
-  test('missing session (findByPk null) — no update, no throw', async () => {
-    const { mockModels, updateCalls } = makeFlushMocks({ findByPkResult: null });
-
+  test('missing session row — the UPDATE matches zero rows, still no throw', async () => {
+    // No read-then-write means the merge cannot know the row is gone; it issues
+    // the same monotonic UPDATE, which simply affects 0 rows. Never a throw.
+    const { mockModels, queryCalls } = makeFlushMocks();
     const { restore } = loadWithMocks(mockModels);
     try {
       const { ingest, flush } = require('../services/ingestBuffer');
 
       ingest({ userId: 1, sessionId: 999, time: new Date('2026-07-01T00:00:00Z'), lon: 0, lat: 0, values: {}, engineRpm: 1500, vehicleSpeed: 40 });
-      ingest({ userId: 1, sessionId: 999, time: new Date('2026-07-01T00:30:00Z'), lon: 0, lat: 0, values: {}, engineRpm: 1600, vehicleSpeed: 55 });
 
-      // Must resolve without throwing despite the session not existing.
       await flush();
 
-      assert.strictEqual(updateCalls.length, 0,
-        'Session.update must NOT be called when the session is missing');
+      assert.strictEqual(queryCalls.length, 1, 'one UPDATE attempted for the affected session');
+      assert.strictEqual(queryCalls[0].opts.replacements.id, 999);
     } finally {
       restore();
     }
   });
 
-  test('failed bulkCreate — NO Session.update (summaries never run ahead of Logs)', async () => {
-    const { mockModels, updateCalls, findByPkCalls } = makeFlushMocks({
-      findByPkResult: { id: 12, firstTimestamp: null, lastTimestamp: null, maxRpm: null, maxSpeed: null },
-      bulkCreateError: new Error('db down'),
-    });
-
+  test('failed bulkCreate — NO summary UPDATE (summaries never run ahead of Logs)', async () => {
+    const { mockModels, queryCalls } = makeFlushMocks({ bulkCreateError: new Error('db down') });
     const { restore } = loadWithMocks(mockModels);
     try {
       const { ingest, flush } = require('../services/ingestBuffer');
@@ -498,27 +519,21 @@ describe('flush — real-path summary merge through ingestBuffer', () => {
       ingest({ userId: 1, sessionId: 12, time: new Date('2026-09-01T00:00:00Z'), lon: 0, lat: 0, values: {}, engineRpm: 1000, vehicleSpeed: 30 });
       ingest({ userId: 1, sessionId: 12, time: new Date('2026-09-01T00:10:00Z'), lon: 0, lat: 0, values: {}, engineRpm: 1100, vehicleSpeed: 35 });
 
-      // Must resolve without throwing despite the write failure (errors are
-      // caught and logged; rows are re-queued/dropped by the retry policy).
+      // Must resolve without throwing despite the write failure.
       await flush();
 
-      assert.strictEqual(findByPkCalls.length, 0,
-        'summary merge must not even start when the Log write failed');
-      assert.strictEqual(updateCalls.length, 0,
-        'Session.update must NOT happen when bulkCreate threw');
+      assert.strictEqual(queryCalls.length, 0,
+        'summary merge must not start when the Log write failed');
     } finally {
       restore();
     }
   });
 
-  test('batch without rpm/speed keeps existing maxima (null-normalized merge)', async () => {
+  test('batch without rpm/speed omits those columns — existing maxima survive', async () => {
     const tA = new Date('2026-08-01T06:00:00Z');
     const tB = new Date('2026-08-01T06:10:00Z');
 
-    const { mockModels, updateCalls } = makeFlushMocks({
-      findByPkResult: { id: 11, firstTimestamp: tA, lastTimestamp: tB, maxRpm: 3200, maxSpeed: 88 },
-    });
-
+    const { mockModels, queryCalls } = makeFlushMocks();
     const { restore } = loadWithMocks(mockModels);
     try {
       const { ingest, flush } = require('../services/ingestBuffer');
@@ -529,13 +544,11 @@ describe('flush — real-path summary merge through ingestBuffer', () => {
 
       await flush();
 
-      assert.strictEqual(updateCalls.length, 1);
-      assert.deepStrictEqual(updateCalls[0].vals, {
-        firstTimestamp: tA,
-        lastTimestamp: tB,
-        maxRpm: 3200,  // existing preserved when batch contributes nothing
-        maxSpeed: 88,
-      }, 'absent batch metrics must not clobber existing column values');
+      assert.strictEqual(queryCalls.length, 1);
+      const { sql, opts } = queryCalls[0];
+      assert.ok(!/"maxRpm"/.test(sql), 'absent batch metrics must not appear in the SET clause');
+      assert.ok(!/"maxSpeed"/.test(sql), 'absent batch metrics must not appear in the SET clause');
+      assert.deepStrictEqual(opts.replacements, { id: 11, minTs: tA, maxTs: tB });
     } finally {
       restore();
     }
@@ -552,8 +565,8 @@ describe('SessionController — recomputeSummary calls', () => {
     );
     const matches = scSrc.match(/recomputeSummary/g);
     assert.ok(matches, 'recomputeSummary should appear in SessionController');
-    // 1 definition + 4 calls (copy, join, filter, cut) + 2 exports = at least 5
+    // 1 import + 4 calls (copy, join, filter, cut) = 5
     assert.ok(matches.length >= 5,
-      `Expected at least 5 occurrences of recomputeSummary (1 def + 4 calls + exports), got ${matches.length}`);
+      `Expected at least 5 occurrences of recomputeSummary (1 import + 4 calls), got ${matches.length}`);
   });
 });

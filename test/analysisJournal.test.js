@@ -349,6 +349,41 @@ describe('exportAnalyses', () => {
     mockModels.Session.findAll = async () => [];
   });
 
+  test('rejects a non-int4 vehicleId with the sibling 400 before any DB access', async () => {
+    for (const vehicleId of ['abc', '-1', '99999999999', '1.5']) {
+      let touched = false;
+      mockModels.Session.findAll = async () => { touched = true; return []; };
+      mockModels.Analysis.findAll = async () => { touched = true; return []; };
+
+      const req = makeStubReq({ query: { vehicleId } });
+      const { res, calls } = makeStubRes();
+
+      await AnalysisController.exportAnalyses(req, res);
+
+      assert.strictEqual(calls.statusCode, 400, `vehicleId=${vehicleId}`);
+      assert.deepStrictEqual(calls.body, { error: 'Invalid vehicleId.' });
+      assert.strictEqual(touched, false, `the gate must run before the DB (vehicleId=${vehicleId})`);
+    }
+    mockModels.Session.findAll = async () => [];
+    mockModels.Analysis.findAll = async () => [];
+  });
+
+  test('a valid owned vehicle id filters to that vehicle\'s sessions', async () => {
+    const sessionCalls = [];
+    mockModels.Session.findAll = async (opts) => { sessionCalls.push(opts); return [{ id: 10 }, { id: 20 }]; };
+    mockModels.Analysis.findAll = async () => [];
+
+    const req = makeStubReq({ query: { vehicleId: '5' } });
+    const { res, calls } = makeStubRes();
+
+    await AnalysisController.exportAnalyses(req, res);
+
+    assert.strictEqual(calls.statusCode, null, 'a valid id must not 400');
+    assert.strictEqual(sessionCalls.length, 1);
+    assert.deepStrictEqual(sessionCalls[0].where, { userId: 1, vehicleId: 5 });
+    mockModels.Session.findAll = async () => [];
+  });
+
   test('handles empty analyses gracefully', async () => {
     mockModels.Analysis.findAll = async () => [];
 

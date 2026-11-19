@@ -33,8 +33,8 @@ let config = {
             if (keys.length === 0) {
                 throw new Error('SESSION_KEYS must contain at least one key');
             }
-            const placeholders = ['please-change-this-in-production', 'change-me', 'secret', 'changeme'];
-            if (keys.some(k => placeholders.includes(k.toLowerCase()))) {
+            const PLACEHOLDER_PATTERN = /change[_-]?me|placeholder|changeme|please-change|your[-_ ]?secret|^secret$/i;
+            if (keys.some(k => PLACEHOLDER_PATTERN.test(k))) {
                 throw new Error(
                     'SESSION_KEYS contains a placeholder value.\n' +
                     'Generate real keys with: openssl rand -hex 24'
@@ -42,6 +42,18 @@ let config = {
             }
             return keys;
         })()
+    },
+    // Per-user unit preference resolution (plan 045). `Users.unitSystem` is
+    // nullable: NULL inherits this deploy-time default. Invalid values fail
+    // startup exactly like a bad SESSION_KEYS entry.
+    units: {
+        defaultSystem: (() => {
+            const raw = (process.env.DEFAULT_UNIT_SYSTEM || 'metric').trim().toLowerCase();
+            if (!['metric', 'us', 'uk'].includes(raw)) {
+                throw new Error("DEFAULT_UNIT_SYSTEM must be one of: metric, us, uk (got '" + raw + "')");
+            }
+            return raw;
+        })(),
     },
     // Tiered rate limits (express-rate-limit). All windows/caps are env-tunable.
     // Keyed on req.ip (app.set('trust proxy', 1) makes this the real client IP

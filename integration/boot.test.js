@@ -11,12 +11,24 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
 const { execFileSync } = require('node:child_process');
+const fs = require('node:fs');
 const path = require('node:path');
 const { Client } = require('pg');
 
 const ROOT = path.join(__dirname, '..');
 const CI = process.env.CI === 'true';
 const APP_TABLES = ['Users', 'Sessions', 'Logs', 'Vehicles', 'Analyses', 'Settings'];
+
+test('the Docker CMD boots migrations-only (no sequelize.sync)', () => {
+    const dockerfile = fs.readFileSync(path.join(ROOT, 'Dockerfile'), 'utf8');
+    const cmdLines = dockerfile
+        .split('\n')
+        .filter((line) => /^\s*CMD\b/.test(line));
+    assert.strictEqual(cmdLines.length, 1, 'Dockerfile must declare exactly one CMD');
+    const cmd = cmdLines[0];
+    assert.ok(!/sequelize\.sync/.test(cmd), `CMD must not sync:\n${cmd}`);
+    assert.match(cmd, /node scripts\/migrate\.js && node app\.js/, `CMD must migrate then start:\n${cmd}`);
+});
 
 function migrate() {
     return execFileSync(process.execPath, ['scripts/migrate.js'], {

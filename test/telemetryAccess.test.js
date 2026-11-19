@@ -255,6 +255,37 @@ describe('GET /api/sessions/:sessionId/telemetry — TelemetryController.range',
         assert.deepStrictEqual(logOpts.order, [['timestamp', 'ASC']]);
     });
 
+    test('returns raw rows with the same response keys (no ORM hydration)', async () => {
+        // raw: true must not change the wire shape: these are exactly the six
+        // attributes the query selects, and every existing test/SPA normalizer
+        // reads them (values stays a JSON object, timestamp still ISO-serialized).
+        const rows = [{
+            timestamp: new Date(FROM),
+            lon: 1.5,
+            lat: 2.5,
+            values: { k5: '88', kc: '2500' },
+            engine_rpm: 2500,
+            vehicle_speed: 60,
+        }];
+        const calls = installDbMocks({ ownedSession: OWNED_SESSION, logRows: rows });
+
+        const { status, body } = await withServer({ id: 1 }, (base) =>
+            getJson(base, TELEMETRY_PATH(qsFromTo()))
+        );
+
+        assert.strictEqual(status, 200);
+        assert.strictEqual(calls.logFindAll[0].raw, true, 'findAll must not hydrate instances');
+        assert.deepStrictEqual(
+            Object.keys(body[0]),
+            ['timestamp', 'lon', 'lat', 'values', 'engine_rpm', 'vehicle_speed'],
+            'response keys must match the selected columns exactly'
+        );
+        assert.strictEqual(body[0].timestamp, FROM, 'Date surfaces as the same ISO string');
+        assert.deepStrictEqual(body[0].values, { k5: '88', kc: '2500' });
+        assert.strictEqual(body[0].engine_rpm, 2500);
+        assert.strictEqual(body[0].vehicle_speed, 60);
+    });
+
     test('clamps a huge requested limit down to 10000', async () => {
         const calls = installDbMocks({ ownedSession: OWNED_SESSION });
 

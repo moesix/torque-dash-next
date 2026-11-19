@@ -6,7 +6,7 @@ const { telemetryRangeSchema } = require('../lib/validators');
 class TelemetryController {
     // GET /api/sessions/:sessionId/telemetry?from&to&limit
     // Enforces ownership and returns paged frames.
-    static async range(req, res) {
+    static async range(req, res, next) {
         try {
             const { from, to } = req.query;
             if (!from || !to) {
@@ -45,6 +45,11 @@ class TelemetryController {
                 // DB columns added by infra/timescale/log_hypertable.sql); the plan's
                 // engineRpm/vehicleSpeed casing would select non-existent columns.
                 attributes: ['timestamp', 'lon', 'lat', 'values', 'engine_rpm', 'vehicle_speed'],
+                // Plain JSON rows: `attributes` already names the DB columns, so
+                // `raw` returns the same keys without hydrating (and re-serializing
+                // through toJSON) up to 10 000 Sequelize instances per page. Dates
+                // still serialize to the same ISO strings in res.json.
+                raw: true,
                 order: [['timestamp', 'ASC']],
                 // Belt-and-braces clamp on the schema-coerced value: schema
                 // default is already 5000 and oversized inputs were pre-clamped,
@@ -54,8 +59,7 @@ class TelemetryController {
             });
             res.json(rows);
         } catch (err) {
-            console.error('[TelemetryController.range]', err);
-            res.status(500).json({ error: 'Internal server error' });
+            next(err);
         }
     }
 }

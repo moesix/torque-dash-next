@@ -43,6 +43,15 @@ The application **will not start** without these:
 | `POSTGRES_PASSWORD` | `openssl rand -base64 24` | Database password. Use the same value for all three `POSTGRES_*` vars. |
 | `SESSION_KEYS` | `openssl rand -hex 24` | Express session secrets. For key rotation, use comma-separated values. |
 
+### Unit system default (optional)
+
+`DEFAULT_UNIT_SYSTEM` sets the display units for users who have not chosen one
+(`metric` — the default — `us`, or `uk`). It is validated at config load: any
+other value aborts startup. Precedence is **explicit user preference →
+`DEFAULT_UNIT_SYSTEM` → `metric`**, so changing the env never rewrites an
+existing user's saved choice. Telemetry is always stored canonically
+(km/h, °C, kPa, L); the setting only affects rendering and exports.
+
 ### Upload API token (required for production)
 
 As of 2026, token authentication is the required security baseline for Torque
@@ -138,14 +147,25 @@ chain. Versioning is **dev-led**: releases happen on `development`, and
 ## 5. First-time setup
 
 1. Open **http://localhost:8080** in your browser.
-2. Register the first account at the sign-up page — **this account becomes the
+2. Optional but recommended: set `ADMIN_SETUP_TOKEN` in `.env` before exposing
+   the instance (generate one with `openssl rand -hex 24`). When it is set, the
+   first registration must pass the same value as `setupToken` (the sign-up
+   request field) — otherwise the request is rejected with `403`. On a fresh
+   instance this closes the window where any visitor who reaches the port
+   before you do becomes the admin. If the variable is **unset**, the first
+   registrant still becomes admin (the original bootstrap behaviour) and a
+   warning is logged in production.
+3. Register the first account at the sign-up page — **this account becomes the
    site admin** (`isAdmin`), the only account that can change server settings.
-3. Sign in with your credentials.
-4. Configure the upload API token — **required for production** (see step 2's
+   The first-admin check is serialized with a Postgres advisory lock
+   (`pg_advisory_xact_lock`), so two simultaneous first registrations cannot
+   both become admin.
+4. Sign in with your credentials.
+5. Configure the upload API token — **required for production** (see step 2's
    "Upload API token" section): either set `UPLOAD_API_TOKEN` in `.env` before
    launching, or generate one from **Settings** now (admin only — which the
    first account is).
-5. Configure Torque Pro (see below).
+6. Configure Torque Pro (see below).
 
 ### Configure Torque Pro
 
@@ -199,6 +219,22 @@ docker compose up -d
 
 Data is persisted in the `pgdata` Docker volume — it survives container
 recreations. The TimescaleDB migration runs automatically on startup if needed.
+
+### Upgrade notes
+
+Releases that require a manual step publish an `## Upgrade notes` section in
+their GitHub release body. Read it before pulling `latest`; the current examples
+are the TimescaleDB `ALTER EXTENSION` step below and the orphan-FK pre-check in
+`docs/development.md` (migrations section).
+
+> If you built a backend image locally from a checkout that contained a `.env`,
+> rotate `POSTGRES_PASSWORD`, `SESSION_KEYS`, `UPLOAD_API_TOKEN` and
+> `LLM_ENCRYPTION_KEY` — earlier `.dockerignore` versions copied that file into
+> the image.
+
+Sessions filtered with `filterNumber >= 3` before v2.4 retained the wrong rows
+(all but every Nth) and the intended rows were deleted; re-upload or re-import
+the session if you need the original resolution. Filtering is not reversible.
 
 ### Admin account on upgrade
 
