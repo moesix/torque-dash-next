@@ -8,6 +8,7 @@
  */
 
 import type { TelemetryFrame, PidMeta, ColumnMeta, SeriesSource } from './types';
+import { kindOf } from './units';
 
 // ── Curated Torque OBD-II fallback map ───────────────────────────────────
 /**
@@ -202,7 +203,25 @@ export function getAvailableSeries(frames: TelemetryFrame[]): SeriesSource[] {
     });
   }
 
-  // ── 5 & 6. Deduplicate by pid, sort by full name ───────────────────
+  // ── 5. Derived fuel economy (only when the data exists) ─────────────
+  // Needs BOTH a fuel-flow rate (kff125a, cc/min) and a vehicle speed. Never
+  // estimate from fuel level % (tank shape is unknown), and do not shadow a
+  // Torque-supplied economy PID. Derived like the combined fuel-trim series:
+  // not stored in Sessions/summaries, labelled with the canonical unit
+  // (L/100km) and converted to MPG (US)/(UK) at display time.
+  const hasFuelFlow = frames.some((f) => coerceScalar(f.values?.kff125a) !== null);
+  const hasSpeed = frames.some((f) => coerceScalar(f.vehicleSpeed) !== null);
+  if (hasFuelFlow && hasSpeed && !results.some((r) => kindOf(r.unit) === 'economy')) {
+    results.push({
+      pid: '__fuelEconomy',
+      full: 'Fuel economy',
+      short: 'Fuel econ',
+      unit: 'L/100km',
+      source: 'computed',
+    });
+  }
+
+  // ── 6. Deduplicate by pid, sort by full name ───────────────────────
   const seen = new Set<string>();
   return results
     .filter((r) => {
@@ -211,6 +230,35 @@ export function getAvailableSeries(frames: TelemetryFrame[]): SeriesSource[] {
       return true;
     })
     .sort((a, b) => a.full.localeCompare(b.full));
+}
+
+/**
+ * Derived instantaneous fuel economy from Fuel Flow Rate (kff125a, cc/min)
+ * and vehicle speed. Returns canonical L/100km (display converts to MPG US/UK).
+ * Frames missing either value are null; speed <= 5 km/h is skipped (idling
+ * would report an undefined/zero MPG and destroy the chart scale).
+ */
+export function computeFuelEconomy(
+  frames: TelemetryFrame[],
+  epochs?: number[],
+): [number, number | null][] {
+  const data: [number, number | null][] = new Array(frames.length);
+  if (epochs && epochs.length !== frames.length) throw new Error('epochs length mismatch');
+  const ts = epochs ?? precomputeEpochs(frames);
+
+  for (let i = 0; i < frames.length; i++) {
+    const f = frames[i];
+    const ccMin = coerceScalar(f.values?.kff125a);
+    const speed = coerceScalar(f.vehicleSpeed);
+    if (ccMin === null || speed === null || speed <= 5 || ccMin < 0) {
+      data[i] = [ts[i], null];
+      continue;
+    }
+    const lPerHour = ccMin * 0.06;
+    data[i] = [ts[i], (100 * lPerHour) / speed];
+  }
+
+  return data;
 }
 
 /**
@@ -251,6 +299,11 @@ export function getSeriesData(
   // every timestamp. Fail loudly instead of producing plausible-but-wrong data.
   if (epochs && epochs.length !== frames.length) throw new Error('epochs length mismatch');
   const ts = epochs ?? precomputeEpochs(frames);
+
+  if (source.source === 'computed') {
+    // Only the derived fuel-economy series exists today.
+    return computeFuelEconomy(frames, ts);
+  }
 
   if (source.source === 'column') {
     for (let i = 0; i < frames.length; i++) {
@@ -303,6 +356,13 @@ export function getSeriesStats(
   epochs?: number[],
 ): SeriesStats | null {
   if (epochs && epochs.length !== frames.length) throw new Error('epochs length mismatch');
+
+  if (source.source === 'computed') {
+    const data = computeFuelEconomy(frames, epochs);
+    const s = computeStats(data);
+    if (!s) return null;
+    return { ...s, count: data.reduce((n, [, v]) => (v === null ? n : n + 1), 0) };
+  }
 
   let min = Infinity;
   let max = -Infinity;

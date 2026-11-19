@@ -45,7 +45,7 @@ export default function DecodedMetricsTable({ sources, stats }: Props) {
 
   // Separate column sources from pid sources for display clarity
   const columnRows = rows.filter((r) => r.src.source === 'column');
-  const pidRows = rows.filter((r) => r.src.source === 'pid');
+  const pidRows = rows.filter((r) => r.src.source !== 'column');
 
   return (
     <div className="overflow-hidden card">

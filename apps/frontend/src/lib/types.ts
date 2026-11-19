@@ -189,7 +189,13 @@ export interface ColumnMeta {
 }
 
 /** Union of every discoverable metric source. */
-export type SeriesSource = PidMeta | ColumnMeta;
+export type SeriesSource = PidMeta | ColumnMeta | {
+  pid: string;
+  full: string;
+  short: string;
+  unit: string;
+  source: 'computed';
+};
 
 // ── BYOK LLM Analysis types ───────────────────────────────────────────
 
