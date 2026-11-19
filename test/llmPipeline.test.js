@@ -303,8 +303,12 @@ describe('deterministic even sampling (implementation)', () => {
     assert.match(controllerSrc, /Math\.max\(1, Math\.floor\(totalCount \/ target\)\)/);
   });
 
-  test('firstBatch/randomBatch/lastBatch merge order preserved', () => {
-    assert.match(controllerSrc, /sample = \[\.\.\.firstBatch, \.\.\.randomBatch, \.\.\.lastBatch\]/);
+  test('firstBatch/randomBatch/lastBatch are deduplicated by id before use', () => {
+    assert.match(controllerSrc, /const byId = new Map\(\)/);
+    assert.match(controllerSrc, /for \(const row of \[\.\.\.firstBatch, \.\.\.randomBatch, \.\.\.lastBatch\]\)/);
+    assert.match(controllerSrc, /byId\.set\(row\.id, row\)/);
+    assert.match(controllerSrc, /sample = \[\.\.\.byId\.values\(\)\]/);
+    assert.doesNotMatch(controllerSrc, /sample = \[\.\.\.firstBatch, \.\.\.randomBatch, \.\.\.lastBatch\]/);
   });
 });
 
@@ -769,6 +773,9 @@ const lifecycle = {
   session: null,
   sample: [],
   created: [],
+  // Optional per-query override for Log.findAll (the large-session path calls
+  // it twice: ASC head + DESC tail). Unset → every call returns `sample`.
+  findAll: null,
   // When set, Session.findOne only resolves for this userId — lets tests
   // exercise the ownership-first 404 path with the single-flight slot held.
   ownerUserId: null,
@@ -787,7 +794,7 @@ require.cache[modelsPath] = {
         return lifecycle.session;
       },
     },
-    Log: { findAll: async () => lifecycle.sample },
+    Log: { findAll: async (opts) => (lifecycle.findAll ? lifecycle.findAll(opts) : lifecycle.sample) },
     Analysis: { create: async (row) => { lifecycle.created.push(row); return row; } },
     Vehicle: {},
     Settings: {
@@ -1257,6 +1264,132 @@ describe('analyzeSession single-flight guard', () => {
 
     assert.strictEqual(lifecycle.created.length, 0);
     assert.ok(!res.chunks.includes('data: [DONE]\n\n'));
+  });
+});
+
+describe('analysis sample deduplication (large sessions)', () => {
+  const T0 = Date.parse('2026-10-01T10:00:00.000Z');
+  // 401 rows → large-session branch. Sources overlap by design: the stride
+  // selector includes the boundary rows already loaded as head/tail.
+  const rows = Array.from({ length: 401 }, (_, i) => ({
+    id: i + 1,
+    timestamp: new Date(T0 + i * 1000),
+    lat: 1,
+    lon: 2,
+    engine_rpm: 800 + (i % 50),
+    vehicle_speed: i % 120,
+    values: {},
+  }));
+
+  function makeRes() {
+    return {
+      statusCode: 200,
+      headersSent: false,
+      headers: {},
+      chunks: [],
+      ended: false,
+      setHeader(key, value) { this.headers[key] = value; },
+      flushHeaders() { this.headersSent = true; },
+      status(code) { this.statusCode = code; return this; },
+      json(body) { this.body = body; return this; },
+      write(chunk) { this.chunks.push(String(chunk)); return true; },
+      end() { this.ended = true; },
+    };
+  }
+
+  function makeReq(sessionId) {
+    const listeners = {};
+    return {
+      user: { id: 1 },
+      params: { sessionId: String(sessionId) },
+      query: {},
+      body: {},
+      on(event, cb) { listeners[event] = cb; },
+      emitClose() { if (listeners.close) listeners.close(); },
+    };
+  }
+
+  test('prompt row count equals the unique-id count; boundary rows appear once', async () => {
+    const firstBatch = rows.slice(0, 50);
+    const lastBatch = rows.slice(-50);
+    // Mirror the server-side stride selector: target 100, stride 4, ids 1..401.
+    const strideIds = [];
+    for (let rn = 1; rn <= rows.length && strideIds.length < 100; rn += 4) {
+      strideIds.push(rows[rn - 1].id);
+    }
+    const byId = new Map();
+    for (const row of [...firstBatch, ...strideIds.map(id => rows[id - 1]), ...lastBatch]) {
+      byId.set(row.id, row);
+    }
+    const uniqueCount = byId.size;
+    const rawMergedCount = 50 + strideIds.length + 50;
+
+    assert.ok(uniqueCount < rawMergedCount, 'fixture must contain overlap to prove dedupe');
+
+    lifecycle.session = {
+      id: 401,
+      firstTimestamp: rows[0].timestamp,
+      lastTimestamp: rows[rows.length - 1].timestamp,
+      toJSON: () => ({ id: 401, name: 'Long drive', vehicleId: null }),
+    };
+    lifecycle.created = [];
+    lifecycle.findAll = async (opts) => {
+      const direction = opts?.order?.[0]?.[1];
+      return direction === 'DESC' ? rows.slice(-50).reverse() : rows.slice(0, 50);
+    };
+    preworkQueryHandler = async (sql, opts) => {
+      if (sql.includes('jsonb_object_keys')) return [[]];
+      if (sql.includes('MATERIALIZED')) return [];
+      if (sql.includes('MIN("timestamp")')) {
+        return [{ startTs: rows[0].timestamp, endTs: rows[rows.length - 1].timestamp }];
+      }
+      if (sql.includes('COUNT(*)')) return [{ cnt: String(rows.length) }];
+      if (sql.includes('ROW_NUMBER()')) return strideIds.map(id => ({ id }));
+      if (sql.includes('WHERE id IN')) {
+        const ids = opts?.replacements?.ids || [];
+        return rows.filter(row => ids.includes(row.id));
+      }
+      return [];
+    };
+    llmStubs.analyze = async () => ({
+      response: {},
+      abortController: { abort() {} },
+      timeoutGuard: { bump() {}, clear() {} },
+    });
+    llmStubs.streamEvents = async function* () {
+      yield { type: 'content', text: 'ok' };
+    };
+
+    try {
+      const res = makeRes();
+      await AnalysisController.analyzeSession(makeReq(401), res);
+      assert.strictEqual(res.statusCode, 200);
+
+      const prompt = lifecycle.created[0].prompt;
+      assert.ok(
+        prompt.includes(`Data points in sample: ${uniqueCount}`),
+        `prompt must report ${uniqueCount} unique rows (raw merge was ${rawMergedCount})`
+      );
+      assert.ok(
+        !prompt.includes(`Data points in sample: ${rawMergedCount}`),
+        'duplicated merge must not inflate the reported row count'
+      );
+
+      // The CSV is resampled from the deduped sample; the first and last
+      // timestamps must each occur exactly once in it.
+      const csv = prompt.split('## Resampled Telemetry Data (CSV Format)\n')[1]
+        .split('\n## Analysis Request')[0];
+      const dataLines = csv.split('\n').filter(Boolean).slice(1);
+      // buildTelemetryCsv formats the timestamp with String(row.timestamp)
+      // (server-local), so mirror that instead of toISOString.
+      const timeOf = (ts) => String(ts).match(/\d{2}:\d{2}:\d{2}/)[0];
+      const firstTime = timeOf(rows[0].timestamp);
+      const lastTime = timeOf(rows[rows.length - 1].timestamp);
+      assert.strictEqual(dataLines.filter(l => l.split(',')[0] === firstTime).length, 1);
+      assert.strictEqual(dataLines.filter(l => l.split(',')[0] === lastTime).length, 1);
+    } finally {
+      lifecycle.findAll = null;
+    }
   });
 });
 

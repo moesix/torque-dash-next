@@ -184,6 +184,52 @@ describe('buildTelemetryCsv chronological ordering', () => {
   });
 });
 
+describe('sample statistics honesty + location sanitization (plans/032)', () => {
+  function promptFor(session) {
+    return buildAnalysisPrompt(session, {}, [], [], null);
+  }
+
+  it('labels the statistics block as sample-derived, never whole-drive', () => {
+    const prompt = promptFor({ name: 'Morning Commute' });
+    assert.ok(prompt.includes('## Sample Statistics (0 sampled rows)'));
+    assert.ok(
+      prompt.includes(
+        'These values are computed from the sampled rows below, not necessarily the whole drive.'
+      )
+    );
+    assert.ok(prompt.includes('say the sample may have missed it'));
+    assert.ok(!prompt.includes('Entire Drive'));
+    assert.ok(!prompt.includes('Pre-Calculated'));
+    assert.ok(!prompt.includes('Use these exact calculated values'));
+  });
+
+  it('reports the sampled row count in the heading', () => {
+    const sample = [
+      { timestamp: '2026-10-01T10:00:00.000Z', engine_rpm: 900, vehicle_speed: 0, values: {} },
+      { timestamp: '2026-10-01T10:00:01.000Z', engine_rpm: 950, vehicle_speed: 0, values: {} },
+    ];
+    const prompt = buildAnalysisPrompt({ name: 'Idle' }, {}, sample, [], null);
+    assert.ok(prompt.includes('## Sample Statistics (2 sampled rows)'));
+    assert.ok(prompt.includes('Data points in sample: 2'));
+  });
+
+  it('sanitizes newlines and truncates a 5000-char location', () => {
+    const session = {
+      name: 'Line one\nline two',
+      startLocation: 'A'.repeat(5000),
+      endLocation: 'B'.repeat(5000),
+    };
+    const prompt = promptFor(session);
+    const locationLine = prompt.split('\n').find((line) => line.startsWith('Location: '));
+    assert.ok(locationLine, 'prompt must carry a Location line');
+    assert.ok(locationLine.length <= 220, `Location line is ${locationLine.length} chars`);
+    assert.ok(!locationLine.includes('\n'));
+    const contextName = prompt.split('\n').find((line) => line.startsWith('Session: '));
+    assert.ok(contextName.includes('Line one line two'));
+    assert.ok(!contextName.includes('\n'));
+  });
+});
+
 describe('buildAnalysisPrompt vehicle context (plans/118)', () => {
   // The controller passes { ...session.toJSON(), duration } where toJSON()
   // serializes the eager-loaded Vehicle profile under the `Vehicle` key
