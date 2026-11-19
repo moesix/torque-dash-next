@@ -231,8 +231,8 @@ sessions after a password change), `015_normalize_emails.sql` (lowercase fold),
   by nginx, so no backend response carries an inline script or style.
 - **CSP enabled on the SPA edge** — `apps/frontend/nginx.conf` sets a
   `Content-Security-Policy` (`default-src 'self'`, `script-src 'self'`,
-  `style-src 'self' 'unsafe-inline' https://fonts.googleapis.com`,
-  `font-src 'self' data: https://fonts.gstatic.com`, `img-src 'self' data: https:`,
+  `style-src 'self' 'unsafe-inline'`,
+  `font-src 'self' data:`, `img-src 'self' data: https:`,
   `connect-src 'self'`, `frame-ancestors 'none'`, `object-src 'none'`,
   `base-uri 'self'`). The Vite build emits one external module script and no
   inline script/style, so `script-src` needs no `'unsafe-inline'`.
@@ -727,7 +727,7 @@ extracts `[timestamp_ms, value]` pairs via the safe `coerceScalar()` helper.
   Tailwind text utilities. Bundle size dropped ~65 kB; all chunks are now
   <400 kB (largest: echarts at ~380 kB, split via Rolldown `codeSplitting`
   groups in `vite.config.ts`).
-- **Typography** — Google Fonts: Space Grotesk for display/body text, Martian Mono for monospace data. Font stacks are exposed as `--font-display`, `--font-body`, `--font-mono` CSS variables and mapped to Tailwind theme values (`--font-display`, `--font-body`, `--font-mono`) in the `@theme` block.
+- **Typography** — self-hosted webfonts via the `@fontsource` packages (`@fontsource/space-grotesk`, `@fontsource/martian-mono`): Space Grotesk for display/body text, Martian Mono for monospace data. Font stacks are exposed as `--font-display`, `--font-body`, `--font-mono` CSS variables and mapped to Tailwind theme values (`--font-display`, `--font-body`, `--font-mono`) in the `@theme` block.
 - **Dark mode** — managed by `lib/theme.ts`: detects `prefers-color-scheme`, persists choice to localStorage, provides `getTheme()` / `setTheme()` / `toggleTheme()`. The theme toggle button (sun/moon icons) lives in `AppShell` and applies the `.dark` class on `<html>`. The custom variant `@custom-variant dark (&:where(.dark, .dark *));` in `index.css` enables `dark:` class-based Tailwind variants.
 - **Mobile drawer** — `MobileDrawer.tsx` renders a slide-out navigation panel with backdrop overlay, Escape-to-close, focus-on-open, and dark mode support. Triggered by a hamburger button visible below the `md` breakpoint.
 - **Loading skeletons** — `Skeleton.tsx` provides a shimmer-animated placeholder for async content; `ErrorAlert.tsx` renders a dismissible error banner. Both replace raw text placeholders in `SessionBrowser` and `ReplayDashboard`.
