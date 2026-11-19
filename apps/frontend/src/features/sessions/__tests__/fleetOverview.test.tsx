@@ -120,7 +120,7 @@ describe('FleetOverview (jsdom)', () => {
     expect(beta.textContent).toContain('Honda Civic');
     expect(beta.textContent).toContain('12');
     expect(beta.textContent).toContain('6,800');
-    expect(beta.textContent).toContain('km/h');
+    expect(beta.textContent).toContain('142 km/h');
 
     const alpha = screen.getByRole('button', { name: 'Vehicle: Alpha' });
     // Zero-session vehicle is present: count 0 and dashes for the maxima.
@@ -157,8 +157,8 @@ describe('FleetOverview (jsdom)', () => {
     renderFleet({ withUnits: true, system: 'us' });
 
     const beta = await screen.findByRole('button', { name: 'Vehicle: Beta' });
-    await waitFor(() => expect(beta.textContent).toMatch(/mph/));
-    // 142 km/h ≈ 88 mph; the metric label must not leak through.
+    await waitFor(() => expect(beta.textContent).toContain('88 mph'));
+    // The metric label must not leak through under a US preference.
     expect(beta.textContent).not.toMatch(/km\/h/);
   });
 });
