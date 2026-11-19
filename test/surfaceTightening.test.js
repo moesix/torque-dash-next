@@ -157,7 +157,10 @@ describe('GET /api/settings — public endpoint trimmed', () => {
 describe('GET /api/settings/full — authenticated full settings', () => {
   it('returns all expected fields', async () => {
     const UserController = require('../controllers/UserController');
-    const req = {};
+    // Plan 030: llmProvider/llmModel/llmEndpoint are admin-only, so the
+    // "full shape" caller must be an admin (this route is authenticate-gated
+    // in the real router; the old empty req simulated a non-admin).
+    const req = { user: { id: 1, isAdmin: true } };
     const { res, calls } = makeStubRes();
 
     await UserController.getSettingsFull(req, res);

@@ -24,9 +24,20 @@ class UserController {
             if (!user) {
                 return res.status(401).json({ error: (info && info.message) || 'Invalid credentials' });
             }
-            req.logIn(user, (loginErr) => {
-                if (loginErr) return next(loginErr);
-                return res.json({ ok: true });
+            // Session fixation defence (plan 030): rotate the session id BEFORE
+            // attaching the authenticated identity, so a cookie planted before
+            // login never becomes an authenticated session. Same sequence as
+            // changePassword below — req.logIn is called exactly once and only
+            // inside this callback, on the fresh session object.
+            req.session.regenerate((regenErr) => {
+                if (regenErr) {
+                    console.error('[UserController] login session regenerate failed:', regenErr.message);
+                    return res.status(500).json({ error: 'Login failed. Please try again.' });
+                }
+                req.logIn(user, (loginErr) => {
+                    if (loginErr) return next(loginErr);
+                    return res.json({ ok: true });
+                });
             });
         })(req, res, next);
     }
@@ -82,13 +93,39 @@ class UserController {
                 return res.status(409).json({ error: 'Registration failed. Please try a different email.' });
             }
 
-            // Save new user to db. First-registered-user bootstrap (plan 099):
-            // when no user row exists yet, this account becomes the admin
-            // (isAdmin = count === 0). Count and create are not atomic together,
-            // so a theoretical simultaneous-registration race could yield two
-            // admins — acceptable for a personal deployment.
-            const userCount = await User.count();
-            user = await User.create({ email: email, password: password, isAdmin: userCount === 0 });
+            // Save new user to db. First-registered-user bootstrap (plans 099 +
+            // 030): when no user row exists yet, this account becomes the admin.
+            // The count runs inside a transaction holding a DB-scoped advisory
+            // lock, so two concurrent registrations cannot both observe zero
+            // users and both become admin. The lock is released when the
+            // transaction ends; only the count is guarded (a concurrent user
+            // delete — not possible through the API today — could still slip
+            // between the count and the create).
+            const setupToken = process.env.ADMIN_SETUP_TOKEN;
+            const isFirstUser = await sequelize.transaction(async (t) => {
+                await sequelize.query(
+                    "SELECT pg_advisory_xact_lock(hashtext('torquedash:first-admin'))",
+                    { transaction: t }
+                );
+                const count = await User.count({ transaction: t });
+                return count === 0;
+            });
+
+            // Bootstrap secret (plan 030): when the operator has set
+            // ADMIN_SETUP_TOKEN, the account that would become admin must
+            // present it — otherwise an unauthenticated visitor racing the
+            // operator on a fresh deployment wins admin rights.
+            if (isFirstUser && setupToken) {
+                const supplied = req.body ? req.body.setupToken : undefined;
+                if (supplied !== setupToken) {
+                    return res.status(403).json({ error: 'Setup token required for the first account.' });
+                }
+            }
+            if (isFirstUser && !setupToken && process.env.NODE_ENV === 'production') {
+                console.warn('[UserController] first account will become admin and ADMIN_SETUP_TOKEN is unset');
+            }
+
+            user = await User.create({ email: email, password: password, isAdmin: isFirstUser });
 
             // Send response
             return res.status(201).json({ ok: true });
@@ -142,7 +179,10 @@ class UserController {
                 extras.isAdmin = Boolean(req.user.isAdmin);
             }
             res.set('Cache-Control', 'private, max-age=30');
-            res.json(settingsView(settings, extras));
+            // Role projection (plan 030): non-admins must not learn the
+            // operator's LLM endpoint/model (the endpoint may embed URL
+            // userinfo). Session-derived, never client input.
+            res.json(settingsView(settings, extras, { isAdmin: req.user && req.user.isAdmin }));
         } catch (err) {
             console.error(err.message || err);
             res.status(500).json({ error: 'Internal server error' });
@@ -205,8 +245,18 @@ class UserController {
             }
             if (llmEndpoint !== undefined) {
               if (llmEndpoint !== null) {
-                try { new URL(llmEndpoint); } catch {
+                let parsed;
+                try { parsed = new URL(llmEndpoint); } catch {
                   return res.status(400).json({ error: 'Invalid endpoint URL' });
+                }
+                // Plan 030: `https://user:pass@host` would round-trip
+                // credentials through the settings response, and non-HTTP(S)
+                // schemes are not endpoints the LLM client can use.
+                if (parsed.username || parsed.password) {
+                  return res.status(400).json({ error: 'Endpoint URL must not contain credentials.' });
+                }
+                if (!/^https?:$/.test(parsed.protocol)) {
+                  return res.status(400).json({ error: 'Endpoint URL must be http or https.' });
                 }
               }
               updateData.llmEndpoint = llmEndpoint;
@@ -356,10 +406,12 @@ class UserController {
 
             // Re-fetch the full settings row to return complete state
             const current = await Settings.getSingleton();
+            // This handler is admin-gated above, so the response keeps the
+            // admin projection (the settings card writes state from it).
             res.json(settingsView(current, {
                 disableRegistration: current.disableRegistration || envDisabled,
                 retentionPolicyApplied: policyApplied,
-            }));
+            }, { isAdmin: true }));
         } catch (err) {
             console.error(err.message || err);
             res.status(500).json({ error: 'Internal server error' });
@@ -453,15 +505,24 @@ class UserController {
 // Single source of truth for the settings response shape. Callers pass extras
 // (e.g. disableRegistration override, retentionPolicyApplied) via the second
 // argument which is spread on top of the base fields.
-function settingsView(settings, extras = {}) {
+//
+// The third argument is the VIEWER and is optional (plan 030): omitting it
+// projects the non-admin shape, so existing two-argument callers never leak
+// provider config. Only admins receive the concrete provider/model/endpoint;
+// everyone else gets `hasLlmProvider` (the settings page renders a
+// "configured" state from the booleans).
+function settingsView(settings, extras = {}, viewer = {}) {
+    const isAdmin = Boolean(viewer.isAdmin);
     return {
         disableRegistration: settings.disableRegistration || false,
         hasUploadApiToken: Boolean(settings.uploadApiToken || runtime.isFromEnv()),
         tokenFromEnv: runtime.isFromEnv(),
         hasLlmProvider: Boolean(settings.llmProvider),
-        llmProvider: settings.llmProvider || null,
-        llmModel: settings.llmModel || null,
-        llmEndpoint: settings.llmEndpoint || null,
+        ...(isAdmin ? {
+            llmProvider: settings.llmProvider || null,
+            llmModel: settings.llmModel || null,
+            llmEndpoint: settings.llmEndpoint || null,
+        } : {}),
         hasLlmApiKey: Boolean(settings.llmApiKeyEnc),
         vehicleMake: settings.vehicleMake || null,
         vehicleModel: settings.vehicleModel || null,

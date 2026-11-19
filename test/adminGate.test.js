@@ -28,6 +28,7 @@ const upsertCalls = [];
 const saveCalls = [];
 const createCalls = [];
 const llmAnalyzeCalls = [];
+const sequelizeQueries = [];
 
 function makeSettingsRow() {
     const row = {
@@ -103,7 +104,14 @@ const mockModels = {
         findAll: async () => [],
     },
     sequelize: {
-        query: async () => [],
+        // Register's first-admin count runs inside this transaction, and the
+        // advisory lock statement goes through sequelize.query — record both
+        // so the tests can assert the lock is actually taken.
+        transaction: async (fn) => fn({ id: 'tx-stub' }),
+        query: async (sql, opts) => {
+            sequelizeQueries.push({ sql, opts });
+            return [];
+        },
         QueryTypes: { SELECT: 'SELECT' },
         fn: () => {},
         col: () => {},
@@ -175,6 +183,7 @@ beforeEach(() => {
     saveCalls.length = 0;
     createCalls.length = 0;
     llmAnalyzeCalls.length = 0;
+    sequelizeQueries.length = 0;
     mockModels.User.count = async () => 0;
     mockModels.User.findOne = async () => null;
 });
@@ -246,6 +255,12 @@ describe('POST /api/users/register — first-user admin bootstrap', { skip: apiR
         assert.strictEqual(createCalls.length, 1, 'exactly one User.create');
         assert.strictEqual(createCalls[0].email, 'first@example.com');
         assert.strictEqual(createCalls[0].isAdmin, true, 'first user must be admin');
+        // Plan 030: the first-admin count is serialized by an advisory lock
+        // scoped to the count transaction.
+        assert.ok(
+            sequelizeQueries.some((q) => /pg_advisory_xact_lock\(hashtext\('torquedash:first-admin'\)\)/.test(q.sql)),
+            'the first-admin count must run under the advisory lock'
+        );
     });
 
     test('second registered user is persisted with isAdmin: false', async () => {
@@ -259,6 +274,97 @@ describe('POST /api/users/register — first-user admin bootstrap', { skip: apiR
         assert.strictEqual(createCalls.length, 1);
         assert.strictEqual(createCalls[0].email, 'second@example.com');
         assert.strictEqual(createCalls[0].isAdmin, false, 'non-first user must NOT be admin');
+    });
+});
+
+describe('POST /api/users/register — ADMIN_SETUP_TOKEN gate (plan 030)', { skip: apiRouter ? false : 'routes/api.js could not load' }, () => {
+    // Every test owns the env var and restores it, so a later file/test never
+    // inherits a token it did not set.
+    async function withSetupToken(value, fn) {
+        const previous = process.env.ADMIN_SETUP_TOKEN;
+        if (value === undefined) delete process.env.ADMIN_SETUP_TOKEN;
+        else process.env.ADMIN_SETUP_TOKEN = value;
+        try {
+            return await fn();
+        } finally {
+            if (previous === undefined) delete process.env.ADMIN_SETUP_TOKEN;
+            else process.env.ADMIN_SETUP_TOKEN = previous;
+        }
+    }
+
+    test('first registration without a setupToken is rejected with 403 (no account created)', async () => {
+        await withSetupToken('abc', async () => {
+            mockModels.User.count = async () => 0;
+
+            const { status, body } = await withServer(null, (base) =>
+                sendJson(base, '/api/users/register', 'POST', { email: 'first@example.com', password: 'password123' })
+            );
+
+            assert.strictEqual(status, 403);
+            assert.deepStrictEqual(body, { error: 'Setup token required for the first account.' });
+            assert.strictEqual(createCalls.length, 0, 'the first account must not be created without the token');
+        });
+    });
+
+    test('first registration with a wrong setupToken is rejected with 403', async () => {
+        await withSetupToken('abc', async () => {
+            mockModels.User.count = async () => 0;
+
+            const { status, body } = await withServer(null, (base) =>
+                sendJson(base, '/api/users/register', 'POST', {
+                    email: 'first@example.com', password: 'password123', setupToken: 'wrong',
+                })
+            );
+
+            assert.strictEqual(status, 403);
+            assert.deepStrictEqual(body, { error: 'Setup token required for the first account.' });
+            assert.strictEqual(createCalls.length, 0);
+        });
+    });
+
+    test('first registration with the correct setupToken returns 201 and creates the admin', async () => {
+        await withSetupToken('abc', async () => {
+            mockModels.User.count = async () => 0;
+
+            const { status, body } = await withServer(null, (base) =>
+                sendJson(base, '/api/users/register', 'POST', {
+                    email: 'first@example.com', password: 'password123', setupToken: 'abc',
+                })
+            );
+
+            assert.strictEqual(status, 201);
+            assert.deepStrictEqual(body, { ok: true });
+            assert.strictEqual(createCalls.length, 1);
+            assert.strictEqual(createCalls[0].isAdmin, true);
+        });
+    });
+
+    test('with ADMIN_SETUP_TOKEN unset the first registration still bootstraps the admin (no token required)', async () => {
+        await withSetupToken(undefined, async () => {
+            mockModels.User.count = async () => 0;
+
+            const { status } = await withServer(null, (base) =>
+                sendJson(base, '/api/users/register', 'POST', { email: 'first@example.com', password: 'password123' })
+            );
+
+            assert.strictEqual(status, 201);
+            assert.strictEqual(createCalls.length, 1);
+            assert.strictEqual(createCalls[0].isAdmin, true, 'documented bootstrap mode when the env var is unset');
+        });
+    });
+
+    test('a later registration needs no setup token even when ADMIN_SETUP_TOKEN is set', async () => {
+        await withSetupToken('abc', async () => {
+            mockModels.User.count = async () => 1;
+
+            const { status } = await withServer(null, (base) =>
+                sendJson(base, '/api/users/register', 'POST', { email: 'second@example.com', password: 'password123' })
+            );
+
+            assert.strictEqual(status, 201);
+            assert.strictEqual(createCalls.length, 1);
+            assert.strictEqual(createCalls[0].isAdmin, false);
+        });
     });
 });
 
@@ -298,6 +404,16 @@ describe('PUT /api/settings — admin-only gate', { skip: apiRouter ? false : 'r
         assert.strictEqual(upsertCalls.length, 0, 'tile settings must not be written for a non-admin');
         assert.strictEqual(settingsRow.tileProvider, 'osm');
         assert.strictEqual(settingsRow.cartoApiKey, null);
+    });
+
+    test('admin PUT response keeps the admin LLM projection (settingsView third arg)', async () => {
+        const { status, body } = await withServer(ADMIN, (base) =>
+            sendJson(base, '/api/settings', 'PUT', { llmEndpoint: 'https://llm.example.com/v1' })
+        );
+
+        assert.strictEqual(status, 200);
+        assert.strictEqual(body.llmEndpoint, 'https://llm.example.com/v1',
+            'the admin form re-hydrates from this response, so it must keep llmEndpoint');
     });
 
     test('admin PUT switches to CARTO and the stored key comes back in the same admin-only response', async () => {
@@ -447,5 +563,39 @@ describe('GET /api/settings/full — authenticated projection carries isAdmin', 
 
         assert.strictEqual(status, 200);
         assert.strictEqual(body.isAdmin, false);
+    });
+
+    test('non-admin full-settings body omits llmEndpoint/llmModel entirely even when configured', async () => {
+        settingsRow.llmProvider = 'custom';
+        settingsRow.llmModel = 'operator-model';
+        settingsRow.llmEndpoint = 'https://operator:secret@llm.internal/v1';
+
+        const { status, body } = await withServer(NON_ADMIN, (base) => getJson(base, '/api/settings/full'));
+
+        assert.strictEqual(status, 200);
+        for (const key of ['llmEndpoint', 'llmModel', 'llmProvider']) {
+            assert.strictEqual(
+                Object.prototype.hasOwnProperty.call(body, key),
+                false,
+                `non-admin response must not carry ${key}`
+            );
+        }
+        assert.strictEqual(body.hasLlmProvider, true, 'the boolean "configured" state stays visible');
+        assert.strictEqual(body.hasLlmApiKey, false);
+        assert.ok(!JSON.stringify(body).includes('llm.internal'), 'no endpoint fragment may leak');
+    });
+
+    test('admin full-settings body carries llmProvider/llmModel/llmEndpoint', async () => {
+        settingsRow.llmProvider = 'custom';
+        settingsRow.llmModel = 'operator-model';
+        settingsRow.llmEndpoint = 'https://llm.internal/v1';
+
+        const { status, body } = await withServer(ADMIN, (base) => getJson(base, '/api/settings/full'));
+
+        assert.strictEqual(status, 200);
+        assert.strictEqual(body.llmProvider, 'custom');
+        assert.strictEqual(body.llmModel, 'operator-model');
+        assert.strictEqual(body.llmEndpoint, 'https://llm.internal/v1');
+        assert.strictEqual(body.hasLlmProvider, true);
     });
 });
