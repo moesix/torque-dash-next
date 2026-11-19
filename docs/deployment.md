@@ -213,6 +213,11 @@ recreations. The TimescaleDB migration runs automatically on startup if needed.
 
 ### Upgrade notes
 
+Releases that require a manual step publish an `## Upgrade notes` section in
+their GitHub release body. Read it before pulling `latest`; the current examples
+are the TimescaleDB `ALTER EXTENSION` step below and the orphan-FK pre-check in
+`docs/development.md` (migrations section).
+
 > If you built a backend image locally from a checkout that contained a `.env`,
 > rotate `POSTGRES_PASSWORD`, `SESSION_KEYS`, `UPLOAD_API_TOKEN` and
 > `LLM_ENCRYPTION_KEY` — earlier `.dockerignore` versions copied that file into

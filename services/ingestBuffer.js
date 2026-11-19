@@ -106,7 +106,8 @@ async function writeChunk(items, written, state) {
         await writeBatch(items);
         for (const item of items) written.push(item);
     } catch (err) {
-        console.error('[ingestBuffer] chunk write failed, re-queueing:', err.message);
+        const sidList = [...new Set(items.map(i => i.sessionId))].join(',');
+        console.error(`[ingestBuffer] chunk write failed (sessions: ${sidList}), re-queueing:`, err.message);
         await requeueOrBisect(items, written, state);
     }
 }
@@ -145,15 +146,17 @@ async function runFlush() {
     // failed (rows re-queued or dropped), these Session updates must NOT run —
     // otherwise denormalized summaries would advance AHEAD of the Logs table
     // they derive from.
+    let currentSummarySessionId = null;
     try {
         for (const sessionId of new Set(writtenRows.map(r => r.sessionId))) {
+            currentSummarySessionId = sessionId;
             await mergeWrittenRows(
                 sessionId,
                 writtenRows.filter(r => r.sessionId === sessionId)
             );
         }
     } catch (err) {
-        console.error('[ingestBuffer] summary update failed:', err.message);
+        console.error(`[ingestBuffer] summary update failed (session: ${currentSummarySessionId ?? 'unknown'}):`, err.message);
     }
 }
 

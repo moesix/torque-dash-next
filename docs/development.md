@@ -55,7 +55,7 @@ pin). No Tremor — all UI uses native Tailwind utilities (Plan 049).
 
 ## 3. Environment Variables
 
-Set these at the backend repo root (`.env` or exported in the shell).
+The backend does not read .env outside Docker (no dotenv). For host runs, `export` the variables; Compose reads `.env`.
 
 | Variable | Required | Default | Description |
 | --- | --- | --- | --- |
@@ -351,10 +351,11 @@ cd apps/frontend
 npm run build      # runs `tsc --noEmit && vite build` → apps/frontend/dist
 ```
 
-> The backend does **not** currently serve `apps/frontend/dist` (it serves the
-> legacy `public/`). In production the SPA is expected to be served by a separate
-> origin/CDN or an nginx layer that proxies `/api` to the backend. See Known
-> Issues (LOW).
+> The backend does not serve the SPA: `app.js` has no `express.static` handler.
+> In production the frontend nginx image (`apps/frontend/Dockerfile`) serves the
+> built SPA and proxies `/api` to the backend (same origin). A separate
+> origin/CDN deployment also works, but then `CORS_ORIGINS` and `COOKIE_SECURE`
+> must be set. See Known Issues (LOW).
 
 ### Frontend API client (`lib/api.ts`)
 
@@ -745,8 +746,9 @@ blockers are resolved and re-reviewed as PASS:
 
 1. ✅ `app.js` now registers `express.json({ limit: '1mb' })` on `/api`
    (before the api router) so JSON bodies populate `req.body`.
-2. ✅ `middleware/auth.js` branches on `req.originalUrl.startsWith('/api')`
-   and returns **401 JSON**; legacy HTML routes keep the redirect.
+2. ✅ `middleware/auth.js` always returns **401 JSON**. Every protected route is
+   mounted under `/api` (SPA and Torque uploads), so there is no HTML-redirect
+   branch to preserve.
 3. ✅ `models/User.js` `confirmPassword` is now `.optional()` (still validated
    when present).
 4. ✅ `UserController.register`/`login` return **JSON** for `/api` requests
@@ -813,14 +815,16 @@ blockers are resolved and re-reviewed as PASS:
 
 ### Low priority
 
-- **Empty `CORS_ORIGINS` blocks the cross-origin SPA.** `app.js` builds the CORS
-  origin allowlist from `process.env.CORS_ORIGINS`. If unset/empty, the allowlist
-  is `[]` and **all** cross-origin `/api` requests are refused. Must be set in
-  production.
-- **SPA build not served by Express.** `app.js` serves the legacy `public/`
-  directory; `apps/frontend/dist` is not served. Confirm the deploy topology
-  (separate origin/CDN, or an nginx layer proxying `/api` to the backend) — both
-  are acceptable, but the choice affects cookie/CSRF handling.
+- **`CORS_ORIGINS` is only needed for a cross-origin SPA.** In the shipped
+  topology the frontend nginx serves the SPA and proxies `/api` on the same
+  origin, so the allowlist can stay empty. If the SPA is deployed on a different
+  origin, set `CORS_ORIGINS` to that origin: `app.js` builds the allowlist from
+  `process.env.CORS_ORIGINS`, and an empty value refuses every cross-origin
+  `/api` request.
+- **SPA is served by nginx, not Express (by design).** `app.js` has no static
+  handler; the frontend image's nginx serves the build and proxies `/api` to the
+  backend. A separate origin/CDN is also supported but requires `CORS_ORIGINS`
+  (and `COOKIE_SECURE=true` for cookie auth over HTTPS).
 - **`log_1min` continuous aggregate is unused.** The 1-minute continuous
   aggregate exists but no endpoint reads from it. Consider serving dashboard
   overviews from it to reduce load on the raw hypertable.
@@ -990,18 +994,17 @@ docker compose -f docker-compose.dev.yml exec backend node scripts/seed-demo.js 
 ```bash
 git clone https://github.com/moesix/torque-dash-next.git
 cd torque-dash-next
-
-# **Required:** generate session keys (app crashes on startup if missing)
-export SESSION_KEYS="$(openssl rand -hex 24)"
-# **Required for production (2026 baseline):** upload API token for Torque
-# Pro authentication. Alternatively generate from the Settings UI after first
-# login (an env-set token overrides and locks the UI).
-export UPLOAD_API_TOKEN="$(openssl rand -hex 24)"
-
-docker compose up -d --build
+cp .env.example .env
+# edit .env: POSTGRES_PASSWORD, SESSION_KEYS (>=32 chars), UPLOAD_API_TOKEN
+docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 ```
 
 Then open **http://localhost:8080**.
+
+`docker-compose.build.yml` is a Compose override: it builds the backend and
+frontend images from this checkout instead of pulling them from GHCR. It must be
+passed *after* the base file (as above) so the `db` service and volumes from
+`docker-compose.yml` are included.
 
 - On first boot the backend creates the database tables, turns the `Logs` table
   into a TimescaleDB hypertable, and seeds the `Settings` row. Data is persisted
@@ -1018,6 +1021,8 @@ Then open **http://localhost:8080**.
 > TLS-terminating proxy. The compose defaults are for local/http use.
 
 ### Manual setup (fallback, without Docker)
+
+> Prefer Docker? Use the build override in [Build from source](#build-from-source) instead — it produces the same schema and services.
 
 **Backend**
 

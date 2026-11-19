@@ -659,6 +659,125 @@ describe('Upload hardening – repeated numeric params', () => {
     });
 });
 
+// ── Upload rejection logging — no token may reach a log line ──────────
+
+describe('Upload hardening – rejection logging', () => {
+    const VALID_QUERY_FOR_LOG = { eml: 'user@x.com', session: 'abc-123', v: 'Car' };
+
+    function captureWarnings() {
+        const original = console.warn;
+        const lines = [];
+        console.warn = (...args) => { lines.push(args.join(' ')); };
+        return {
+            lines,
+            rejected() {
+                return lines
+                    .filter((l) => l.startsWith('[upload] rejected '))
+                    .map((l) => JSON.parse(l.slice('[upload] rejected '.length)));
+            },
+            restore() { console.warn = original; },
+        };
+    }
+
+    test('missing bearer logs reason=missing_bearer', async () => {
+        stubHappyPath();
+        mockRuntime.token = 'aabbccdd11223344';
+        const spy = captureWarnings();
+        try {
+            const { res } = makeRes();
+            await UploadController.processUpload(makeReq(VALID_QUERY_FOR_LOG), res);
+            const rejected = spy.rejected();
+            assert.strictEqual(rejected.length, 1);
+            assert.strictEqual(rejected[0].reason, 'missing_bearer');
+        } finally {
+            spy.restore();
+        }
+    });
+
+    test('invalid bearer logs reason=invalid_bearer with no token material', async () => {
+        const CONFIGURED = 'S3CR3T-UPLOAD-TOKEN-9f2a';
+        stubHappyPath();
+        mockRuntime.token = CONFIGURED;
+        const spy = captureWarnings();
+        try {
+            const req = makeReq(VALID_QUERY_FOR_LOG);
+            req.headers.authorization = `Bearer ${'X'.repeat(CONFIGURED.length)}`;
+            const { res, calls } = makeRes();
+            await UploadController.processUpload(req, res);
+            assert.strictEqual(calls.statusCode, 401);
+            const rejected = spy.rejected();
+            assert.strictEqual(rejected.length, 1);
+            assert.strictEqual(rejected[0].reason, 'invalid_bearer');
+            const serialized = spy.lines.join('\n');
+            for (let i = 0; i + 8 <= CONFIGURED.length; i++) {
+                assert.ok(!serialized.includes(CONFIGURED.slice(i, i + 8)),
+                    'no 8-char slice of the configured token may reach the log');
+            }
+        } finally {
+            spy.restore();
+        }
+    });
+
+    test('unknown email logs reason=unknown_email', async () => {
+        stubHappyPath({ user: null });
+        const spy = captureWarnings();
+        try {
+            const { res, calls } = makeRes();
+            await UploadController.processUpload(makeReq(VALID_QUERY_FOR_LOG), res);
+            assert.strictEqual(calls.statusCode, 403);
+            const rejected = spy.rejected();
+            assert.strictEqual(rejected.length, 1);
+            assert.strictEqual(rejected[0].reason, 'unknown_email');
+            assert.strictEqual(rejected[0].eml, 'user@x.com');
+        } finally {
+            spy.restore();
+        }
+    });
+
+    test('bad session param logs reason=invalid_session_param', async () => {
+        stubHappyPath();
+        const spy = captureWarnings();
+        try {
+            const { res } = makeRes();
+            await UploadController.processUpload(makeReq({ eml: 'user@x.com' }), res);
+            const rejected = spy.rejected();
+            assert.strictEqual(rejected.length, 1);
+            assert.strictEqual(rejected[0].reason, 'invalid_session_param');
+        } finally {
+            spy.restore();
+        }
+    });
+
+    test('bad time param logs reason=invalid_time_param', async () => {
+        stubHappyPath();
+        const spy = captureWarnings();
+        try {
+            const { res } = makeRes();
+            await UploadController.processUpload(makeReq({
+                eml: 'user@x.com', session: 'abc-123', time: 'not-a-number',
+            }), res);
+            const rejected = spy.rejected();
+            assert.strictEqual(rejected.length, 1);
+            assert.strictEqual(rejected[0].reason, 'invalid_time_param');
+        } finally {
+            spy.restore();
+        }
+    });
+
+    test('a successful upload logs no rejection line', async () => {
+        stubHappyPath();
+        const spy = captureWarnings();
+        try {
+            const { res, calls } = makeRes();
+            await UploadController.processUpload(makeReq(VALID_QUERY_FOR_LOG), res);
+            assert.strictEqual(calls.statusCode, 200);
+            assert.strictEqual(spy.rejected().length, 0);
+        } finally {
+            spy.restore();
+        }
+    });
+});
+
 // ── Session-cache eviction on delete — exported evictSession seam ──────
 
 describe('Upload hardening – evictSession drops the cached session FK', () => {
