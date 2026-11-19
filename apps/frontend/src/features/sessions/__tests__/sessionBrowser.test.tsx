@@ -55,13 +55,13 @@ const ALL_SESSIONS = [...PAGE_0, ...PAGE_1, ...PAGE_2];
 const MOCK_PAGE_SIZE = 3;
 const CAR_PAGE_0 = [makeSession('v1', 'Car one'), makeSession('v2', 'Car two')];
 
-function renderBrowser() {
+function renderBrowser(initialEntries: string[] = ['/']) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
   return render(
     <QueryClientProvider client={client}>
-      <MemoryRouter>
+      <MemoryRouter initialEntries={initialEntries}>
         <SessionBrowser />
       </MemoryRouter>
     </QueryClientProvider>,
@@ -167,6 +167,21 @@ describe('SessionBrowser pagination (jsdom)', () => {
     expect(lastCall?.[2]).toBe('none');
     // The exact regression: no request may ever carry NaN as the filter.
     expect(getSessionsMock.mock.calls.some(([, , vehicleId]) => Number.isNaN(vehicleId))).toBe(false);
+  });
+
+  // Fleet overview deep link (`/?vehicleId=7`): the filter must initialize
+  // from the URL at mount, without an effect, and the first query must already
+  // be scoped to that vehicle.
+  it('initializes the vehicle filter from a vehicleId query param', async () => {
+    getVehiclesMock.mockResolvedValue([makeVehicle(7, 'Car Seven')]);
+    renderBrowser(['/?vehicleId=7']);
+
+    const select = (await screen.findByLabelText('Filter by vehicle:')) as HTMLSelectElement;
+    expect(select.value).toBe('7');
+
+    await waitFor(() =>
+      expect(getSessionsMock.mock.calls.some(([, , vehicleId]) => vehicleId === 7)).toBe(true),
+    );
   });
 
   // The server pages by offset, so shifting rows between requests can repeat a

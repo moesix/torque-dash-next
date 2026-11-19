@@ -141,6 +141,9 @@ router.patch('/sessions/:sessionId/vehicle', validateIds('sessionId'), authentic
 
 // ── Vehicle CRUD ──────────────────────────────────────────────────────
 router.get('/vehicles', authenticate, VehicleController.getAll);
+// Literal route MUST stay before '/vehicles/:vehicleId' — Express matches in
+// registration order, so otherwise "overview" is parsed as an id and rejected.
+router.get('/vehicles/overview', authenticate, VehicleController.overview);
 router.get('/vehicles/:vehicleId', validateIds('vehicleId'), authenticate, VehicleController.getOne);
 router.post('/vehicles', writeLimiter, authenticate, VehicleController.create);
 router.put('/vehicles/:vehicleId', validateIds('vehicleId'), writeLimiter, authenticate, VehicleController.update);

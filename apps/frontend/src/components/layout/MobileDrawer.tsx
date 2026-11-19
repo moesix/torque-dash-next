@@ -186,6 +186,14 @@ export default function MobileDrawer({ open, onClose }: Props) {
             Sessions
           </NavLink>
           <NavLink
+            to="/fleet"
+            end
+            onClick={onClose}
+            className={({ isActive }) => navLinkClass(isActive)}
+          >
+            Fleet
+          </NavLink>
+          <NavLink
             to="/settings"
             end
             onClick={onClose}

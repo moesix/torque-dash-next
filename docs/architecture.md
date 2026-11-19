@@ -1013,6 +1013,7 @@ See `docs/deployment.md` for the full deployment guide.
 | `POST /api/settings/upload-token` | cookie + **admin** | admin-only — generate a new upload API token (shown once); 403 for non-admins |
 | `POST /api/settings/test-llm` | cookie + **admin** | admin-only — test LLM connection (returns streaming response); 403 for non-admins |
 | `GET /api/vehicles` | cookie | list all vehicles for authenticated user |
+| `GET /api/vehicles/overview` | cookie | fleet overview per vehicle over `?days=` (clamped 1..365, default 90): `{ vehicleId, name, make, model, engineCc, sessionCount, lastActivityAt, maxRpm, maxSpeed }[]`; includes zero-session vehicles and an `Unassigned` row (`vehicleId: null`) when unassigned sessions exist. One `Session.findAll` over the denormalized summary columns — never a Logs scan. Registered before `/vehicles/:vehicleId`. |
 | `GET /api/vehicles/:vehicleId` | cookie | get a single vehicle |
 | `POST /api/vehicles` | cookie | create a new vehicle (body: `{ name, make?, model?, year?, engineCc? }`) |
 | `PUT /api/vehicles/:vehicleId` | cookie | update a vehicle (body: partial fields) |

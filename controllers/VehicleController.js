@@ -1,6 +1,7 @@
 const Vehicle = require('../models').Vehicle;
 const Session = require('../models').Session;
 const sequelize = require('../models').sequelize;
+const Op = require('../models').Sequelize.Op;
 const { vehicleCreateSchema, vehicleUpdateSchema } = require('../lib/validators');
 
 class VehicleController {
@@ -25,6 +26,120 @@ class VehicleController {
             });
             if (!vehicle) return res.status(404).json({ error: 'Vehicle not found' });
             res.json(vehicle);
+        } catch (err) {
+            next(err);
+        }
+    }
+
+    /**
+     * Fleet overview: per-vehicle activity/counts/maxima over a selectable
+     * window (Plan 021, DIR-06).
+     *
+     * Deliberately ONE `Session.findAll` over the denormalized summary columns
+     * (`firstTimestamp`/`lastTimestamp`/`maxRpm`/`maxSpeed`, migration 016) —
+     * never a `Logs` scan. Rows whose summary columns are still NULL (an
+     * ingest that never ran the summary pass) are counted but contribute no
+     * activity/maxima; there is intentionally no fallback scan.
+     *
+     * Every owned vehicle appears, including zero-session ones. Sessions with
+     * `vehicleId: null` are returned as an extra "Unassigned" row when present.
+     */
+    static async overview(req, res, next) {
+        try {
+            // Same clamp rule as the rest of the API: absent/invalid → 90.
+            const days = Math.min(Math.max(parseInt(req.query.days, 10) || 90, 1), 365);
+            const since = new Date(Date.now() - days * 86400e3);
+
+            const vehicles = await Vehicle.findAll({
+                where: { userId: req.user.id },
+                order: [['isDefault', 'DESC'], ['name', 'ASC']],
+            });
+
+            const rows = await Session.findAll({
+                where: {
+                    userId: req.user.id,
+                    lastTimestamp: { [Op.gte]: since },
+                },
+                attributes: [
+                    'vehicleId',
+                    'firstTimestamp',
+                    'lastTimestamp',
+                    'maxRpm',
+                    'maxSpeed',
+                ],
+            });
+
+            // Group in JS. `null` vehicleId collects the unassigned bucket.
+            const groups = new Map();
+            for (const row of rows) {
+                const key = row.vehicleId == null ? null : Number(row.vehicleId);
+                let g = groups.get(key);
+                if (!g) {
+                    g = { sessionCount: 0, lastActivityAt: null, maxRpm: null, maxSpeed: null };
+                    groups.set(key, g);
+                }
+                g.sessionCount += 1;
+
+                const last = row.lastTimestamp ? new Date(row.lastTimestamp) : null;
+                if (last && (!g.lastActivityAt || last > g.lastActivityAt)) {
+                    g.lastActivityAt = last;
+                }
+                // NULL maxima are ignored; a numeric string (driver nuance) is
+                // coerced. Never trust the raw value enough to compare blindly.
+                const rpm = row.maxRpm == null ? null : Number(row.maxRpm);
+                if (rpm != null && Number.isFinite(rpm) && (g.maxRpm == null || rpm > g.maxRpm)) {
+                    g.maxRpm = rpm;
+                }
+                const speed = row.maxSpeed == null ? null : Number(row.maxSpeed);
+                if (speed != null && Number.isFinite(speed) && (g.maxSpeed == null || speed > g.maxSpeed)) {
+                    g.maxSpeed = speed;
+                }
+            }
+
+            const out = vehicles.map((v) => {
+                const g = groups.get(v.id) || {
+                    sessionCount: 0,
+                    lastActivityAt: null,
+                    maxRpm: null,
+                    maxSpeed: null,
+                };
+                return {
+                    vehicleId: v.id,
+                    name: v.name,
+                    make: v.make,
+                    model: v.model,
+                    engineCc: v.engineCc,
+                    sessionCount: g.sessionCount,
+                    lastActivityAt: g.lastActivityAt,
+                    maxRpm: g.maxRpm,
+                    maxSpeed: g.maxSpeed,
+                };
+            });
+
+            const unassigned = groups.get(null);
+            if (unassigned && unassigned.sessionCount > 0) {
+                out.push({
+                    vehicleId: null,
+                    name: 'Unassigned',
+                    make: null,
+                    model: null,
+                    engineCc: null,
+                    sessionCount: unassigned.sessionCount,
+                    lastActivityAt: unassigned.lastActivityAt,
+                    maxRpm: unassigned.maxRpm,
+                    maxSpeed: unassigned.maxSpeed,
+                });
+            }
+
+            // Most recent activity first; zero-activity vehicles last.
+            out.sort((a, b) => {
+                const at = a.lastActivityAt ? a.lastActivityAt.getTime() : -Infinity;
+                const bt = b.lastActivityAt ? b.lastActivityAt.getTime() : -Infinity;
+                if (at !== bt) return bt - at;
+                return String(a.name).localeCompare(String(b.name));
+            });
+
+            res.json(out);
         } catch (err) {
             next(err);
         }

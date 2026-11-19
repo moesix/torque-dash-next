@@ -70,6 +70,25 @@ export interface Session {
   maxRpm?: number | null;
 }
 
+/** A row from `GET /api/vehicles/overview` — one owned vehicle (or the
+ *  `vehicleId: null` "Unassigned" bucket) aggregated over a day window.
+ *  `lastActivityAt` and the maxima are null for vehicles with no sessions in
+ *  the window, and when the denormalized summary columns are NULL. */
+export interface FleetRow {
+  vehicleId: number | null;
+  name: string;
+  make: string | null;
+  model: string | null;
+  engineCc: number | null;
+  sessionCount: number;
+  /** ISO timestamp of the newest session lastTimestamp in the window. */
+  lastActivityAt: string | null;
+  /** Peak RPM (unitless). */
+  maxRpm: number | null;
+  /** Peak vehicle speed in km/h (canonical; convert for display). */
+  maxSpeed: number | null;
+}
+
 /** A vehicle profile. */
 export interface Vehicle {
   id: number;

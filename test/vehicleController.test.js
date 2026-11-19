@@ -29,10 +29,38 @@ const mockModels = {
         findOne: async () => null,
         findAll: async () => [],
     },
+    // Stubs the rest of the model module so routes/api.js can be required by
+    // the route-order test below (the real routers pull every controller).
+    Log: {
+        findAll: async () => [],
+        findOne: async () => null,
+        count: async () => 0,
+    },
+    User: { findOne: async () => null, findAll: async () => [] },
+    Analysis: {
+        findAll: async () => [],
+        findOne: async () => null,
+        count: async () => 0,
+    },
+    Settings: { findOne: async () => null, findAll: async () => [] },
     sequelize: {
         transaction: async (fn) => {
             dbCalls.transactions += 1;
             return fn({ LOCK: { UPDATE: 'UPDATE' } });
+        },
+        query: async () => [],
+        fn: () => ({}),
+        col: () => ({}),
+    },
+    Sequelize: {
+        Op: {
+            and: Symbol('and'),
+            gt: Symbol('gt'),
+            gte: Symbol('gte'),
+            lte: Symbol('lte'),
+            or: Symbol('or'),
+            in: Symbol('in'),
+            ne: Symbol('ne'),
         },
     },
 };
@@ -72,14 +100,25 @@ function makeStubRes() {
 }
 
 // Per-test model wiring + recorders.
-function install({ vehicle = null, vehicleList = [], sessionUpdateResult = [0] } = {}) {
+function install({ vehicle = null, vehicleList = [], sessionUpdateResult = [0], sessionRows = [] } = {}) {
     dbCalls.transactions = 0;
-    const calls = { vehicleFindAll: [], vehicleFindOne: [], vehicleCreate: [], vehicleUpdate: [], sessionUpdate: [], destroys: [] };
+    const calls = {
+        vehicleFindAll: [],
+        vehicleFindOne: [],
+        vehicleCreate: [],
+        vehicleUpdate: [],
+        sessionUpdate: [],
+        sessionFindAll: [],
+        logFindAll: [],
+        destroys: [],
+    };
     mockModels.Vehicle.findAll = async (opts) => { calls.vehicleFindAll.push(opts); return vehicleList; };
     mockModels.Vehicle.findOne = async (opts) => { calls.vehicleFindOne.push(opts); return vehicle; };
     mockModels.Vehicle.create = async (attrs) => { calls.vehicleCreate.push(attrs); return attrs; };
     mockModels.Vehicle.update = async (patch, opts) => { calls.vehicleUpdate.push({ patch, opts }); return [1]; };
     mockModels.Session.update = async (patch, opts) => { calls.sessionUpdate.push({ patch, opts }); return sessionUpdateResult; };
+    mockModels.Session.findAll = async (opts) => { calls.sessionFindAll.push(opts); return sessionRows; };
+    mockModels.Log.findAll = async (opts) => { calls.logFindAll.push(opts); return []; };
     if (vehicle && typeof vehicle.destroy !== 'function') {
         vehicle.destroy = async () => { calls.destroys.push(vehicle.id); return vehicle; };
     }
@@ -307,5 +346,184 @@ describe('VehicleController (with mocked models)', () => {
         assert.deepStrictEqual(out.body, { error: 'Vehicle not found' });
         assert.strictEqual(calls.vehicleUpdate.length, 0, 'no unset for a foreign vehicle');
         assert.strictEqual(dbCalls.transactions, 1, 'the lookup still ran in a transaction');
+    });
+});
+
+// ── Fleet overview (Plan 021) ───────────────────────────────────────
+
+describe('VehicleController.overview (fleet aggregation)', () => {
+    test('aggregates per-vehicle activity/maxima over one Session query', async () => {
+        const vehicles = [
+            makeVehicle(1, { name: 'Alpha' }),
+            makeVehicle(2, { name: 'Beta' }),
+            makeVehicle(3, { name: 'Gamma' }),
+        ];
+        const rows = [
+            // Alpha: two normal rows plus one whose denormalized summary is NULL
+            // (counted, but contributes no activity/maxima).
+            { vehicleId: 1, lastTimestamp: new Date('2026-11-10T10:00:00Z'), maxRpm: 5000, maxSpeed: 100 },
+            { vehicleId: 1, lastTimestamp: new Date('2026-11-12T10:00:00Z'), maxRpm: 6200, maxSpeed: 140 },
+            { vehicleId: 1, lastTimestamp: null, maxRpm: null, maxSpeed: null },
+            // Beta: one session, all maxima NULL.
+            { vehicleId: 2, lastTimestamp: new Date('2026-11-15T10:00:00Z'), maxRpm: null, maxSpeed: null },
+            // Unassigned session.
+            { vehicleId: null, lastTimestamp: new Date('2026-11-14T10:00:00Z'), maxRpm: 3000, maxSpeed: 60 },
+        ];
+        const calls = install({ vehicleList: vehicles, sessionRows: rows });
+
+        const req = makeStubReq();
+        const { res, calls: out } = makeStubRes();
+        await VehicleController.overview(req, res);
+
+        // Owner scoping on both reads; exactly ONE session query.
+        assert.deepStrictEqual(calls.vehicleFindAll[0].where, { userId: 1 });
+        assert.strictEqual(calls.sessionFindAll.length, 1, 'one Session.findAll');
+        assert.deepStrictEqual(calls.sessionFindAll[0].where.userId, 1);
+        // Denormalized columns only — never Logs.
+        assert.deepStrictEqual(calls.sessionFindAll[0].attributes, [
+            'vehicleId',
+            'firstTimestamp',
+            'lastTimestamp',
+            'maxRpm',
+            'maxSpeed',
+        ]);
+        assert.strictEqual(calls.logFindAll.length, 0, 'overview must never scan Logs');
+
+        assert.strictEqual(out.statusCode, null);
+        const byId = new Map(out.body.map((r) => [r.vehicleId, r]));
+        // Zero-session vehicle is present (never dropped).
+        assert.deepStrictEqual(
+            { ...byId.get(3), lastActivityAt: null },
+            {
+                vehicleId: 3, name: 'Gamma', make: 'Toyota', model: 'Corolla',
+                engineCc: 1800, sessionCount: 0, lastActivityAt: null,
+                maxRpm: null, maxSpeed: null,
+            },
+        );
+        // NULL maxima are ignored, not replaced by a Logs scan.
+        const alpha = byId.get(1);
+        assert.strictEqual(alpha.sessionCount, 3, 'NULL-summary row is still counted');
+        assert.strictEqual(alpha.maxRpm, 6200);
+        assert.strictEqual(alpha.maxSpeed, 140);
+        assert.strictEqual(alpha.lastActivityAt.toISOString(), '2026-11-12T10:00:00.000Z');
+        // A vehicle whose only session has NULL summary columns keeps nulls.
+        assert.strictEqual(byId.get(2).sessionCount, 1);
+        assert.strictEqual(byId.get(2).maxRpm, null);
+        assert.strictEqual(byId.get(2).maxSpeed, null);
+        // Unassigned bucket appended because it has sessions.
+        const unassigned = byId.get(null);
+        assert.strictEqual(unassigned.name, 'Unassigned');
+        assert.strictEqual(unassigned.sessionCount, 1);
+        assert.strictEqual(unassigned.maxSpeed, 60);
+
+        // Most recent activity first, zero-activity vehicles last.
+        assert.deepStrictEqual(out.body.map((r) => r.vehicleId), [2, null, 1, 3]);
+    });
+
+    test('clamps days to 1..365 and filters Sessions by lastTimestamp', async () => {
+        const calls = install({ vehicleList: [], sessionRows: [] });
+        const lastSince = () => {
+            const where = calls.sessionFindAll[calls.sessionFindAll.length - 1].where;
+            assert.deepStrictEqual(where.userId, 1);
+            return where.lastTimestamp[mockModels.Sequelize.Op.gte];
+        };
+
+        let req = makeStubReq({ query: { days: '30' } });
+        let stub = makeStubRes();
+        await VehicleController.overview(req, stub.res);
+        let since = lastSince();
+        const thirtyDays = 30 * 86400e3;
+        assert.ok(Math.abs(Date.now() - thirtyDays - since.getTime()) < 5000, '30-day window');
+
+        req = makeStubReq({ query: { days: '9999' } });
+        stub = makeStubRes();
+        await VehicleController.overview(req, stub.res);
+        since = lastSince();
+        const year = 365 * 86400e3;
+        assert.ok(Math.abs(Date.now() - year - since.getTime()) < 5000, 'clamped to 365');
+
+        req = makeStubReq({ query: { days: '-5' } });
+        stub = makeStubRes();
+        await VehicleController.overview(req, stub.res);
+        since = lastSince();
+        assert.ok(Math.abs(Date.now() - 86400e3 - since.getTime()) < 5000, 'clamped to 1');
+    });
+
+    test('omits the Unassigned row when no unassigned session exists', async () => {
+        install({
+            vehicleList: [makeVehicle(1, { name: 'Alpha' })],
+            sessionRows: [{ vehicleId: 1, lastTimestamp: new Date(), maxRpm: 1, maxSpeed: 2 }],
+        });
+        const req = makeStubReq();
+        const { res, calls: out } = makeStubRes();
+        await VehicleController.overview(req, res);
+        assert.deepStrictEqual(out.body.map((r) => r.vehicleId), [1]);
+    });
+
+    test('route is registered before /vehicles/:vehicleId and returns 200', async () => {
+        // Source-order gate (STOP condition 3): the literal route must come
+        // first or Express treats "overview" as an :vehicleId.
+        const src = require('fs').readFileSync(
+            require.resolve('../routes/api.js'),
+            'utf8',
+        );
+        const overviewAt = src.indexOf("router.get('/vehicles/overview'");
+        const paramAt = src.indexOf("router.get('/vehicles/:vehicleId'");
+        assert.ok(overviewAt !== -1, 'overview route exists');
+        assert.ok(paramAt !== -1, ':vehicleId route exists');
+        assert.ok(overviewAt < paramAt, 'overview must be registered BEFORE :vehicleId');
+
+        // Runtime proof: boot the real router and dispatch the request. Auth is
+        // stubbed pass-through; models stay mocked (no DB).
+        const authPath = require.resolve('../middleware/auth');
+        const previousAuth = require.cache[authPath];
+        require.cache[authPath] = {
+            id: authPath,
+            filename: authPath,
+            loaded: true,
+            exports: (req, res, next) => next(),
+        };
+        const calls = install({
+            vehicleList: [makeVehicle(1, { name: 'Alpha' })],
+            sessionRows: [],
+        });
+        const router = require('../routes/api');
+        const req = {
+            method: 'GET',
+            url: '/vehicles/overview',
+            originalUrl: '/vehicles/overview',
+            path: '/vehicles/overview',
+            headers: {},
+            query: {},
+            params: {},
+            user: { id: 1 },
+            isAuthenticated: () => true,
+            ip: '127.0.0.1',
+            get: () => undefined,
+            app: { get: () => undefined },
+        };
+        const out = { statusCode: 200, body: null, headers: {} };
+        const res = {
+            status(code) { out.statusCode = code; return res; },
+            json(obj) { out.body = obj; return res; },
+            setHeader(k, v) { out.headers[k] = v; return res; },
+            set() { return res; },
+            end() { return res; },
+        };
+        let handled = false;
+        router(req, res, () => { handled = false; });
+        // The controller is async; let its microtasks settle before asserting.
+        await new Promise((resolve) => setImmediate(resolve));
+
+        if (previousAuth) require.cache[authPath] = previousAuth;
+        else delete require.cache[authPath];
+
+        assert.strictEqual(handled, false);
+        assert.strictEqual(out.statusCode, 200);
+        assert.ok(Array.isArray(out.body), 'overview returns an array');
+        assert.strictEqual(out.body[0].vehicleId, 1);
+        // The ordering bug would run getOne, which calls Vehicle.findOne.
+        assert.strictEqual(calls.vehicleFindOne.length, 0, ':vehicleId handler must not run');
+        assert.strictEqual(calls.vehicleFindAll.length, 1, 'overview handler did run');
     });
 });
