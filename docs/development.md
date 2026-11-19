@@ -592,7 +592,7 @@ under `all: true`, which is already priced into the floors above.
 ```sh
 cd apps/frontend
 npm test            # runs: vitest run
-npm run test:coverage  # vitest run --coverage (@vitest/coverage-v8; no floors yet)
+npm run test:coverage  # vitest run --coverage (@vitest/coverage-v8; enforces vitest.config.ts floors)
 npm run test:watch  # runs: vitest (watch mode)
 ```
 
@@ -602,6 +602,10 @@ need a DOM (chart/render tests, the print-flow regression) opt in per file with
 `// @vitest-environment jsdom`; pure-logic tests keep the default node
 environment. Vitest 5 also lifted the peer-range conflict that previously
 forced `--legacy-peer-deps` in CI.
+
+The coverage thresholds in `vitest.config.ts` are a **ratchet**, not a target:
+each is the measured baseline minus 2 points. Raise them by ~2 points per
+release once the baseline is stable — never pad tests just to clear a number.
 
 ### 9.4 CI Pipeline
 
@@ -614,8 +618,9 @@ or pull request to the `development` branch:
   run) → `npm run lint`; the coverage table is published to the job summary and
   `coverage/` is uploaded as a short-lived artifact.
 - **Frontend checks:** `npm ci` → `npm audit --omit=dev --audit-level=high` →
-  `npm run lint` (placeholder) → `npm test` (vitest) → `npx tsc --noEmit`
-  (typecheck) → `npm run build`.
+  `npm run lint` (placeholder) → `npm run test:coverage` (vitest plus the floor
+  gate) → `npx tsc --noEmit` (typecheck) → `npm run build`;
+  `apps/frontend/coverage/` is uploaded as a short-lived artifact.
 
 CI installs with plain `npm ci` — **no `--legacy-peer-deps`** (the Vitest 5
 upgrade removed the need). `CLAUDE.md` / `AGENTS.md` are **not tracked** (they

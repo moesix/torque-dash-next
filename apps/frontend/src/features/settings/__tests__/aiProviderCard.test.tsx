@@ -107,6 +107,28 @@ describe('AiProviderCard (jsdom)', () => {
     });
   });
 
+  it('sends a typed API key but never echoes it back into the input', async () => {
+    render(<AiProviderCard settings={settingsFixture()} onUpdate={vi.fn()} />);
+
+    const keyInput = screen.getByPlaceholderText(
+      /key set, leave blank to keep/,
+    ) as HTMLInputElement;
+    expect(keyInput.type).toBe('password');
+    expect(keyInput.value).toBe('');
+
+    fireEvent.change(keyInput, { target: { value: 'sk-secret-typed' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(updateMock).toHaveBeenCalledTimes(1));
+    expect(updateMock.mock.calls[0][0]).toMatchObject({
+      llmProvider: 'openai',
+      llmApiKey: 'sk-secret-typed',
+    });
+    // The key was sent once, then cleared — it is not kept in the DOM.
+    await waitFor(() => expect(keyInput.value).toBe(''));
+    expect(screen.queryByDisplayValue('sk-secret-typed')).toBeNull();
+  });
+
   it('keeps the endpoint for providers that need one (custom)', async () => {
     render(
       <AiProviderCard

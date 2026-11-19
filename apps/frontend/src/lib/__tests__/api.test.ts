@@ -39,6 +39,76 @@ describe('api module', () => {
     });
 });
 
+describe('request() auth redirect', () => {
+    afterEach(() => {
+        vi.unstubAllGlobals();
+    });
+
+    /** node-env test: `request()` only touches window.location on a 401. */
+    function stubWindowAt(pathname: string) {
+        const assign = vi.fn();
+        vi.stubGlobal('window', { location: { pathname, assign } });
+        return assign;
+    }
+
+    it('redirects to /login and throws ApiError 401 from a protected page', async () => {
+        const assign = stubWindowAt('/dashboard');
+        vi.stubGlobal('fetch', vi.fn(async () => new Response(
+            JSON.stringify({ error: 'Unauthorized' }),
+            { status: 401, headers: { 'Content-Type': 'application/json' } },
+        )));
+
+        const err = await api.getSessions().then(
+            () => { throw new Error('expected rejection'); },
+            (e: unknown) => e,
+        );
+
+        expect(assign).toHaveBeenCalledTimes(1);
+        expect(assign).toHaveBeenCalledWith('/login');
+        expect(err).toBeInstanceOf(api.ApiError);
+        expect((err as InstanceType<typeof api.ApiError>).status).toBe(401);
+    });
+
+    it('does not redirect when already on an auth page, but still throws', async () => {
+        const assign = stubWindowAt('/login');
+        vi.stubGlobal('fetch', vi.fn(async () => new Response(
+            JSON.stringify({ error: 'Unauthorized' }),
+            { status: 401, headers: { 'Content-Type': 'application/json' } },
+        )));
+
+        const err = await api.getSessions().then(
+            () => { throw new Error('expected rejection'); },
+            (e: unknown) => e,
+        );
+
+        expect(assign).not.toHaveBeenCalled();
+        expect(err).toBeInstanceOf(api.ApiError);
+        expect((err as InstanceType<typeof api.ApiError>).status).toBe(401);
+    });
+});
+
+describe('request() response parsing', () => {
+    afterEach(() => {
+        vi.unstubAllGlobals();
+    });
+
+    it('returns the parsed body for a JSON 200 and undefined for a 204', async () => {
+        const fetchMock = vi.fn()
+            .mockResolvedValueOnce(new Response(
+                JSON.stringify({ disableRegistration: true, tokenFromEnv: false }),
+                { status: 200, headers: { 'Content-Type': 'application/json' } },
+            ))
+            .mockResolvedValueOnce(new Response(null, { status: 204 }));
+        vi.stubGlobal('fetch', fetchMock);
+
+        await expect(api.getSettings()).resolves.toEqual({
+            disableRegistration: true,
+            tokenFromEnv: false,
+        });
+        await expect(api.updateSettings({ disableRegistration: true })).resolves.toBeUndefined();
+    });
+});
+
 describe('request() error body parsing', () => {
     afterEach(() => {
         vi.unstubAllGlobals();
