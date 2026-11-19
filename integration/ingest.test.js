@@ -269,7 +269,7 @@ test('upload → drain → sessions/telemetry/CSV/rename over the real routes', 
     const csvText = csvBytes.toString('utf8');
     const lines = csvText.trim().split('\n');
     const header = lines[0].replace('\ufeff', '').split(',');
-    for (const col of ['timestamp', 'lat (deg)', 'lon (deg)', 'engine_rpm', 'vehicle_speed (km/h)', 'kc', 'kd', 'k5 (°C)']) {
+    for (const col of ['timestamp', 'lat (deg)', 'lon (deg)', 'engine_rpm', 'vehicle_speed (km/h)', 'kc', 'kd (km/h)', 'k5 (°C)']) {
         assert.ok(header.includes(col), `CSV header missing ${col}`);
     }
     assert.strictEqual(lines.length, 6, 'one header row + five frame rows');

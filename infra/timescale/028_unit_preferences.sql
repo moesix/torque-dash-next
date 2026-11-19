@@ -6,10 +6,8 @@ ALTER TABLE "Users" ADD COLUMN IF NOT EXISTS "unitSystem" VARCHAR(16) NULL;
 -- in. NULL = unknown (historical rows). Not used for rendering the prose.
 ALTER TABLE "Analyses" ADD COLUMN IF NOT EXISTS "unitSystem" VARCHAR(16) NULL;
 
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'Users_unitSystem_check') THEN
-    ALTER TABLE "Users" ADD CONSTRAINT "Users_unitSystem_check"
-      CHECK ("unitSystem" IS NULL OR "unitSystem" IN ('metric','us','uk'));
-  END IF;
-END $$;
+-- The migration runner splits on ';' (no dollar-quote awareness), so use a
+-- plain ADD CONSTRAINT: a re-run hits Postgres' "already exists" error, which
+-- scripts/migrate.js treats as a benign idempotent skip.
+ALTER TABLE "Users" ADD CONSTRAINT "Users_unitSystem_check"
+  CHECK ("unitSystem" IS NULL OR "unitSystem" IN ('metric','us','uk'));
