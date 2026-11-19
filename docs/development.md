@@ -600,10 +600,14 @@ forced `--legacy-peer-deps` in CI.
 A **GitHub Actions** workflow (`.github/workflows/ci.yml`) runs on every push
 or pull request to the `development` branch:
 
-- **Backend checks:** `npm ci` → `npm run test:coverage` (the test suite plus the
-  c8 floor gate in one run) → `npm run lint`; the coverage table is published to
-  the job summary and `coverage/` is uploaded as a short-lived artifact.
-- **Frontend checks:** `npm ci` → `npm run lint` (placeholder) → `npm test` (vitest) → `npx tsc --noEmit` (typecheck) → `npm run build`.
+- **Backend checks:** `npm ci` → `npm audit --omit=dev --audit-level=high` (the
+  runtime-only advisory gate; dev advisories are deliberately excluded — see
+  §10) → `npm run test:coverage` (the test suite plus the c8 floor gate in one
+  run) → `npm run lint`; the coverage table is published to the job summary and
+  `coverage/` is uploaded as a short-lived artifact.
+- **Frontend checks:** `npm ci` → `npm audit --omit=dev --audit-level=high` →
+  `npm run lint` (placeholder) → `npm test` (vitest) → `npx tsc --noEmit`
+  (typecheck) → `npm run build`.
 
 CI installs with plain `npm ci` — **no `--legacy-peer-deps`** (the Vitest 5
 upgrade removed the need). `CLAUDE.md` / `AGENTS.md` are **not tracked** (they
@@ -688,6 +692,26 @@ pinned deployments.
 ## 10. Known Issues / Follow-up Items
 
 These are documented issues from code reviews. Severity is assigned per the review.
+
+### Accepted dependency advisories
+
+- **`picomatch` 4.0.7 ReDoS (GHSA-fc5q-39xc-vjpf) — accepted, dev-only.**
+  The advisory covers `<= 4.0.7` and 4.0.7 is the only published version
+  (verified 2026-11-19: `npm view picomatch version` → `4.0.7`; patched
+  versions: none). It reaches us through `lint-staged`, `vite`, `vitest`,
+  `fdir` and `tinyglobby`, all build/test tooling; nothing in the shipped
+  bundle parses attacker-controlled globs. `npm audit` propagates it to those
+  five packages, which is why the frontend reports 6 high dev advisories; the
+  runtime-only gate (`npm audit --omit=dev --audit-level=high`, the CI
+  "Audit runtime dependencies" step) is unaffected. Re-check on every
+  toolchain bump and remove this note when `picomatch > 4.0.7` is available.
+  Do **not** downgrade `vite`/`vitest` to satisfy `npm audit fix` — npm's
+  suggested "fix" here is `vite@6.2.7` / `vitest@3.1.4`, a real toolchain
+  regression for a fake mitigation.
+  - Note (2026-11-19): GitHub withdrew this advisory on Nov 18, 2026, but the
+    npm audit feed the registry serves has not caught up and still flags it.
+    Expect the frontend dev-audit count to drop to zero without a dependency
+    change once that propagates; delete the note then.
 
 ### Integration coverage / Express 5 prerequisite ✅ RESOLVED
 
