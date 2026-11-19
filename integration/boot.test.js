@@ -92,15 +92,33 @@ test('migrate.js alone boots a fresh database, twice, idempotently', async (t) =
               WHERE hypertable_name = 'Logs'`
         );
         const tracker = await client.query('SELECT count(*)::int AS n FROM _migrations');
+        const caggs = await client.query(
+            `SELECT view_name FROM timescaledb_information.continuous_aggregates
+              WHERE view_name = 'log_1min'`
+        );
+        const caggJobs = await client.query(
+            `SELECT job_id FROM timescaledb_information.jobs
+              WHERE proc_name = 'policy_refresh_continuous_aggregate'
+                AND hypertable_name = 'log_1min'`
+        );
+        const legacyView = await client.query(
+            "SELECT to_regclass('public.log_1min') AS oid"
+        );
         return {
             tables: tables.rows.map((r) => r.table_name).sort(),
             hypertables: hypertables.rowCount,
             migrations: tracker.rows[0].n,
+            caggs: caggs.rowCount,
+            caggJobs: caggJobs.rowCount,
+            legacyView: legacyView.rows[0].oid,
         };
     });
 
     assert.deepStrictEqual(schema.tables, [...APP_TABLES].sort(), 'migrations must create every app table');
     assert.strictEqual(schema.hypertables, 1, 'Logs must be a TimescaleDB hypertable');
+    assert.strictEqual(schema.caggs, 0, '029 must retire the unused log_1min continuous aggregate');
+    assert.strictEqual(schema.caggJobs, 0, '029 must remove the log_1min refresh policy job');
+    assert.strictEqual(schema.legacyView, null, 'no log_1min relation may survive the migration series');
     assert.ok(schema.migrations > 0, '_migrations must record applied files');
 
     const second = migrate();

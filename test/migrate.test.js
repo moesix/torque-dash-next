@@ -40,6 +40,7 @@ describe('migration loader', () => {
             '026_session_user_created_idx.sql',
             '027_vehicle_default_unique.sql',
             '028_unit_preferences.sql',
+            '029_drop_log1min.sql',
             'migrations/001_add_upload_token.sql',
             'migrations/002_backfill_pid_columns.sql',
             'migrations/003_recompute_session_summaries.sql',
@@ -133,6 +134,20 @@ describe('baseline schema', () => {
                 `024 must retype Sessions.${column}`
             );
         }
+        assert.ok(!/\$\$/.test(sql), 'no dollar-quoted blocks (the runner splits on ;)');
+    });
+
+    it('029_drop_log1min.sql removes the policy before dropping the aggregate', () => {
+        const sql = fs.readFileSync(path.join(SQL_DIR, '029_drop_log1min.sql'), 'utf8');
+        const policyAt = sql.indexOf(
+            "SELECT remove_continuous_aggregate_policy(to_regclass('log_1min'), if_exists => true)"
+        );
+        const guardAt = sql.indexOf("WHERE to_regclass('log_1min') IS NOT NULL;");
+        const dropAt = sql.indexOf('DROP MATERIALIZED VIEW IF EXISTS log_1min;');
+        assert.ok(policyAt !== -1, '029 must remove the refresh policy idempotently');
+        assert.ok(guardAt > policyAt, 'the policy call must be guarded by to_regclass(...) IS NOT NULL');
+        assert.ok(dropAt !== -1, '029 must drop the aggregate with IF EXISTS');
+        assert.ok(guardAt < dropAt, 'the policy must be removed before the aggregate is dropped');
         assert.ok(!/\$\$/.test(sql), 'no dollar-quoted blocks (the runner splits on ;)');
     });
 

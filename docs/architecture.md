@@ -151,8 +151,10 @@ which enforces ownership and returns
   older than 7 days (`add_compression_policy('"Logs"', INTERVAL '7 days')`).
   The migration temporarily disables compression during ALTER TABLE operations
   (TimescaleDB does not support ALTER on compressed hypertables).
-- **Continuous aggregate** `log_1min` (1-minute buckets of avg/max rpm & speed,
-  count) with a refresh policy. Currently **unused** by the API (Known Issues, LOW).
+- **Continuous aggregate** — a 1-minute bucket aggregate (avg/max rpm & speed,
+  count) was created by `001` but **retired by `029`**: it had no reader and its
+  refresh policy cost write amplification. A future overview feature must
+  define a new aggregate sized to that feature.
 
 > Columns are **camelCase** (`sessionId`, `engine_rpm`) because no
 > `underscore: true` is set; the SQL uses quoted identifiers accordingly.
@@ -163,7 +165,7 @@ order — top-level files (`001_log_hypertable.sql` … `020_analyses_created_id
 sort before the nested `migrations/` directory, so the legacy PID backfill
 (`migrations/002_backfill_pid_columns.sql`) is now discovered and applied after
 the numbered series (previously orphaned). The series is append-only and
-currently runs through **027**; see `infra/timescale/` for the authoritative
+currently runs through **029**; see `infra/timescale/` for the authoritative
 list rather than relying on this document:
 `017_user_admin.sql` adds `Users.isAdmin` (first-user bootstrap + lowest-id
 upgrade backfill), `018_drop_forward_urls.sql` drops the retired webhook
@@ -984,6 +986,7 @@ See `docs/deployment.md` for the full deployment guide.
 | `POST /api/users/change-password` | cookie | change password (requires currentPassword + newPassword; regenerates session) |
 | `POST /api/users/logout` | cookie | logout |
 | `GET /api/version` | none | returns `{ version: string }` from package.json |
+| `GET /api/status` | cookie + **admin** | operator status JSON — version, uptime, node runtime, ingest buffer depth, analyses-retention last run, retention policy presence, Timescale job state. Internal-network exposure only; 403 for non-admins. |
 | `GET /api/sessions?limit&offset` | cookie | list sessions (paginated: `{ sessions, total, limit, offset }`) |
 | `GET /api/sessions/:id` | cookie + owner | session metadata (no full logs) |
 | `GET /api/sessions/:sessionId/telemetry?from&to&limit` | cookie + owner | paged telemetry frames |
@@ -1010,6 +1013,7 @@ See `docs/deployment.md` for the full deployment guide.
 | `POST /api/settings/upload-token` | cookie + **admin** | admin-only — generate a new upload API token (shown once); 403 for non-admins |
 | `POST /api/settings/test-llm` | cookie + **admin** | admin-only — test LLM connection (returns streaming response); 403 for non-admins |
 | `GET /api/vehicles` | cookie | list all vehicles for authenticated user |
+| `GET /api/vehicles/overview` | cookie | fleet overview per vehicle over `?days=` (clamped 1..365, default 90): `{ vehicleId, name, make, model, engineCc, sessionCount, lastActivityAt, maxRpm, maxSpeed }[]`; includes zero-session vehicles and an `Unassigned` row (`vehicleId: null`) when unassigned sessions exist. One `Session.findAll` over the denormalized summary columns — never a Logs scan. Registered before `/vehicles/:vehicleId`. |
 | `GET /api/vehicles/:vehicleId` | cookie | get a single vehicle |
 | `POST /api/vehicles` | cookie | create a new vehicle (body: `{ name, make?, model?, year?, engineCc? }`) |
 | `PUT /api/vehicles/:vehicleId` | cookie | update a vehicle (body: partial fields) |

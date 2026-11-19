@@ -11,6 +11,7 @@ import type {
   TestLlmResponse,
   Vehicle,
   UpdateVehicle,
+  FleetRow,
   UnitSystem,
   UserPreferences,
 } from './types';
@@ -468,6 +469,13 @@ export async function deleteVehicle(id: number): Promise<void> {
 /** Set a vehicle as default. */
 export async function setDefaultVehicle(id: number): Promise<Vehicle | undefined> {
   return request<Vehicle>(`/api/vehicles/${id}/default`, { method: 'PATCH' });
+}
+
+/** Fleet overview: per-vehicle session counts + maxima over the last `days`
+ *  days (server clamps to 1..365; default 90). Includes zero-session vehicles
+ *  and an "Unassigned" row (vehicleId null) when unassigned sessions exist. */
+export async function getFleetOverview(days = 90): Promise<FleetRow[] | undefined> {
+  return request<FleetRow[]>(`/api/vehicles/overview?days=${days}`);
 }
 
 /** Reassign a session to a different vehicle. */

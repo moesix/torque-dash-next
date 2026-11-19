@@ -10,6 +10,7 @@ const UserController = require('../controllers/UserController');
 const VehicleController = require('../controllers/VehicleController');
 const TelemetryController = require('../controllers/TelemetryController');
 const AnalysisController = require('../controllers/AnalysisController');
+const StatusController = require('../controllers/StatusController');
 const runtime = require('../config/runtime');
 const { validateIds } = require('../lib/validators');
 
@@ -111,6 +112,11 @@ router.get('/version', (req, res) => {
 // or /settings, which have their own limiters above).
 router.use(makeLimiter(rateLimits.global));
 
+// ── OPERATOR STATUS ─────────────────────────────────────────────────
+// Authenticated at the route; admin-gated INSIDE the controller (the real
+// admin helper), matching the settings-mutation pattern.
+router.get('/status', authenticate, StatusController.get);
+
 router.post('/users/register', authLimiter, UserController.register);
 router.post('/users/login', authLimiter, UserController.login);
 router.post('/users/logout', UserController.logout);
@@ -135,6 +141,9 @@ router.patch('/sessions/:sessionId/vehicle', validateIds('sessionId'), authentic
 
 // ── Vehicle CRUD ──────────────────────────────────────────────────────
 router.get('/vehicles', authenticate, VehicleController.getAll);
+// Literal route MUST stay before '/vehicles/:vehicleId' — Express matches in
+// registration order, so otherwise "overview" is parsed as an id and rejected.
+router.get('/vehicles/overview', authenticate, VehicleController.overview);
 router.get('/vehicles/:vehicleId', validateIds('vehicleId'), authenticate, VehicleController.getOne);
 router.post('/vehicles', writeLimiter, authenticate, VehicleController.create);
 router.put('/vehicles/:vehicleId', validateIds('vehicleId'), writeLimiter, authenticate, VehicleController.update);
