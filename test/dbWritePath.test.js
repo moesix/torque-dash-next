@@ -8,20 +8,9 @@ const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');
 
-// ── 1. Test that join SQL includes ON CONFLICT DO NOTHING ─────────────
-describe('SessionController join — ON CONFLICT DO NOTHING', () => {
-  test('join INSERT…SELECT includes ON CONFLICT clause', () => {
-    const src = fs.readFileSync(
-      path.resolve(__dirname, '../controllers/SessionController.js'),
-      'utf8'
-    );
-    const matches = src.match(/ON CONFLICT \("sessionId", timestamp\) DO NOTHING/g);
-    assert.ok(matches, 'Expected ON CONFLICT clause in join SQL');
-    assert.ok(matches.length >= 2, `Expected ≥2 ON CONFLICT matches, got ${matches.length}`);
-  });
-});
+// Join ON CONFLICT is asserted behaviourally in integration/sessionMutations.test.js.
 
-// ── 2. Test that flush chunks rows into ≤1000-row batches ────────────
+// ── 1. Test that flush chunks rows into ≤1000-row batches ────────────
 describe('ingestBuffer.flush — chunked bulkCreate', () => {
   test('flush with >1000 rows calls bulkCreate multiple times (ceil(rows/1000))', async () => {
     let bulkCreateCallCount = 0;
