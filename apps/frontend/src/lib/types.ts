@@ -13,6 +13,18 @@
  * frames are still fetched separately via `GET /api/sessions/:id/telemetry`.
  */
 
+/** Display unit system. Stored telemetry is always metric-canonical. */
+export type UnitSystem = 'metric' | 'us' | 'uk';
+
+/** GET/PUT /api/users/preferences response. `unitSystem` is the resolved
+ *  value (user → DEFAULT_UNIT_SYSTEM → metric); `preference` is the raw user
+ *  choice (null = inherit the server default). */
+export interface UserPreferences {
+  unitSystem: UnitSystem;
+  serverDefault: UnitSystem;
+  preference: UnitSystem | null;
+}
+
 /** Normalized telemetry frame as consumed by the UI. */
 export interface TelemetryFrame {
   timestamp: string;

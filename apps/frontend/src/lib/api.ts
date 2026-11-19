@@ -11,6 +11,8 @@ import type {
   TestLlmResponse,
   Vehicle,
   UpdateVehicle,
+  UnitSystem,
+  UserPreferences,
 } from './types';
 
 /**
@@ -233,6 +235,22 @@ export async function getSettings(): Promise<PublicSettings | undefined> {
  *  hasLlmProvider / llmProvider / hasLlmApiKey MUST use this one. */
 export async function getFullSettings(): Promise<Settings | undefined> {
   return request<Settings>('/api/settings/full');
+}
+
+/** Per-user display preferences (plan 045). `unitSystem` is resolved; the
+ *  raw choice is `preference` (null = inherit the server default). */
+export async function getPreferences(): Promise<UserPreferences | undefined> {
+  return request<UserPreferences>('/api/users/preferences');
+}
+
+/** Save the unit system. `null` clears it back to inherit DEFAULT_UNIT_SYSTEM. */
+export async function updatePreferences(
+  unitSystem: UnitSystem | null,
+): Promise<UserPreferences | undefined> {
+  return request<UserPreferences>('/api/users/preferences', {
+    method: 'PUT',
+    body: JSON.stringify({ unitSystem }),
+  });
 }
 
 export async function updateSettings(

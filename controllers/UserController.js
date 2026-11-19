@@ -75,6 +75,7 @@ class UserController {
             return res.json({
                 unitSystem: resolveUnitSystem(req.user.unitSystem, serverDefault),
                 serverDefault,
+                preference: req.user.unitSystem ?? null,
             });
         } catch (err) {
             next(err);
@@ -108,6 +109,7 @@ class UserController {
             return res.json({
                 unitSystem: resolveUnitSystem(unitSystem, serverDefault),
                 serverDefault,
+                preference: unitSystem,
             });
         } catch (err) {
             next(err);

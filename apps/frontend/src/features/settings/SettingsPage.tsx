@@ -8,9 +8,12 @@ import Badge from '@/components/ui/Badge';
 import AiProviderCard from './AiProviderCard';
 import MapBasemapCard from './MapBasemapCard';
 import VehicleManager from './VehicleManager';
+import UnitsCard from './UnitsCard';
 import AnalysisHistory from '@/components/ai/AnalysisHistory';
+import { useUnits } from '@/app/unitSystem';
 
 export default function SettingsPage() {
+  const { serverDefault } = useUnits();
   const [disableRegistration, setDisableRegistration] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -139,6 +142,9 @@ export default function SettingsPage() {
         <p className="mt-1 text-sm leading-relaxed dark:text-[var(--text-secondary)]">Global site configuration.</p>
       </div>
 
+      {/* Per-user units — rendered for every user, admins or not. */}
+      <UnitsCard />
+
       {isAdmin === false ? (
         <div className="card">
           <p className="text-sm leading-relaxed font-medium">Account</p>
@@ -172,6 +178,11 @@ export default function SettingsPage() {
         {saved ? (
           <p className="mt-3 text-sm leading-relaxed text-emerald-600 dark:text-emerald-400">Saved.</p>
         ) : null}
+        <p className="mt-3 text-xs leading-relaxed text-gray-500 dark:text-[var(--text-muted)]">
+          Server default:{' '}
+          {serverDefault === 'us' ? 'US customary' : serverDefault === 'uk' ? 'UK' : 'Metric'}{' '}
+          (<code className="font-mono">DEFAULT_UNIT_SYSTEM</code>)
+        </p>
       </div>
 
       <div className="card">

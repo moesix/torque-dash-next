@@ -10,8 +10,9 @@
  * Bare `°` is NEVER temperature — only °C/°F (and C/F) are.
  */
 import unitsData from './units.json';
+import type { UnitSystem } from './types';
 
-export type UnitSystem = 'metric' | 'us' | 'uk';
+export type { UnitSystem };
 export type UnitKind =
   | 'speed'
   | 'distance'

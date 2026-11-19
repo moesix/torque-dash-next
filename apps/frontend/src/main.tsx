@@ -3,6 +3,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { queryClient } from '@/app/queryClient';
+import { UnitSystemProvider } from '@/app/unitSystem';
 import App from '@/App';
 import { applyTheme, getTheme } from '@/lib/theme';
 
@@ -12,7 +13,9 @@ applyTheme(getTheme());
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
-      <App />
+      <UnitSystemProvider>
+        <App />
+      </UnitSystemProvider>
     </QueryClientProvider>
   </React.StrictMode>,
 );
