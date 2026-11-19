@@ -396,3 +396,28 @@ docker compose down -v
   proxies `/api` to it.
 - **frontend** — Unprivileged Nginx serving the React SPA. Proxies `/api`
   requests to the backend.
+
+---
+
+## 10. PWA / offline behaviour
+
+The frontend ships a hand-rolled service worker (`dist/sw.js`, generated at
+build time from `apps/frontend/scripts/sw-template.js`; no Workbox).
+
+- **Registration is production-only** (`import.meta.env.PROD`), so `vite dev`
+  and HMR are unaffected. It registers on `window.load` at scope `/`.
+- **App data is never cached**: every `/api/**` request (telemetry, sessions,
+  auth) is network-only, as are all non-GET and cross-origin requests. Nothing
+  personal is written to Cache Storage in a possibly shared browser.
+- **Static assets are cache-first**: the hashed `/assets/*.js|css` emitted into
+  `index.html` are precached into `tdn-shell`; other same-origin GETs are
+  cached on first use and served cache-first afterwards. Hashes make
+  invalidation automatic.
+- **Navigations are network-first** with the cached app shell (`/index.html`)
+  as fallback, so a flaky in-car connection still paints after one visit.
+- **Updates** land on the next visit after a deploy (a stale shell is served for
+  at most one navigation while the new worker installs and claims clients).
+- **nginx serves `/sw.js` with `Cache-Control: no-cache`** so the browser
+  revalidates the worker itself on every navigation.
+- Offline API caching is deliberately **not** enabled; enabling it is a
+  separate privacy decision.
