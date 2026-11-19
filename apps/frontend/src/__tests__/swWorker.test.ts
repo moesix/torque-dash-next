@@ -12,7 +12,7 @@ import { describe, expect, it } from 'vitest';
 const ORIGIN = 'https://dash.test';
 const TEMPLATE = readFileSync(new URL('../../scripts/sw-template.js', import.meta.url), 'utf8');
 const PRECACHE = ['/', '/index.html', '/assets/index-abc123.js', '/assets/index-abc123.css', '/manifest.webmanifest', '/favicon.svg'];
-const CODE = TEMPLATE.replace('__PRECACHE__', JSON.stringify(PRECACHE)).replace('__BUILD__', 'testbuild');
+const CODE = TEMPLATE.replace('__PRECACHE__', JSON.stringify(PRECACHE)).split('__BUILD__').join('testbuild');
 
 interface FakeResponse {
   ok: boolean;
@@ -40,6 +40,7 @@ function boot(fetchImpl: (req: unknown) => Promise<FakeResponse> = async () => r
     return raw.startsWith('/') ? new URL(raw, ORIGIN).href : raw;
   };
   const fetched: string[] = [];
+  const puts: string[] = [];
   let claimCalled = false;
   const handlers: Record<string, (ev: any) => void> = {};
 
@@ -48,6 +49,7 @@ function boot(fetchImpl: (req: unknown) => Promise<FakeResponse> = async () => r
       for (const u of urls) store.set(norm(u), response());
     },
     put: async (key: unknown, res: FakeResponse) => {
+      puts.push(norm(key));
       store.set(norm(key), res);
     },
   };
@@ -101,7 +103,7 @@ function boot(fetchImpl: (req: unknown) => Promise<FakeResponse> = async () => r
     return { responded, result: responded ? await responded : undefined };
   }
 
-  return { store, deleted, fetched, fire, claimCalled: () => claimCalled, caches };
+  return { store, deleted, fetched, puts, fire, claimCalled: () => claimCalled, caches };
 }
 
 describe('generated service worker', () => {
@@ -166,6 +168,17 @@ describe('generated service worker', () => {
     expect(sw.fetched).toEqual([`${ORIGIN}/sessions/42`]);
     await flush();
     expect(sw.store.has(`${ORIGIN}/index.html`)).toBe(true);
+    expect(sw.puts).toContain(`${ORIGIN}/index.html`);
+  });
+
+  it('does not cache a non-OK navigation response', async () => {
+    const notFound = { ...response(false), status: 404 };
+    const sw = boot(async () => notFound);
+    const { result } = await sw.fire('fetch', request(`${ORIGIN}/sessions/missing`, 'GET', 'navigate'));
+    await flush();
+    expect(result).toBe(notFound); // error response passed through untouched
+    expect(sw.puts).not.toContain(`${ORIGIN}/index.html`);
+    expect(sw.store.has(`${ORIGIN}/index.html`)).toBe(false);
   });
 
   it('navigation falls back to the cached shell when offline', async () => {
@@ -178,15 +191,27 @@ describe('generated service worker', () => {
     expect(result).toBe(shell);
   });
 
-  it('activate drops old tdn-* caches and claims clients', async () => {
+  it('activate keeps the current versioned cache, drops legacy tdn-old, claims clients', async () => {
     const sw = boot();
-    sw.store.set('tdn-shell', response());
+    sw.store.set('tdn-shell-testbuild', response());
     sw.store.set('tdn-old', response());
     sw.store.set('other-cache', response());
     await sw.fire('activate');
     expect(sw.deleted).toEqual(['tdn-old']);
-    expect(sw.store.has('tdn-shell')).toBe(true);
+    expect(sw.store.has('tdn-shell-testbuild')).toBe(true);
     expect(sw.store.has('other-cache')).toBe(true);
     expect(sw.claimCalled()).toBe(true);
+  });
+
+  it('activate drops a previous build\'s shell cache', async () => {
+    const sw = boot();
+    sw.store.set('tdn-shell-testbuild', response());
+    sw.store.set('tdn-shell-OLD', response());
+    sw.store.set('other-cache', response());
+    await sw.fire('activate');
+    expect(sw.deleted).toEqual(['tdn-shell-OLD']);
+    expect(sw.store.has('tdn-shell-testbuild')).toBe(true);
+    expect(sw.store.has('tdn-shell-OLD')).toBe(false);
+    expect(sw.store.has('other-cache')).toBe(true);
   });
 });

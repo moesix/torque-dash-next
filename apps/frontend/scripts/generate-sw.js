@@ -29,7 +29,9 @@ const precache = ['/', '/index.html', ...assets, '/manifest.webmanifest', '/favi
 const buildId = createHash('sha256').update(JSON.stringify(precache)).digest('hex').slice(0, 16);
 
 const template = await readFile(path.join(root, 'sw-template.js'), 'utf8');
-const sw = template.replace('__PRECACHE__', JSON.stringify(precache)).replace('__BUILD__', buildId);
+const sw = template
+  .replace('__PRECACHE__', JSON.stringify(precache))
+  .split('__BUILD__').join(buildId); // build comment + versioned cache name
 
 await writeFile(path.join(dist, 'sw.js'), sw);
 
