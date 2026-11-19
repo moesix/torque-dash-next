@@ -62,7 +62,7 @@ Set these at the backend repo root (`.env` or exported in the shell).
 | `DATABASE_URL` | **yes** | **REQUIRED** — no default | Postgres/TimescaleDB connection string. App **crashes on startup** if missing. Also used by `scripts/migrate.js`. |
 | `CORS_ORIGINS` | prod | `''` (empty) | Comma-separated list of SPA origins allowed to call `/api` **with cookies** (e.g. `https://app.example.com`). An empty value blocks all cross-origin SPA calls (see Known Issues, LOW). |
 | `COOKIE_SECURE` | prod | unset (`lax`) | Set `true` in production to set `sameSite:none; secure` on the session cookie (required for cross-origin SPA auth). Dev (same-origin) keeps `lax` and works without HTTPS. `SameSite` is derived from this variable in `app.js` — there is no separate `COOKIE_SAMESITE`. **Set `COOKIE_SECURE=true` / terminate TLS at the edge before using BYOK LLM keys** — an unencrypted deployment would ship LLM API keys over plain HTTP. |
-| `NODE_ENV` | no | unset | Optional. `production` skips the **app-internal** `sequelize.sync()` in `app.js`; any other value runs it on boot. This does NOT stop the Docker CMD bootstrap — the image runs an idempotent `sequelize.sync()` before `scripts/migrate.js` on **every** boot regardless of NODE_ENV. Migrations are authoritative for the schema objects they define (base tables and TimescaleDB-specific DDL); the CMD's sync step is belt-and-braces only. |
+| `NODE_ENV` | no | unset | Optional. `production` skips the **app-internal** `sequelize.sync()` in `app.js`; any other value runs it on boot. The Docker CMD does not sync at all — it runs `node scripts/migrate.js && node app.js`, independent of NODE_ENV. Migrations are the sole owner of the schema in production. |
 | `PORT` | no | `3000` | Backend listen port. |
 | `SESSION_KEYS` | **yes** | **REQUIRED** — no default | express-session secrets (array accepted via comma-separated string). App **crashes on startup** if missing or if a placeholder value is used. Generate with `openssl rand -hex 24`. |
 | `PUBLIC_ORIGIN` | no | unset | Optional. Overrides the expected CSRF origin. Set to the browser-visible origin (e.g. `https://app.example.com`) when nginx terminates HTTPS but forwards HTTP to the backend, so `X-Forwarded-Proto` doesn't mislead the origin check. |
@@ -99,16 +99,16 @@ and `022` (it had to drop the sync-created UNIQUE *constraint* before its index
 — every statement is `IF EXISTS`, so re-runs are no-ops).
 
 **In Docker, migrations run automatically.** The backend container's CMD
-(`Dockerfile`) executes `node scripts/migrate.js` at every container start,
-so `docker compose up -d` applies any pending migrations — no manual step
-needed for Docker deployments. The CMD first runs an idempotent
-`sequelize.sync()` bootstrap **unconditionally** (regardless of NODE_ENV) as
-belt-and-braces; migrations also create the `Logs` baseline themselves
+(`Dockerfile`) runs `node scripts/migrate.js && node app.js` at every container
+start, so `docker compose up -d` applies any pending migrations — no manual
+step needed for Docker deployments. The migrations are the sole owner of the
+production schema: the `000` files create the `Logs` baseline
 (`000_baseline_tables.sql`) and `Users`/`Sessions`
-(`000_users_sessions_baseline.sql`), so an empty database migrates with or
-without that sync. migrate.js then applies the TimescaleDB-specific DDL (`Logs` hypertable, continuous
-aggregate) and seeds Settings. A manual run is only required for **non-Docker
-(manual) setups**:
+(`000_users_sessions_baseline.sql`), `001` applies the TimescaleDB-specific DDL
+(`Logs` hypertable, continuous aggregate), and the later files seed and extend
+Settings. Production boots migrations-only; `sequelize.sync()` runs only when
+`NODE_ENV != production` (`app.js`). A manual run is only required for
+**non-Docker (manual) setups**:
 
 ```sh
 node scripts/migrate.js
@@ -126,23 +126,28 @@ The script:
    missing relation aborts the run. Every base table has an owning migration
    (`000_baseline_tables.sql` for `Logs`, `000_users_sessions_baseline.sql` for
    `Users`/`Sessions`, then `002`/`004`/`009`), and those files sort before the
-   migrations that reference them, so **fresh installs are supported in both
-   boot shapes**: with a preceding `sequelize.sync()` (Docker; the SQL then
-   no-ops) and sync-less (`node scripts/migrate.js` on an empty database). The
-   CI `migrate-checks` job runs the sync-less path twice on every push/PR to
-   `development`. A file is marked applied in the tracker only once all its
-   statements succeed.
+   migrations that reference them, so **fresh installs work sync-less**
+   (`node scripts/migrate.js` on an empty database), which is exactly what
+   production does. The CI `migrate-checks` job runs that path twice on every
+   push/PR to `development`. A file is marked applied in the tracker only once
+   all its statements succeed **and** its post-conditions hold (`001`'s
+   constraints/indexes are verified after the file runs; a benign skip alone is
+   never recorded as success).
 
 **Upgrading a migrations-only database:** before booting a release that adds the
 `Logs.sessionId` foreign key (`000_users_sessions_baseline.sql`), check for orphaned rows:
 `SELECT count(*) FROM "Logs" l LEFT JOIN "Sessions" s ON s.id = l."sessionId" WHERE s.id IS NULL;`
 A non-zero count makes the validating FK add fail (non-benign) and the container will not start;
-clean the orphans first. Sync-created databases already carry the constraint and skip benignly.
+clean the orphans first. Sync-created databases (dev/test only) already carry the
+constraint and skip benignly. Databases created by a pre-025 image may carry the
+sync-shaped `Sessions.userId` constraint (`ON DELETE SET NULL`); new installs get
+`ON DELETE CASCADE` from the baseline migration. Sessions still cascade when a
+user row is deleted — that is the migration's contract.
 
 **Known model ↔ migration differences (accepted).** These predate this
 ordering baseline and are recorded rather than silently changed:
 
-| Difference | Sync-created database | Migration-created database |
+| Difference | Dev/test sync shape (`app.js` non-prod only) | Migration-created database (production) |
 | --- | --- | --- |
 | `Sessions.userId` foreign key | `ON DELETE SET NULL` (Sequelize `belongsTo` default) | `ON DELETE CASCADE` (`013` / `000_users_sessions_baseline`) |
 | `Sessions.vehicleId` foreign key | present, `ON DELETE SET NULL` (from `Session.belongsTo(Vehicle)` — `009`'s `ADD COLUMN IF NOT EXISTS` then skips) | absent: `009`'s `ADD COLUMN IF NOT EXISTS` skips because the baseline already created the column, so no FK is ever added |
@@ -151,9 +156,11 @@ ordering baseline and are recorded rather than silently changed:
 | `Settings.id` default | `DEFAULT 1` (model) | no column default; `002` seeds the singleton row explicitly |
 
 Changing any of these means a new numbered migration (never an edit to `009` /
-`013`); the sync-created shape only exists for dev/test builds.
+`013`). Production boots migrations-only (`Dockerfile` CMD); `sequelize.sync()`
+runs only when `NODE_ENV != production` (`app.js`), so the sync shape is dev/test
+only and never the schema a deployment runs.
 
-**Current migration files** — top-level series `000`–`024` (in execution order):
+**Current migration files** — top-level series `000`–`025` (in execution order):
 
 | File | Purpose |
 | --- | --- |
@@ -183,6 +190,7 @@ Changing any of these means a new numbered migration (never an edit to `009` /
 | `022_remove_share_surface.sql` | Drops the retired `Users.shareId` column and its unique index (pre-existing databases; a no-op on fresh installs) |
 | `023_user_admin_guarded.sql` | Re-runs 017's lowest-id promotion only when no admin exists, so a fresh-install re-run cannot promote a second account |
 | `024_session_max_types.sql` | Retypes `Sessions.maxRpm` / `maxSpeed` to `DOUBLE PRECISION` where an older sync created them as `INTEGER` (`016`'s `ADD COLUMN IF NOT EXISTS` cannot) |
+| `025_settings_timestamps.sql` | Adds `Settings."createdAt"` / `"updatedAt"` on databases whose `002` was applied before those columns existed (idempotent; no-op on fresh installs) |
 
 Nested under `migrations/`: `001_add_upload_token.sql` (no-op placeholder) and
 `002_backfill_pid_columns.sql` — the legacy `engine_rpm`/`vehicle_speed`
@@ -208,9 +216,8 @@ built into Node, so local dev and the container behave identically.
 
 - In non-production, the server runs its own `sequelize.sync()` then listens on `PORT`.
 - In production (`NODE_ENV=production`), the server skips its own `sequelize.sync()`.
-- When run from the Docker image, the CMD additionally runs an idempotent
-  `sequelize.sync()` bootstrap before `scripts/migrate.js` on every boot —
-  regardless of NODE_ENV (see §4).
+- The Docker image's CMD runs `node scripts/migrate.js` before `node app.js` and
+  never syncs — migrations own the schema in production (see §4).
 - `/health` returns `{ status: 'ok', ts }` for probes.
 
 ---
@@ -719,8 +726,9 @@ These are documented issues from code reviews. Severity is assigned per the revi
 TimescaleDB through `node scripts/migrate.js` only — no `sequelize.sync()` — and
 drives upload → ingest → sessions → telemetry → CSV → delete → re-upload over
 the real routers and models. The migrate boot path is covered end-to-end and
-sync remains dev-only belt-and-braces (the dev `sequelize.sync()` path exercises
-the same model contracts, so the Express 5 migration prerequisite is met).
+sync is dev-only (`app.js` runs it when `NODE_ENV != production`; the path
+exercises the same model contracts, so the Express 5 migration prerequisite is
+met).
 The suite is fail-closed in CI: `CI=true` turns a missing `DATABASE_URL` /
 `SESSION_KEYS` or an unreachable database into a failure instead of a skip.
 

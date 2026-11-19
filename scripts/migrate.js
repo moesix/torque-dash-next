@@ -50,6 +50,49 @@ function isBenignError(err) {
 }
 
 /**
+ * Objects each migration file is responsible for creating. A benign "already
+ * exists" skip is only trustworthy if the object it was meant to create is
+ * actually present: on a compressed hypertable, for example, a statement can
+ * be skipped for a reason unrelated to idempotency. Checked after the file's
+ * statements run; a missing object fails the run instead of recording a file
+ * whose DDL never landed.
+ *
+ * Only 001 is checked today (the plan's scope); adding a file here is additive.
+ */
+const POST_CONDITIONS = {
+    '001_log_hypertable.sql': [
+        {
+            object: 'Logs_pkey',
+            sql: "SELECT 1 FROM pg_constraint WHERE conname = 'Logs_pkey'",
+        },
+        {
+            object: 'logs_session_timestamp_uniq',
+            sql: "SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND indexname = 'logs_session_timestamp_uniq'",
+        },
+        {
+            object: 'logs_session_time_idx',
+            sql: "SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND indexname = 'logs_session_time_idx'",
+        },
+    ],
+};
+
+/**
+ * Return true when every object this file owns exists. Logs a
+ * POST-CONDITION FAILED line for the first missing object.
+ */
+async function verifyPostConditions(pool, file) {
+    const checks = POST_CONDITIONS[file] || [];
+    for (const { object, sql } of checks) {
+        const res = await pool.query(sql);
+        if (res.rowCount === 0) {
+            console.error(`[migrate] POST-CONDITION FAILED: ${file} — ${object}`);
+            return false;
+        }
+    }
+    return true;
+}
+
+/**
  * Strip SQL comments so that semicolons inside block comments (slash-star
  * ... star-slash) or line comments (double-dash) don't fragment the naive
  * ;-split below.  Block comments are stripped first to avoid stripping
@@ -132,7 +175,9 @@ async function run() {
                 console.log(`[migrate] (${globalIndex}/${statements.length}) [${stmtFile}] OK: ${stmt.slice(0, 60).replace(/\s+/g, ' ')}`);
             } catch (err) {
                 if (isBenignError(err)) {
-                    console.warn(`[migrate] (${globalIndex}/${statements.length}) [${stmtFile}] SKIP (benign): ${err.message}`);
+                    // A benign skip is only trusted once the file's post-conditions
+                    // confirm the object exists — see verifyPostConditions below.
+                    console.warn(`[migrate] (${globalIndex}/${statements.length}) [${stmtFile}] SKIP (benign, verified): ${err.message}`);
                 } else {
                     console.error(`[migrate] (${globalIndex}/${statements.length}) [${stmtFile}] FAILED: ${err.message}`);
                     process.exitCode = 1;
@@ -141,7 +186,15 @@ async function run() {
             }
         }
 
-        // All statements for this file succeeded (benign skips count as success),
+        // A benign skip is not success by itself: confirm what this file owns
+        // actually exists. If not, fail without recording it so the next boot
+        // retries rather than pretending the file was applied.
+        if (!(await verifyPostConditions(pool, file))) {
+            process.exitCode = 1;
+            return;
+        }
+
+        // All statements for this file succeeded (benign skips verified above),
         // so record it. We only insert here — never on a non-benign failure.
         // Upsert on `filename`: makes a concurrent-replica race (both INSERT the
         // same filename) and a future content-edit re-run (new hash, same
@@ -238,4 +291,4 @@ function collectSqlFiles(dir) {
     return out;
 }
 
-module.exports = { listMigrationFiles, isBenignError };
+module.exports = { listMigrationFiles, isBenignError, verifyPostConditions };

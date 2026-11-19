@@ -13,5 +13,8 @@ CREATE TABLE IF NOT EXISTS "Settings" (
 );
 
 -- Seed the singleton row so GET /api/settings never 404s before first toggle.
-INSERT INTO "Settings" (id, "disableRegistration", "uploadApiToken", "createdAt", "updatedAt") VALUES (1, false, NULL, NOW(), NOW())
+-- Timestamps are intentionally not named here: this file was edited after
+-- shipping, so databases that applied the pre-#83 version re-run it and may not
+-- have the columns yet. 025 backfills them.
+INSERT INTO "Settings" (id, "disableRegistration", "uploadApiToken") VALUES (1, false, NULL)
     ON CONFLICT (id) DO NOTHING;
