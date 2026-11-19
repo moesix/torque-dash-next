@@ -379,15 +379,13 @@ test('filter: keeps every Nth row (1-indexed), oversize is a no-op, invalid reje
 
     const { email, cookie } = await registerAndLogin();
 
-    // PRODUCT BUG (reported, not fixed — plan 028 is test-only):
-    // the handler's comment and docs/architecture.md say "downsample to every
-    // Nth row", but its SQL keeps `rn % N != 0` and DELETEs the multiples via
-    // `id NOT IN (…)`, i.e. it keeps every row EXCEPT the Nth. The assertions
-    // below pin that observed behaviour so the suite is honest; the intended
-    // contract is recorded as a `todo` test at the bottom of this file.
+    // Contract (docs/architecture.md, handler comment): "downsample to every
+    // Nth row" keeps the Nth, 2Nth, … row (1-indexed) and deletes the rest.
+    // The fixture's frames are exactly 1 s apart (+0s…+19s), so positions map
+    // straight to offsets.
     //
-    // filterNumber 2 on a fresh 20-frame session: multiples (rn 2,4,…20) are
-    // deleted → the ten odd positions remain, i.e. +0s,+2s,…,+18s.
+    // filterNumber 2 on a fresh 20-frame session: rn 2,4,…20 survive → the ten
+    // odd positions remain, i.e. +1s,+3s,…,+19s.
     await seedFrames({ email, session: '028-filter-2' });
     const s2 = await findSessionBySessionKey(cookie, '028-filter-2');
     const f2 = await request(`/api/sessions/filter/${s2.id}`, {
@@ -397,11 +395,15 @@ test('filter: keeps every Nth row (1-indexed), oversize is a no-op, invalid reje
     });
     assert.strictEqual(f2.status, 200, `filter 2 failed: ${await f2.text()}`);
     const rows2 = await telemetry(cookie, s2.id);
-    assert.deepStrictEqual(offsetsOf(rows2), [0, 2, 4, 6, 8, 10, 12, 14, 16, 18],
-        'observed: filterNumber 2 deletes rows at positions 2,4,…20');
+    assert.deepStrictEqual(offsetsOf(rows2), [1, 3, 5, 7, 9, 11, 13, 15, 17, 19],
+        'filterNumber 2 keeps positions 2,4,…20 (offsets +1s…+19s)');
+    // The survivor at i=19 still carries the fixture maxima.
+    const detail2 = await getSession(cookie, s2.id);
+    assert.strictEqual(detail2.maxRpm, 2900, 'filter 2 keeps i=19 → maxRpm 2900');
+    assert.strictEqual(detail2.maxSpeed, 39, 'filter 2 keeps i=19 → maxSpeed 39');
 
-    // filterNumber 5 on a fresh 20-frame session: positions 5,10,15,20 are
-    // deleted, leaving 16 frames (not the 4 that "keep every Nth" would give).
+    // filterNumber 5 on a fresh 20-frame session: positions 5,10,15,20 survive,
+    // leaving exactly four frames at +4s,+9s,+14s,+19s.
     await seedFrames({ email, session: '028-filter-5' });
     const s5 = await findSessionBySessionKey(cookie, '028-filter-5');
     const f5 = await request(`/api/sessions/filter/${s5.id}`, {
@@ -413,9 +415,12 @@ test('filter: keeps every Nth row (1-indexed), oversize is a no-op, invalid reje
     const rows5 = await telemetry(cookie, s5.id);
     assert.deepStrictEqual(
         offsetsOf(rows5),
-        [0, 1, 2, 3, 5, 6, 7, 8, 10, 11, 12, 13, 15, 16, 17, 18],
-        'observed: filterNumber 5 deletes rows at positions 5,10,15,20'
+        [4, 9, 14, 19],
+        'filterNumber 5 keeps positions 5,10,15,20 (offsets +4s,+9s,+14s,+19s)'
     );
+    const detail5 = await getSession(cookie, s5.id);
+    assert.strictEqual(detail5.maxRpm, 2900, 'filter 5 keeps i=19 → maxRpm 2900');
+    assert.strictEqual(detail5.maxSpeed, 39, 'filter 5 keeps i=19 → maxSpeed 39');
 
     // filterNumber greater than the row count is a 200 no-op.
     await seedFrames({ email, session: '028-filter-big' });
@@ -444,42 +449,6 @@ test('filter: keeps every Nth row (1-indexed), oversize is a no-op, invalid reje
         body: { filterNumber: 'abc' },
     });
     assert.strictEqual(abc.status, 400, 'filterNumber "abc" is not a number');
-});
-
-// Reported product bug, recorded but not enforced: the documented contract
-// ("downsample to every Nth row") is the inverse of the current SQL. This
-// `todo` test proves the discrepancy deterministically; it is expected to fail
-// until the controller is fixed in a follow-up (plan 028 must not touch it).
-test('filter: INTENDED contract — keeps every Nth row (currently violated)', {
-    todo: 'BUG: filter deletes every Nth row instead of keeping every Nth (SessionController.filter)',
-}, async (t) => {
-    if (state.skip) return t.skip(state.skip);
-
-    const { email, cookie } = await registerAndLogin();
-
-    await seedFrames({ email, session: '028-filter-intended-2' });
-    const s2 = await findSessionBySessionKey(cookie, '028-filter-intended-2');
-    const f2 = await request(`/api/sessions/filter/${s2.id}`, {
-        method: 'PATCH',
-        cookie,
-        body: { filterNumber: 2 },
-    });
-    assert.strictEqual(f2.status, 200, `filter 2 failed: ${await f2.text()}`);
-    const rows2 = await telemetry(cookie, s2.id);
-    assert.deepStrictEqual(offsetsOf(rows2), [1, 3, 5, 7, 9, 11, 13, 15, 17, 19],
-        'the docs promise to keep positions 2,4,… (i.e. +1s,+3s,…)');
-
-    await seedFrames({ email, session: '028-filter-intended-5' });
-    const s5 = await findSessionBySessionKey(cookie, '028-filter-intended-5');
-    const f5 = await request(`/api/sessions/filter/${s5.id}`, {
-        method: 'PATCH',
-        cookie,
-        body: { filterNumber: 5 },
-    });
-    assert.strictEqual(f5.status, 200, `filter 5 failed: ${await f5.text()}`);
-    const rows5 = await telemetry(cookie, s5.id);
-    assert.deepStrictEqual(offsetsOf(rows5), [4, 9, 14, 19],
-        'the docs promise 20/5 = four surviving frames');
 });
 
 // ── Step 4: copy and join ───────────────────────────────────────────────────
