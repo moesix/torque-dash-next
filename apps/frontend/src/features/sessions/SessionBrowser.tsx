@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { getSessions, getVehicles } from '@/lib/api';
 import type { PaginatedSessions } from '@/lib/api';
@@ -27,9 +28,18 @@ function flattenUniqueSessions(pages: Array<PaginatedSessions | undefined>): Ses
 export default function SessionBrowser() {
   const limit = 50;
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  // Deep link from the fleet overview (`/?vehicleId=<id>`). Read once at mount:
+  // navigating to a different vehicle from the fleet page remounts this route,
+  // so no effect is needed. Limitation: changing the param on the *same*
+  // mounted instance (e.g. a hand-edited URL) does not re-sync the filter —
+  // the dropdown is then the source of truth.
+  const [searchParams] = useSearchParams();
   // 'none' is the Unassigned filter the API understands (vehicleId=none).
   // It must never be coerced with Number(), which turns it into NaN.
-  const [selectedVehicleId, setSelectedVehicleId] = useState<number | 'all' | 'none'>('all');
+  const [selectedVehicleId, setSelectedVehicleId] = useState<number | 'all' | 'none'>(() => {
+    const raw = Number(searchParams.get('vehicleId'));
+    return Number.isFinite(raw) && raw > 0 ? raw : 'all';
+  });
 
   useEffect(() => {
     getVehicles().then((v) => setVehicles(v ?? [])).catch(() => {});

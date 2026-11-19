@@ -55,6 +55,13 @@ export default function AppShell() {
             Sessions
           </NavLink>
           <NavLink
+            to="/fleet"
+            end
+            className={({ isActive }) => navLinkClass(isActive)}
+          >
+            Fleet
+          </NavLink>
+          <NavLink
             to="/settings"
             end
             className={({ isActive }) => navLinkClass(isActive)}

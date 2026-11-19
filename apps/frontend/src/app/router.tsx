@@ -6,6 +6,7 @@ import NotFound from '@/features/misc/NotFound';
 
 const Register = lazy(() => import('@/features/auth/Register'));
 const SessionBrowser = lazy(() => import('@/features/sessions/SessionBrowser'));
+const FleetOverview = lazy(() => import('@/features/sessions/FleetOverview'));
 const ReplayDashboard = lazy(() => import('@/features/dashboard/ReplayDashboard'));
 const SettingsPage = lazy(() => import('@/features/settings/SettingsPage'));
 
@@ -26,6 +27,7 @@ export const routerConfig: RouteObject[] = [
     element: <AppShell />,
     children: [
       { index: true, element: <SessionBrowser /> },
+      { path: 'fleet', element: <FleetOverview /> },
       {
         path: 'session/:id',
         element: <ReplayDashboard />,
