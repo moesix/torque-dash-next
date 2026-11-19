@@ -984,6 +984,7 @@ See `docs/deployment.md` for the full deployment guide.
 | `POST /api/users/change-password` | cookie | change password (requires currentPassword + newPassword; regenerates session) |
 | `POST /api/users/logout` | cookie | logout |
 | `GET /api/version` | none | returns `{ version: string }` from package.json |
+| `GET /api/status` | cookie + **admin** | operator status JSON — version, uptime, node runtime, ingest buffer depth, analyses-retention last run, retention policy presence, Timescale job state. Internal-network exposure only; 403 for non-admins. |
 | `GET /api/sessions?limit&offset` | cookie | list sessions (paginated: `{ sessions, total, limit, offset }`) |
 | `GET /api/sessions/:id` | cookie + owner | session metadata (no full logs) |
 | `GET /api/sessions/:sessionId/telemetry?from&to&limit` | cookie + owner | paged telemetry frames |

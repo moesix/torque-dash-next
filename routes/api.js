@@ -10,6 +10,7 @@ const UserController = require('../controllers/UserController');
 const VehicleController = require('../controllers/VehicleController');
 const TelemetryController = require('../controllers/TelemetryController');
 const AnalysisController = require('../controllers/AnalysisController');
+const StatusController = require('../controllers/StatusController');
 const runtime = require('../config/runtime');
 const { validateIds } = require('../lib/validators');
 
@@ -110,6 +111,11 @@ router.get('/version', (req, res) => {
 // Registered here so it covers all routes declared below (but NOT /upload
 // or /settings, which have their own limiters above).
 router.use(makeLimiter(rateLimits.global));
+
+// ── OPERATOR STATUS ─────────────────────────────────────────────────
+// Authenticated at the route; admin-gated INSIDE the controller (the real
+// admin helper), matching the settings-mutation pattern.
+router.get('/status', authenticate, StatusController.get);
 
 router.post('/users/register', authLimiter, UserController.register);
 router.post('/users/login', authLimiter, UserController.login);

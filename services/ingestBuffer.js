@@ -233,4 +233,10 @@ function size() {
     return buffer.length;
 }
 
-module.exports = { ingest, flush, drain, size };
+// Observation seam for the operator status endpoint (plan 019): whether a
+// flush pass is currently in flight.
+function isFlushing() {
+    return flushing;
+}
+
+module.exports = { ingest, flush, drain, size, isFlushing };
