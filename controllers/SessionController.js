@@ -4,7 +4,7 @@ const Vehicle = require('../models').Vehicle;
 const sequelize = require('../models').sequelize;
 const Op = require('../models').Sequelize.Op;
 const { nanoid } = require('nanoid');
-const { discoverPidKeys, invalidatePidKeys } = require('../lib/pidRegistry');
+const { discoverPidKeys, invalidatePidKeys, PID_REGISTRY } = require('../lib/pidRegistry');
 const ingestBuffer = require('../services/ingestBuffer');
 const { evictSession } = require('../lib/hotCaches');
 // Summary aggregate lives in one place (plans/017) — re-exported below for
@@ -15,7 +15,9 @@ const {
     recomputeSummary,
 } = require('../services/sessionSummaries');
 // CSV helpers used by exportCsv.
-const { sanitizeFilename, csvEscape } = require('../lib/csvExport');
+const { sanitizeFilename, csvEscape, buildCsvHeader } = require('../lib/csvExport');
+const { convert, resolveUnitSystem } = require('../lib/units');
+const config = require('../config/config');
 const {
   renameSchema,
   notesSchema,
@@ -24,6 +26,7 @@ const {
   copySchema,
   joinSchema,
   addLocationSchema,
+  csvUnitsSchema,
   isInt4Id,
 } = require('../lib/validators');
 
@@ -381,6 +384,16 @@ class SessionController {
             // answering 200 with no body still proves authorization for the client.
             if (req.method === 'HEAD') return res.end();
 
+            // 1b. Unit system: explicit ?units= wins, otherwise the caller's
+            // saved preference (resolved through DEFAULT_UNIT_SYSTEM). Values
+            // are converted at write time; stored rows stay canonical.
+            const { error: unitsError, value: unitsQuery } = csvUnitsSchema.validate(req.query || {});
+            if (unitsError) {
+                return res.status(400).json({ error: unitsError.details[0].message });
+            }
+            const unitSystem = unitsQuery.units
+                || resolveUnitSystem(req.user.unitSystem, config.units.defaultSystem);
+
             // 2. Discover all k* PID keys via jsonb_object_keys SQL
             const pidKeys = await discoverPidKeys(session.id, sequelize);
 
@@ -388,10 +401,10 @@ class SessionController {
             const filename = sanitizeFilename(session.name || `session-${session.id}`);
             res.setHeader('Content-Type', 'text/csv; charset=utf-8');
             res.setHeader('Content-Disposition', `attachment; filename="${filename}.csv"`);
+            res.setHeader('X-Units-System', unitSystem);
 
             // 4. Write header row: fixed columns + promoted hot columns + discovered PID keys
-            const fixedCols = ['timestamp', 'lat', 'lon', 'engine_rpm', 'vehicle_speed'];
-            const header = [...fixedCols, ...pidKeys];
+            const header = buildCsvHeader(pidKeys, unitSystem);
             // Prepend UTF-8 BOM for Excel compatibility; escape header values defensively
             res.write('\ufeff' + header.map(csvEscape).join(',') + '\n');
 
@@ -430,8 +443,10 @@ class SessionController {
                         csvEscape(row.lat),
                         csvEscape(row.lon),
                         csvEscape(row.engine_rpm),
-                        csvEscape(row.vehicle_speed),
-                        ...pidKeys.map(k => csvEscape(values[k]))
+                        csvEscape(convert(row.vehicle_speed, 'km/h', unitSystem)),
+                        ...pidKeys.map(k => csvEscape(
+                            convert(values[k], PID_REGISTRY[k]?.unit || '', unitSystem)
+                        ))
                     ];
                     const ok = res.write(cells.join(',') + '\n');
                     if (!ok) {

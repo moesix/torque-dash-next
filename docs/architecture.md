@@ -219,6 +219,27 @@ sessions after a password change), `015_normalize_emails.sql` (lowercase fold),
   null lat/lon. `pidRegistry.js` and the frontend `pidDecode.ts` FALLBACK_MAP
   label them "GPS Longitude" / "GPS Latitude" (unit: `°`).
 
+### 2.6a Unit system (`units.json`, `lib/units.js`, `app/unitSystem.tsx`)
+
+- **One data source** — `apps/frontend/src/lib/units.json` holds every factor
+  and the three presets (`metric`, `us`, `uk`). `apps/frontend/src/lib/units.ts`
+  and backend `lib/units.js` both consume it; a factor cannot be edited on one
+  runtime only (both test suites assert its `version`).
+- **Display-time only** — `Logs`, `Sessions` summaries and stored `Analyses`
+  stay canonical (`km/h`, `°C`, `kPa`, `L`). The preference only changes what
+  is rendered/exported, so old sessions re-render in either system.
+- **Precedence** — explicit `Users.unitSystem` → deploy-time
+  `DEFAULT_UNIT_SYSTEM` → `metric`, resolved by `resolveUnitSystem()`. A NULL
+  column means inherit; changing the env never rewrites saved user rows.
+  Invalid `DEFAULT_UNIT_SYSTEM` aborts config load.
+- **Unit-string aware, not PID-hardcoded** — `kindOf()` maps aliases
+  (`mph`, `°F`, `bar`, `gal (UK)`, `MPG (US)`, …); unknown units (`rpm`, `%`,
+  `V`, `g`, `:1`, bare `°`, `g/s`) pass through untouched. Bare `°` is never
+  treated as temperature.
+- **Consumers** — gauges/charts convert numbers (`convertSeries`), text uses
+  `format()`, the CSV export labels+converts cells, and the AI prompt
+  declares its units and converts both the stats block and its guardrails.
+
 ### 2.7 Security Headers (Helmet)
 
 - **Helmet middleware** (`app.js`) applies a standard set of HTTP security headers
@@ -652,8 +673,10 @@ extracts `[timestamp_ms, value]` pairs via the safe `coerceScalar()` helper.
 - `OverlayChart.tsx` renders an ECharts instance with dynamic series: each
   selected metric source becomes a `type: 'line'` series on a shared time (x)
   axis within a **single** chart — replaces the old dual TimeSeriesChart layout.
-- **Per-unit-group y-axes** — sources are grouped by their unit string (e.g.
-  `rpm`, `km/h`, `°C`, `V`). Each unique unit gets a separate y-axis (left for
+- **Per-unit-group y-axes** — sources are grouped by their **converted** unit
+  label (e.g. `rpm`, `km/h`, `°C`, `V` in metric; `mph`, `°F` in US). Grouping
+  on the display label means km/h and mph can never share an axis, and metric
+  grouping is unchanged. Each unique unit gets a separate y-axis (left for
   the first group, right with offset for subsequent groups), letting you overlay
   RPM, speed, coolant temp, and O2 voltage without scale distortion. The total
   number of y-axes is capped at 4 (1 left + 3 right) sorted by frequency, and

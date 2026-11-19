@@ -105,6 +105,25 @@ describe('AnalysisHistory data layer (jsdom)', () => {
     vi.restoreAllMocks();
   });
 
+  it('badges a stored analysis with the units it was generated in; NULL is unbadged', async () => {
+    apiMocks.getAllAnalyses.mockResolvedValue({
+      analyses: [
+        { ...preview(1, 'US session'), unitSystem: 'us' },
+        { ...preview(2, 'Legacy session'), unitSystem: null },
+      ],
+      total: 2,
+      limit: 20,
+      offset: 0,
+    });
+
+    renderHistory();
+
+    expect(await screen.findByText('US units')).toBeTruthy();
+    const legacy = screen.getByText('Legacy session').closest('details') as HTMLElement;
+    expect(within(legacy).queryByText('US units')).toBeNull();
+    expect(within(legacy).queryByText('Metric')).toBeNull();
+  });
+
   it('keeps page 3 when a stale page-1 response resolves afterwards', async () => {
     const page1 = deferred<ReturnType<typeof page>>();
     const page2 = deferred<ReturnType<typeof page>>();

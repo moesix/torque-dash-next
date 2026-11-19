@@ -9,6 +9,8 @@ import Button from '@/components/ui/Button';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
 import ChevronIcon from '@/components/ui/ChevronIcon';
 import Skeleton from '@/components/ui/Skeleton';
+import Badge from '@/components/ui/Badge';
+import { unitBadgeLabel } from '@/lib/units';
 
 /**
  * Cross-vehicle analysis history — lists all analyses across sessions
@@ -260,6 +262,11 @@ export default function AnalysisHistory() {
                     </span>
                     <span className="block truncate text-xs text-fg-muted">
                       {a.provider}/{a.model} — {new Date(a.createdAt).toLocaleString()}
+                      {unitBadgeLabel(a.unitSystem) && (
+                        <Badge tone="neutral" className="ml-2">
+                          {unitBadgeLabel(a.unitSystem)}
+                        </Badge>
+                      )}
                     </span>
                   </span>
                   <span className="flex shrink-0 items-center gap-2">

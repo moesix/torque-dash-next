@@ -171,7 +171,9 @@ describe('buildTelemetryCsv chronological ordering', () => {
 
     const csv = buildTelemetryCsv(sorted, []);
     const lines = csv.split('\n');
-    assert.strictEqual(lines[0], 'Time,RPM,Speed');
+    // Plan 045 deliberately declares the unit on the prompt CSV columns
+    // (metric included) so a model can never misread a converted number.
+    assert.strictEqual(lines[0], 'Time,RPM,Speed (km/h)');
     const times = lines.slice(1).map((line) => line.split(',')[0]);
     assert.ok(times.length > 1, 'sample is large enough to exercise resampling');
 
@@ -331,5 +333,84 @@ describe('buildAnalysisPrompt vehicle context (plans/118)', () => {
     assert.ok(ctx.includes('Engine: 2500cc'));
     assert.ok(!ctx.includes('Ford'));
     assert.ok(!ctx.includes('9999'));
+  });
+});
+
+describe('unit-system prompt + guardrails (plan 045)', () => {
+  const sample = [
+    {
+      timestamp: '2026-10-01T10:00:00.000Z',
+      engine_rpm: 2000,
+      vehicle_speed: 100,
+      values: { kc: 2000, k5: 90, kb: 40 },
+    },
+    {
+      timestamp: '2026-10-01T10:00:01.000Z',
+      engine_rpm: 2100,
+      vehicle_speed: 110,
+      values: { kc: 2100, k5: 91, kb: 41 },
+    },
+  ];
+  const pids = ['k5', 'kb'];
+  const session = { name: 'Units', Vehicle: { engineCc: 2500 } };
+
+  it('metric prompt keeps today’s guardrail wording (plus declared units)', () => {
+    const p = buildAnalysisPrompt(session, {}, sample, pids, null, 'metric');
+    assert.ok(p.includes('Units: Metric (km/h, °C, kPa, L, L/100km)'));
+    assert.ok(p.includes('a 2500cc engine'));
+    assert.ok(p.includes('MAP) around 40–45 kPa'));
+    assert.ok(p.includes('unless speed is 0 km/h'));
+    assert.ok(p.includes('minimum MAP (~24–26 kPa)'));
+    assert.ok(p.includes('Speed (km/h)'));
+    assert.ok(p.includes('Engine Coolant Temperature (°C)'));
+  });
+
+  it('US prompt declares US units, converts stats/CSV and has no kPa/km/h/°C', () => {
+    const p = buildAnalysisPrompt(session, {}, sample, pids, null, 'us');
+    assert.ok(p.includes('Units: US customary'));
+    assert.ok(p.includes('All numeric values and column headers in this prompt are in US customary.'));
+    assert.ok(p.includes('Report findings in the SAME units'));
+
+    // Guardrails converted, not the metric metres.
+    assert.ok(p.includes('MAP) around 5.8–6.5 psi'));
+    assert.ok(p.includes('unless the vehicle is stationary'));
+    assert.ok(p.includes('minimum MAP (~3.5–3.8 psi)'));
+    assert.ok(p.includes('a 2.5 L (152.6 cu in) engine'));
+
+    // Column headers + converted sample values.
+    assert.ok(p.includes('Speed (mph)'));
+    assert.ok(p.includes('Engine Coolant Temperature (°F)'));
+    assert.ok(p.includes('Intake Manifold Pressure (psi)'));
+    assert.ok(p.includes('62.14'));
+    assert.ok(p.includes('194.00'));
+
+    assert.ok(!p.includes('kPa'), 'US prompt must not mention kPa');
+    assert.ok(!p.includes('km/h'), 'US prompt must not mention km/h');
+    assert.ok(!p.includes('°C'), 'US prompt must not mention °C');
+  });
+
+  it('UK prompt uses psi with °C/MPG UK and the stationary wording', () => {
+    const p = buildAnalysisPrompt(session, {}, sample, pids, null, 'uk');
+    assert.ok(p.includes('Units: UK (mph, °C, psi, MPG UK)'));
+    assert.ok(p.includes('MAP) around 5.8–6.5 psi'));
+    assert.ok(p.includes('minimum MAP (~3.5–3.8 psi)'));
+    assert.ok(p.includes('a 2.5 L engine'));
+    assert.ok(p.includes('unless the vehicle is stationary'));
+    assert.ok(p.includes('Engine Coolant Temperature (°C)'));
+    assert.ok(p.includes('Speed (mph)'));
+    assert.ok(!p.includes('kPa'));
+    assert.ok(!p.includes('km/h'));
+  });
+
+  it('buildTelemetryCsv labels columns and converts values', () => {
+    const us = buildTelemetryCsv(sample, pids, 'us').split('\n');
+    assert.strictEqual(
+      us[0],
+      'Time,RPM,Speed (mph),Engine Coolant Temperature (°F),Intake Manifold Pressure (psi)',
+    );
+    const cells = us[1].split(',');
+    assert.strictEqual(cells[1], '2000');
+    assert.ok(Math.abs(Number(cells[2]) - 62.1371192237) < 1e-9);
+    assert.strictEqual(cells[3], '194');
   });
 });

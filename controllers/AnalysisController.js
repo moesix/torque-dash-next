@@ -5,6 +5,7 @@ const Analysis = require('../models').Analysis;
 const Vehicle = require('../models').Vehicle;
 const Settings = require('../models').Settings;
 const sequelize = require('../models').sequelize;
+const { resolveUnitSystem } = require('../lib/units');
 const { analyze, streamEvents } = require('../lib/llmProviders');
 const { buildAnalysisPrompt, formatSessionDuration, buildDataQualityNote, GAP_ANALYSIS } = require('../lib/llmPrompt');
 const { discoverPidKeys } = require('../lib/pidRegistry');
@@ -243,9 +244,10 @@ class AnalysisController {
       const dataQualityNote = buildDataQualityNote(gapSummary);
 
       // 5. Build prompt with computed duration
+      const unitSystem = resolveUnitSystem(req.user.unitSystem, process.env.DEFAULT_UNIT_SYSTEM);
       const prompt = buildAnalysisPrompt(
         { ...session.toJSON(), duration: durationStr },
-        settings, sample, pidKeys, dataQualityNote
+        settings, sample, pidKeys, dataQualityNote, unitSystem
       );
 
       // Row identity for the abort path (built before the first byte streams).
@@ -255,6 +257,8 @@ class AnalysisController {
         provider: settings.llmProvider,
         model: settings.llmModel || 'default',
         prompt,
+        // Descriptive metadata: the prose is generated in these units.
+        unitSystem,
       };
 
       // 6. Set up SSE headers
@@ -309,6 +313,7 @@ class AnalysisController {
           prompt,
           response: fullResponse || fullReasoning,
           reasoning: fullReasoning || null,
+          unitSystem,
           tokenUsage: budgetExhausted ? { finishReason, reasoningChars: fullReasoning.length, responseChars: fullResponse.length } : null,
         });
       } catch (cacheErr) {
@@ -373,7 +378,7 @@ class AnalysisController {
         where: { sessionId: session.id, userId: req.user.id },
         order: [['createdAt', 'DESC']],
         limit: 20,
-        attributes: ['id', 'provider', 'model', 'createdAt'],
+        attributes: ['id', 'provider', 'model', 'createdAt', 'unitSystem'],
       });
 
       res.json(analyses);
@@ -427,7 +432,7 @@ class AnalysisController {
         where,
         order: [['createdAt', 'DESC']],
         limit, offset,
-        attributes: ['id', 'sessionId', 'provider', 'model', 'createdAt'],
+        attributes: ['id', 'sessionId', 'provider', 'model', 'createdAt', 'unitSystem'],
         include: [{
           model: Session,
           as: 'Session',
@@ -447,7 +452,7 @@ class AnalysisController {
     try {
       const analysis = await Analysis.findOne({
         where: { id: req.params.analysisId, userId: req.user.id },
-        attributes: ['id', 'sessionId', 'provider', 'model', 'response', 'reasoning', 'tokenUsage', 'createdAt'],
+        attributes: ['id', 'sessionId', 'provider', 'model', 'response', 'reasoning', 'tokenUsage', 'createdAt', 'unitSystem'],
       });
       if (!analysis) return res.status(404).json({ error: 'Analysis not found' });
       res.json(analysis);

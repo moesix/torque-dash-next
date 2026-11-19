@@ -94,10 +94,20 @@ function loadController(defaultSystem) {
     ['../config/config', '../lib/units', '../lib/validators', '../config/runtime'],
   );
 
-  if (previous === undefined) delete process.env.DEFAULT_UNIT_SYSTEM;
-  else process.env.DEFAULT_UNIT_SYSTEM = previous;
+  // config is required lazily inside the preference handlers, so keep the env
+  // value in place until ctx.restore() and restore the module cache with it.
+  const restoreAll = () => {
+    loaded.restore();
+    if (previous === undefined) delete process.env.DEFAULT_UNIT_SYSTEM;
+    else process.env.DEFAULT_UNIT_SYSTEM = previous;
+  };
 
-  return { UserController: loaded.module, restore: loaded.restore, userUpdates, cacheDels };
+  return {
+    UserController: loaded.module,
+    restore: restoreAll,
+    userUpdates,
+    cacheDels,
+  };
 }
 
 describe('GET/PUT /api/users/preferences (controller)', () => {

@@ -1105,3 +1105,23 @@ boots a real migrations-only TimescaleDB and drives upload → ingest → sessio
 → telemetry → CSV → delete → re-upload over the real models, so the
 `app.use('*')` wildcard in `app.js` (the only breaking pattern) can move behind
 that net.
+
+## Adding a new unit (plan 045)
+
+1. Add the factor(s) and any preset label to
+   `apps/frontend/src/lib/units.json` (single source for both runtimes) and
+   bump its `version`.
+2. Add the alias(es) to **both** `CANONICAL` tables: `apps/frontend/src/lib/units.ts`
+   and `lib/units.js`. Keep non-convertible units out — they must stay `none`
+   and pass through (`rpm`, `%`, `V`, `g`, `:1`, bare `°`, `g/s`).
+3. Extend the matrix in `test/units.test.js` **and**
+   `apps/frontend/src/lib/__tests__/units.test.ts` (both assert the JSON
+   `version`).
+4. Never emit a bare `MPG` or `gal`: use `MPG (US)`/`MPG (UK)` and
+   `gal (US)`/`gal (UK)`.
+
+**CSV-export limitation:** a PID whose runtime unit came from Torque metadata
+(`userUnit*`/`defaultUnit*`) is not persisted. Exports therefore declare and
+convert using the `lib/pidRegistry.js` fallback unit only; a session recorded
+in mph because Torque was configured that way still exports with the registry
+assumption.

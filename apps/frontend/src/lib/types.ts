@@ -206,6 +206,8 @@ export interface Analysis {
    *  marks an analysis cut off mid-stream (partial answer kept). */
   tokenUsage?: Record<string, unknown> | null;
   createdAt: string;
+  /** Unit system the prose was generated in. NULL/absent = historical unknown. */
+  unitSystem?: UnitSystem | null;
 }
 
 /** Preview of an analysis (no response body — used in listings). */
@@ -215,6 +217,8 @@ export interface AnalysisPreview {
   provider: string;
   model: string;
   createdAt: string;
+  /** Unit system the prose was generated in (NULL = unknown). */
+  unitSystem?: UnitSystem | null;
   Session?: {
     id: number;
     name: string | null;

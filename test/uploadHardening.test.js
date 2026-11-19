@@ -320,7 +320,7 @@ describe('Upload hardening – User model normalizeEmail hook (production code)'
         },
     };
     const fakeDataTypes = {
-        STRING: 'STRING',
+        STRING: (len) => ['STRING', len],
         ARRAY: (inner) => ['ARRAY', inner],
     };
     const UserModel = factory(fakeSequelize, fakeDataTypes);

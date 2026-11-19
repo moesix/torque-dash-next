@@ -4,7 +4,6 @@ const sequelize = require('../models').sequelize;
 const passport = require('passport');
 const crypto = require('crypto');
 const runtime = require('../config/runtime');
-const config = require('../config/config');
 const { userByIdCache } = require('../config/passport');
 const { settingsUpdateSchema, preferencesSchema } = require('../lib/validators');
 const { resolveUnitSystem } = require('../lib/units');
@@ -69,7 +68,9 @@ class UserController {
             if (!req.user || !req.user.id) {
                 return res.status(401).json({ error: 'Unauthorized' });
             }
-            const serverDefault = config.units.defaultSystem;
+            // config.js validated DEFAULT_UNIT_SYSTEM at boot; resolve through
+            // the single precedence helper (user → env → metric).
+            const serverDefault = resolveUnitSystem(null, process.env.DEFAULT_UNIT_SYSTEM);
             res.set('Cache-Control', 'private, no-store');
             res.vary('Cookie');
             return res.json({
@@ -104,7 +105,7 @@ class UserController {
             // the row — keep it consistent for downstream handlers.
             req.user.unitSystem = unitSystem;
 
-            const serverDefault = config.units.defaultSystem;
+            const serverDefault = resolveUnitSystem(null, process.env.DEFAULT_UNIT_SYSTEM);
             res.set('Cache-Control', 'private, no-store');
             return res.json({
                 unitSystem: resolveUnitSystem(unitSystem, serverDefault),

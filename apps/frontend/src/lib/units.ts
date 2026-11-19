@@ -270,6 +270,14 @@ export function format(
   };
 }
 
+/** Short label for a stored analysis's unit-system badge; null = unknown. */
+export function unitBadgeLabel(system: UnitSystem | null | undefined): string | null {
+  if (system === 'metric') return 'Metric';
+  if (system === 'us') return 'US units';
+  if (system === 'uk') return 'UK units';
+  return null;
+}
+
 export function convertSeries(
   values: Array<[number, number | null]>,
   from: string,

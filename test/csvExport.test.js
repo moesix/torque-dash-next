@@ -92,3 +92,42 @@ describe('csvEscape', () => {
     assert.strictEqual(csvEscape(42), '42');
   });
 });
+
+// ── buildCsvHeader (plan 045) ──────────────────────────────────────
+
+const { buildCsvHeader } = require('../lib/csvExport');
+
+describe('buildCsvHeader', () => {
+  it('metric declares canonical units', () => {
+    assert.deepStrictEqual(buildCsvHeader(['kc', 'k5', 'zzz'], 'metric'), [
+      'timestamp',
+      'lat (deg)',
+      'lon (deg)',
+      'engine_rpm',
+      'vehicle_speed (km/h)',
+      'kc',
+      'k5 (°C)',
+      'zzz',
+    ]);
+  });
+
+  it('US converts the labels and keeps unknown PIDs bare', () => {
+    assert.deepStrictEqual(buildCsvHeader(['kc', 'k5', 'kff1278', 'zzz'], 'us'), [
+      'timestamp',
+      'lat (deg)',
+      'lon (deg)',
+      'engine_rpm',
+      'vehicle_speed (mph)',
+      'kc',
+      'k5 (°F)',
+      'kff1278 (psi)',
+      'zzz',
+    ]);
+  });
+
+  it('UK labels', () => {
+    const header = buildCsvHeader(['k5'], 'uk');
+    assert.strictEqual(header[4], 'vehicle_speed (mph)');
+    assert.strictEqual(header[5], 'k5 (°C)');
+  });
+});

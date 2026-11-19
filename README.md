@@ -19,6 +19,7 @@ A self-hosted dashboard for [Torque Pro](https://torque-bhp.com/) vehicle teleme
 | **Dash ↔ Map session views** | Toggle the replay page between the dashboard layout and a near-fullscreen GPS map driven by the same playback transport — the scrub cursor carries across modes. |
 | **Map basemaps** | Replay maps draw standard OpenStreetMap tiles by default — keyless, nothing to configure. CARTO basemaps are an opt-in admin upgrade: enable them and save your CARTO API key from the Settings page (domain-allowlist the key in the CARTO dashboard, since it ships to the browser). |
 | **Multi-series overlay chart** | Toggle any combination of PIDs on a shared time axis with per-unit-group y-axes (ECharts + LTTB sampling for large datasets). |
+| **Saved unit system** | Pick Metric, US customary (mph, °F, psi, US gal, MPG US) or UK (mph, °C, psi, MPG UK) per user in Settings; gauges, charts, tables, print/PDF, CSV exports and the AI prompt all follow it. Operators can set a server default with `DEFAULT_UNIT_SYSTEM`; stored telemetry is never rewritten. |
 | **CSV export** | Download any session with auto-discovered PID columns — ready for Excel, Google Sheets, or Python notebooks. |
 | **Print-to-PDF session report** | A "🖨️ Print / PDF" button renders the session as a clean print-ready report — expanded diagnostic charts, a min/max/median stats table, and the AI analysis — for saving as PDF. |
 | **BYOK AI analysis** | Connect your own LLM (OpenAI, Anthropic, DeepSeek, Ollama, or any OpenAI-compatible endpoint) for per-session diagnostic insights. |

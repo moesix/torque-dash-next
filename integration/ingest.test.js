@@ -269,14 +269,14 @@ test('upload → drain → sessions/telemetry/CSV/rename over the real routes', 
     const csvText = csvBytes.toString('utf8');
     const lines = csvText.trim().split('\n');
     const header = lines[0].replace('\ufeff', '').split(',');
-    for (const col of ['timestamp', 'lat', 'lon', 'engine_rpm', 'vehicle_speed', 'kc', 'kd', 'k5']) {
+    for (const col of ['timestamp', 'lat (deg)', 'lon (deg)', 'engine_rpm', 'vehicle_speed (km/h)', 'kc', 'kd', 'k5 (°C)']) {
         assert.ok(header.includes(col), `CSV header missing ${col}`);
     }
     assert.strictEqual(lines.length, 6, 'one header row + five frame rows');
     const firstRow = lines[1].split(',');
     assert.strictEqual(firstRow[header.indexOf('engine_rpm')], '800');
-    assert.strictEqual(firstRow[header.indexOf('vehicle_speed')], '20');
-    assert.strictEqual(firstRow[header.indexOf('lat')], '45.5017');
+    assert.strictEqual(firstRow[header.indexOf('vehicle_speed (km/h)')], '20');
+    assert.strictEqual(firstRow[header.indexOf('lat (deg)')], '45.5017');
 
     const renameRes = await request(`/api/sessions/rename/${session.id}`, {
         method: 'PATCH',
@@ -286,6 +286,80 @@ test('upload → drain → sessions/telemetry/CSV/rename over the real routes', 
     assert.strictEqual(renameRes.status, 200);
     const detail = await request(`/api/sessions/${session.id}`, { cookie });
     assert.strictEqual((await detail.json()).name, 'Integration Run');
+});
+
+test('per-user unit preference drives the CSV export (?units= override)', async (t) => {
+    if (state.skip) return t.skip(state.skip);
+    await resetDatabase();
+
+    const { email, cookie } = await registerAndLogin();
+
+    // GET defaults to the resolved server default (metric).
+    let prefs = await request('/api/users/preferences', { cookie });
+    assert.strictEqual(prefs.status, 200);
+    let prefsBody = await prefs.json();
+    assert.strictEqual(prefsBody.unitSystem, 'metric');
+    assert.strictEqual(prefsBody.serverDefault, 'metric');
+    assert.strictEqual(prefsBody.preference, null);
+
+    // Invalid value is rejected at the route.
+    const bad = await request('/api/users/preferences', {
+        method: 'PUT', cookie, body: { unitSystem: 'imperial' },
+    });
+    assert.strictEqual(bad.status, 400);
+
+    // Save US, then read it back.
+    const put = await request('/api/users/preferences', {
+        method: 'PUT', cookie, body: { unitSystem: 'us' },
+    });
+    assert.strictEqual(put.status, 200);
+    assert.strictEqual((await put.json()).unitSystem, 'us');
+    prefs = await request('/api/users/preferences', { cookie });
+    prefsBody = await prefs.json();
+    assert.strictEqual(prefsBody.unitSystem, 'us');
+    assert.strictEqual(prefsBody.preference, 'us');
+
+    const sessionKey = 'it-units-1';
+    const frames = makeSeries({ session: sessionKey, eml: email, count: 5, speedBase: 100 });
+    await uploadSeries(frames);
+    const [session] = (await listSessions(cookie)).sessions;
+
+    // Default export follows the saved US preference.
+    const usCsv = await request(`/api/sessions/${session.id}/export/csv`, { cookie });
+    assert.strictEqual(usCsv.status, 200);
+    assert.strictEqual(usCsv.headers.get('x-units-system'), 'us');
+    const usLines = (await usCsv.text()).replace('\ufeff', '').trim().split('\n');
+    const usHeader = usLines[0].split(',');
+    assert.ok(usHeader.includes('vehicle_speed (mph)'), 'US header must name mph');
+    assert.ok(usHeader.includes('k5 (°F)'), 'US PID header must name °F');
+    const usFirst = usLines[1].split(',');
+    const usSpeed = Number(usFirst[usHeader.indexOf('vehicle_speed (mph)')]);
+    assert.ok(Math.abs(usSpeed - 100 / 1.609344) < 1e-6, `US speed ${usSpeed}`);
+
+    // Explicit metric override re-renders the same canonical rows.
+    const metricCsv = await request(`/api/sessions/${session.id}/export/csv?units=metric`, { cookie });
+    assert.strictEqual(metricCsv.headers.get('x-units-system'), 'metric');
+    const metricLines = (await metricCsv.text()).replace('\ufeff', '').trim().split('\n');
+    const metricHeader = metricLines[0].split(',');
+    assert.ok(metricHeader.includes('vehicle_speed (km/h)'));
+    assert.strictEqual(metricLines[1].split(',')[metricHeader.indexOf('vehicle_speed (km/h)')], '100');
+
+    // Unknown override → 400.
+    const bogus = await request(`/api/sessions/${session.id}/export/csv?units=bogus`, { cookie });
+    assert.strictEqual(bogus.status, 400);
+
+    // null clears the preference back to inherit.
+    const cleared = await request('/api/users/preferences', {
+        method: 'PUT', cookie, body: { unitSystem: null },
+    });
+    assert.strictEqual((await cleared.json()).unitSystem, 'metric');
+    prefs = await request('/api/users/preferences', { cookie });
+    assert.strictEqual((await prefs.json()).preference, null);
+
+    // Preferences remain outside the admin-shaped settings payload.
+    const full = await request('/api/settings/full', { cookie });
+    assert.strictEqual(full.status, 200);
+    assert.strictEqual(Object.prototype.hasOwnProperty.call(await full.json(), 'unitSystem'), false);
 });
 
 test('delete cascades Logs and a re-upload recreates the session', async (t) => {
