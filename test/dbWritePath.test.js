@@ -8,6 +8,12 @@ const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');
 
+// sessionSummaries binds ../models at load time; every harness below replaces
+// the models module, so drop the service too or it keeps the previous mock.
+function purgeSessionSummaries() {
+  delete require.cache[require.resolve('../services/sessionSummaries')];
+}
+
 // Join ON CONFLICT is asserted behaviourally in integration/sessionMutations.test.js.
 
 // ── 1. Test that flush chunks rows into ≤1000-row batches ────────────
@@ -37,6 +43,7 @@ describe('ingestBuffer.flush — chunked bulkCreate', () => {
     const ingestBufferPath = require.resolve('../services/ingestBuffer');
     const originalIngestBufferCache = require.cache[ingestBufferPath];
     delete require.cache[ingestBufferPath];
+    purgeSessionSummaries();
 
     try {
       const { ingest, flush } = require('../services/ingestBuffer');
@@ -104,6 +111,7 @@ describe('ingestBuffer.flush — chunked bulkCreate', () => {
     const ingestBufferPath = require.resolve('../services/ingestBuffer');
     const originalIngestBufferCache = require.cache[ingestBufferPath];
     delete require.cache[ingestBufferPath];
+    purgeSessionSummaries();
 
     try {
       const { ingest, flush } = require('../services/ingestBuffer');
@@ -184,6 +192,7 @@ describe('SessionController exportCsv — drain backpressure', () => {
     const sessionControllerPath = require.resolve('../controllers/SessionController');
     const originalSCCache = require.cache[sessionControllerPath];
     delete require.cache[sessionControllerPath];
+    purgeSessionSummaries();
 
     try {
       const SessionController = require('../controllers/SessionController');
@@ -292,6 +301,7 @@ describe('SessionController exportCsv — HEAD short-circuit', () => {
     const sessionControllerPath = require.resolve('../controllers/SessionController');
     const originalSCCache = require.cache[sessionControllerPath];
     delete require.cache[sessionControllerPath];
+    purgeSessionSummaries();
 
     try {
       const SessionController = require('../controllers/SessionController');
@@ -385,6 +395,7 @@ describe('ingestBuffer.flush — failure isolation', () => {
     const ibPath = require.resolve('../services/ingestBuffer');
     const originalIBCache = require.cache[ibPath];
     delete require.cache[ibPath];
+    purgeSessionSummaries();
 
     return {
       ingestBuffer: require('../services/ingestBuffer'),
@@ -565,6 +576,7 @@ describe('ingestBuffer.drain — quiesce before Log mutations', () => {
     const ibPath = require.resolve('../services/ingestBuffer');
     const originalIBCache = require.cache[ibPath];
     delete require.cache[ibPath];
+    purgeSessionSummaries();
     return {
       ingestBuffer: require('../services/ingestBuffer'),
       restore() {
@@ -766,6 +778,7 @@ describe('ingestBuffer.flush — deleted session mid-buffer', () => {
     const ibPath = require.resolve('../services/ingestBuffer');
     const originalIBCache = require.cache[ibPath];
     delete require.cache[ibPath];
+    purgeSessionSummaries();
 
     try {
       const { ingest, flush, size } = require('../services/ingestBuffer');
@@ -900,15 +913,16 @@ describe('SessionController.delete — drain and evictSession wiring', () => {
 
     const ibPath = require.resolve('../services/ingestBuffer');
     const originalIBCache = require.cache[ibPath];
+    purgeSessionSummaries();
     require.cache[ibPath] = {
       id: ibPath, filename: ibPath, loaded: true,
       exports: { async drain() { events.push('drain'); } },
     };
 
-    const uploadPath = require.resolve('../controllers/UploadController');
-    const originalUploadCache = require.cache[uploadPath];
-    require.cache[uploadPath] = {
-      id: uploadPath, filename: uploadPath, loaded: true,
+    const hotCachesPath = require.resolve('../lib/hotCaches');
+    const originalHotCachesCache = require.cache[hotCachesPath];
+    require.cache[hotCachesPath] = {
+      id: hotCachesPath, filename: hotCachesPath, loaded: true,
       exports: { evictSession(...args) { events.push(['evict', ...args]); } },
     };
 
@@ -920,8 +934,8 @@ describe('SessionController.delete — drain and evictSession wiring', () => {
       else delete require.cache[modelsPath];
       if (originalIBCache) require.cache[ibPath] = originalIBCache;
       else delete require.cache[ibPath];
-      if (originalUploadCache) require.cache[uploadPath] = originalUploadCache;
-      else delete require.cache[uploadPath];
+      if (originalHotCachesCache) require.cache[hotCachesPath] = originalHotCachesCache;
+      else delete require.cache[hotCachesPath];
       if (originalSCCache) require.cache[scPath] = originalSCCache;
       else delete require.cache[scPath];
     }

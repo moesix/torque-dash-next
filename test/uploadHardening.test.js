@@ -63,6 +63,7 @@ inject(require.resolve('../config/runtime'), mockRuntime);
 
 // ── Now safe to require the production controller ──────────────────
 const UploadController = require('../controllers/UploadController');
+const { evictSession } = require('../lib/hotCaches');
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
@@ -679,7 +680,7 @@ describe('Upload hardening – evictSession drops the cached session FK', () => 
         assert.strictEqual(findOrCreateCalls, 1, 'second upload hits the positive session cache');
         assert.ok(mockUserCache.store.has('s:1:dev-abc'), 'cache key is s:<userId>:<session>');
 
-        UploadController.evictSession('dev-abc', 1);
+        evictSession('dev-abc', 1);
 
         assert.strictEqual(mockUserCache.store.has('s:1:dev-abc'), false,
             'evictSession deletes the per-user session key');
@@ -692,9 +693,9 @@ describe('Upload hardening – evictSession drops the cached session FK', () => 
         stubHappyPath({ user: { id: 1 } });
         mockUserCache.store.set('s:2:dev-abc', { id: 99 });
 
-        UploadController.evictSession(null, 1);
-        UploadController.evictSession('dev-abc', undefined);
-        UploadController.evictSession('dev-abc', 1);
+        evictSession(null, 1);
+        evictSession('dev-abc', undefined);
+        evictSession('dev-abc', 1);
 
         assert.ok(mockUserCache.store.has('s:2:dev-abc'), 'other users are unaffected');
     });

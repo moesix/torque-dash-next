@@ -6,7 +6,7 @@ const Op = require('../models').Sequelize.Op;
 const { nanoid } = require('nanoid');
 const { discoverPidKeys, invalidatePidKeys } = require('../lib/pidRegistry');
 const ingestBuffer = require('../services/ingestBuffer');
-const { evictSession } = require('./UploadController');
+const { evictSession } = require('../lib/hotCaches');
 // Summary aggregate lives in one place (plans/017) — re-exported below for
 // existing consumers/tests.
 const {
@@ -14,8 +14,8 @@ const {
     decorateWithSummaries,
     recomputeSummary,
 } = require('../services/sessionSummaries');
-// CSV helpers extracted to lib/ (plans/017) — re-exported below.
-const { formatDuration, sanitizeFilename, csvEscape } = require('../lib/csvExport');
+// CSV helpers used by exportCsv.
+const { sanitizeFilename, csvEscape } = require('../lib/csvExport');
 const {
   renameSchema,
   notesSchema,
@@ -500,13 +500,6 @@ class SessionController {
 }
 
 module.exports = SessionController;
-module.exports.formatDuration = formatDuration;
-module.exports.sanitizeFilename = sanitizeFilename;
-module.exports.csvEscape = csvEscape;
-module.exports.loadOwnedSession = loadOwnedSession;
-module.exports.decorateWithSummaries = decorateWithSummaries;
-module.exports.aggregateSummaries = aggregateSummaries;
-module.exports.recomputeSummary = recomputeSummary;
 
 // ── Shared helpers ──────────────────────────────────────────────────────────
 
