@@ -25,7 +25,7 @@ async function resolveUser(eml) {
 }
 
 class UploadController {
-    static async processUpload(req, res) {
+    static async processUpload(req, res, next) {
         try {
             // ── AUTHENTICATION ──────────────────────────────────────────────
             // When UPLOAD_API_TOKEN is configured, bearer token is REQUIRED.
@@ -164,8 +164,7 @@ class UploadController {
             // Respond immediately — do NOT await the DB flush.
             res.status(200).send('OK!');
         } catch (err) {
-            res.status(500).json({ error: 'Internal server error' });
-            console.error(err.message || err);
+            next(err);
         }
     }
 }

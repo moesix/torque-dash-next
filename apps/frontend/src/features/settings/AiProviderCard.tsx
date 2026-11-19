@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { updateLlmSettings, testLlmConnection } from '@/lib/api';
+import { ApiError, updateLlmSettings, testLlmConnection } from '@/lib/api';
 import type { Settings } from '@/lib/types';
 import Button from '@/components/ui/Button';
 import Badge from '@/components/ui/Badge';
@@ -57,8 +57,8 @@ export default function AiProviderCard({ settings, onUpdate }: Props) {
       if (updated) onUpdate(updated);
       setApiKey('');
       setTestResult(null);
-    } catch {
-      setError('Failed to save settings.');
+    } catch (err) {
+      setError(err instanceof ApiError && err.message ? err.message : 'Failed to save settings.');
     } finally {
       setBusy(false);
     }
@@ -77,8 +77,8 @@ export default function AiProviderCard({ settings, onUpdate }: Props) {
       } else {
         setError(res.error || 'Test failed');
       }
-    } catch {
-      setError('Connection test failed.');
+    } catch (err) {
+      setError(err instanceof ApiError && err.message ? err.message : 'Connection test failed.');
     } finally {
       setBusy(false);
     }

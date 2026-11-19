@@ -57,7 +57,7 @@ class UserController {
             });
         });
     }
-    static async register(req, res) {
+    static async register(req, res, next) {
         try {
             // Hard-disable via env always wins (deploy-time kill switch).
             if (process.env.DISABLE_REGISTRATION === 'true') {
@@ -131,14 +131,13 @@ class UserController {
             return res.status(201).json({ ok: true });
 
         } catch (err) {
-            console.error('Error:', err.message);
-            res.status(500).json({ error: 'Internal server error' });
+            next(err);
         }
     }
     // Public read of site settings (the register/login pages need this to
     // decide whether to surface the signup form). The deploy-time env
     // kill-switch always wins over the runtime toggle, so we OR it in here.
-    static async getSettings(req, res) {
+    static async getSettings(req, res, next) {
         try {
             const settings = await Settings.getSingleton();
             const envDisabled = process.env.DISABLE_REGISTRATION === 'true';
@@ -164,11 +163,10 @@ class UserController {
             }
             res.json(body);
         } catch (err) {
-            console.error(err.message || err);
-            res.status(500).json({ error: 'Internal server error' });
+            next(err);
         }
     }
-    static async getSettingsFull(req, res) {
+    static async getSettingsFull(req, res, next) {
         try {
             const settings = await Settings.getSingleton();
             const envDisabled = process.env.DISABLE_REGISTRATION === 'true';
@@ -190,8 +188,7 @@ class UserController {
             // userinfo). Session-derived, never client input.
             res.json(settingsView(settings, extras, { isAdmin: req.user && req.user.isAdmin }));
         } catch (err) {
-            console.error(err.message || err);
-            res.status(500).json({ error: 'Internal server error' });
+            next(err);
         }
     }
     // Authenticated toggle of site settings. ADMIN-ONLY (plan 099): the first
@@ -199,7 +196,7 @@ class UserController {
     // registration toggle, rotate the upload token, or change LLM/vehicle/
     // retention/timezone config. The deploy-time DISABLE_REGISTRATION env var
     // always wins over the runtime toggle.
-    static async updateSettings(req, res) {
+    static async updateSettings(req, res, next) {
         try {
             if (!requireAdmin(req, res)) return;
 
@@ -380,15 +377,14 @@ class UserController {
                 retentionPolicyApplied: policyApplied,
             }, { isAdmin: true }));
         } catch (err) {
-            console.error(err.message || err);
-            res.status(500).json({ error: 'Internal server error' });
+            next(err);
         }
     }
     // Generate a new upload API token (64 hex chars). Returns the full token
     // to the caller exactly once; subsequent reads via getSettings expose only
     // a Boolean indicating presence. The token is persisted to the Settings row
     // and also held in the runtime in-memory holder for fast rate-limiter checks.
-    static async generateUploadToken(req, res) {
+    static async generateUploadToken(req, res, next) {
         try {
             // Admin-only: rotating the shared upload token locks out every
             // configured Torque client, so only the operator may do it.
@@ -405,13 +401,12 @@ class UserController {
             runtime.setUploadApiToken(token);
             res.json({ uploadApiToken: token });
         } catch (err) {
-            console.error(err.message || err);
-            res.status(500).json({ error: 'Internal server error' });
+            next(err);
         }
     }
 
     // Change password endpoint. Regenerates session to invalidate all other sessions.
-    static async changePassword(req, res) {
+    static async changePassword(req, res, next) {
         try {
             const { currentPassword, newPassword } = req.body;
 
@@ -462,8 +457,7 @@ class UserController {
                 });
             });
         } catch (err) {
-            console.error('[UserController]', err.message || err);
-            res.status(500).json({ error: 'Internal server error' });
+            next(err);
         }
     }
 }

@@ -75,6 +75,7 @@ function makeStubRes() {
     send(data) { calls.body = data; return res; },
     setHeader() { return res; },
     set() { return res; },
+    vary() { return res; },
     write() { return res; },
     end() { return res; },
   };

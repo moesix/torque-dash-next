@@ -49,7 +49,17 @@ async function request<T>(url: string, init?: RequestInit): Promise<T | undefine
     throw new ApiError('Unauthorized', 401);
   }
   if (!res.ok) {
-    throw new ApiError(`Request failed with status ${res.status}`, res.status);
+    // Prefer the backend's `{ error }` message (it is user-actionable, e.g.
+    // "retentionDays must be between 90 and 365") over a bare status string.
+    // res.json() consumes the body; nothing below reads it on this path.
+    let message = `Request failed with status ${res.status}`;
+    try {
+      const body = await res.json();
+      if (body && typeof body.error === 'string' && body.error) message = body.error;
+    } catch {
+      // non-JSON body (e.g. a proxy's HTML error page) — keep the status message
+    }
+    throw new ApiError(message, res.status);
   }
 
   const contentType = res.headers.get('content-type') ?? '';

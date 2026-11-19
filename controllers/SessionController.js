@@ -28,7 +28,7 @@ const {
 } = require('../lib/validators');
 
 class SessionController {
-    static async delete(req, res) {
+    static async delete(req, res, next) {
         try{
             // quiesce pending ingest rows before mutating Logs so buffered
             // frames can't resurrect deleted ranges
@@ -50,13 +50,11 @@ class SessionController {
             // as cut/filter/copy/join.
             invalidatePidKeys(row.id);
             res.sendStatus(200);
-        }
-        catch (err) {
-            console.error('[SessionController]', err);
-            res.status(500).json({ error: 'Internal server error' });
+        } catch (err) {
+            next(err);
         }
     }
-    static async getOne(req, res) {
+    static async getOne(req, res, next) {
         try{
             // Get session for user (no eager Log load — summary is aggregated)
             let session = await Session.findOne({
@@ -81,13 +79,11 @@ class SessionController {
             out.vehicleId = session.vehicleId || null;
             out.vehicleName = session.Vehicle?.name || null;
             res.json(out);
-        }
-        catch (err) {
-            console.error('[SessionController]', err);
-            res.status(500).json({ error: 'Internal server error' });
+        } catch (err) {
+            next(err);
         }
     }
-    static async getAll(req, res) {
+    static async getAll(req, res, next) {
         try {
             // Clamp pagination to limit [1,200] (default 50) and offset >= 0.
             // limit=0 → 50 is deliberate: 0 parses falsy and falls back to the
@@ -148,13 +144,11 @@ class SessionController {
             res.set('Cache-Control', 'private, no-store');
             res.vary('Cookie');
             res.json({ sessions: out, total, limit, offset });
-        }
-        catch (err) {
-            console.error('[SessionController]', err);
-            res.status(500).json({ error: 'Internal server error' });
+        } catch (err) {
+            next(err);
         }
     }
-    static async rename(req, res) {
+    static async rename(req, res, next) {
         try {
             const { error: valErr } = renameSchema.validate(req.body);
             if (valErr) {
@@ -170,13 +164,11 @@ class SessionController {
             )
             if (affectedCount === 0) return res.status(404).json({ error: 'Session not found' });
             res.sendStatus(200);
-        }
-        catch (err) {
-            console.error('[SessionController]', err);
-            res.status(500).json({ error: 'Internal server error' });
+        } catch (err) {
+            next(err);
         }
     }
-    static async updateNotes(req, res) {
+    static async updateNotes(req, res, next) {
         try {
             const { error: valErr } = notesSchema.validate(req.body);
             if (valErr) {
@@ -188,11 +180,10 @@ class SessionController {
             await session.update({ notes: notes || null });
             res.json({ ok: true, notes: session.notes });
         } catch (err) {
-            console.error('[SessionController]', err);
-            res.status(500).json({ error: 'Internal server error' });
+            next(err);
         }
     }
-    static async addLocation(req, res) {
+    static async addLocation(req, res, next) {
         try {
             let session = await loadOwnedSession(req.params.sessionId, req.user.id);
             if(!session) return res.status(404).json({ error: 'Session not found' });
@@ -210,13 +201,11 @@ class SessionController {
                 }
             )
             res.sendStatus(200);
-        }
-        catch (err) {
-            console.error('[SessionController]', err);
-            res.status(500).json({ error: 'Internal server error' });
+        } catch (err) {
+            next(err);
         }
     }
-    static async copy(req, res) {
+    static async copy(req, res, next) {
         try {
             await drainIngest();
             const { error: valErr } = copySchema.validate(req.body);
@@ -253,13 +242,11 @@ class SessionController {
             });
             await recomputeSummary(sessionCopy.id);
             res.sendStatus(200);
-        }
-        catch (err) {
-            console.error('[SessionController]', err);
-            res.status(500).json({ error: 'Internal server error' });
+        } catch (err) {
+            next(err);
         }
     }
-    static async filter(req, res) {
+    static async filter(req, res, next) {
         try {
             await drainIngest();
             const { error: valErr } = filterSchema.validate(req.body);
@@ -293,13 +280,11 @@ class SessionController {
             });
             await recomputeSummary(session.id);
             res.sendStatus(200);
-        }
-        catch (err) {
-            console.error('[SessionController]', err);
-            res.status(500).json({ error: 'Internal server error' });
+        } catch (err) {
+            next(err);
         }
     }
-    static async cut(req, res) {
+    static async cut(req, res, next) {
         try {
             await drainIngest();
             const { error: valErr } = cutSchema.validate(req.body);
@@ -323,13 +308,11 @@ class SessionController {
             }});
             await recomputeSummary(session.id);
             res.sendStatus(200);
-        }
-        catch (err) {
-            console.error('[SessionController]', err);
-            res.status(500).json({ error: 'Internal server error' });
+        } catch (err) {
+            next(err);
         }
     }
-    static async join(req, res) {
+    static async join(req, res, next) {
         try {
             await drainIngest();
             const { error: valErr } = joinSchema.validate(req.body);
@@ -380,10 +363,8 @@ class SessionController {
             });
             await recomputeSummary(joinSession.id);
             res.sendStatus(200);
-        }
-        catch (err) {
-            console.error('[SessionController]', err);
-            res.status(500).json({ error: 'Internal server error' });
+        } catch (err) {
+            next(err);
         }
     }
     static async exportCsv(req, res) {
@@ -473,7 +454,7 @@ class SessionController {
         }
     }
 
-    static async reassignVehicle(req, res) {
+    static async reassignVehicle(req, res, next) {
         try {
             const { vehicleId } = req.body;
             // vehicleId can be a number (assign) or null (unassign)
@@ -497,8 +478,7 @@ class SessionController {
             await session.update({ vehicleId: vehicleId || null });
             res.json({ ok: true, vehicleId: session.vehicleId });
         } catch (err) {
-            console.error('[SessionController]', err);
-            res.status(500).json({ error: 'Internal server error' });
+            next(err);
         }
     }
 }

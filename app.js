@@ -83,6 +83,10 @@ app.use('/api', express.json({ limit: '1mb' }));
 app.use('/api', require('./routes/api.js'));
 // JSON 404 for any unmatched route (the SPA handles its own not-found UI).
 app.use('*', (req, res) => res.status(404).json({ error: 'Not found' }));
+// Terminal error middleware: turns anything thrown/rejected by a handler into
+// the same JSON shape. 5xx never leak err.message; 4xx (HttpError) do.
+const { errorMiddleware } = require('./lib/httpError');
+app.use(errorMiddleware);
 
 // Connect to database and (non-prod) sync models.
 // Gate: NODE_ENV !== 'production' runs sequelize.sync() here; with
