@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import type { Session } from '@/lib/types';
 import { renameSession } from '@/lib/api';
+import { useUnits } from '@/app/unitSystem';
 
 interface Props {
   sessions: Session[];
@@ -11,6 +12,7 @@ interface Props {
 export default function SessionTable({ sessions }: Props) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { fmt } = useUnits();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
   const [renameError, setRenameError] = useState(false);
@@ -157,7 +159,7 @@ export default function SessionTable({ sessions }: Props) {
                 </td>
                 <td className="py-2.5 px-4">{s.duration || '—'}</td>
                 <td className="py-2.5 px-4">
-                  {maxSpeed != null ? `${Math.round(maxSpeed)} km/h` : '—'}
+                  {maxSpeed != null ? fmt(maxSpeed, 'km/h', { digits: 0 }).text : '—'}
                 </td>
                 <td className="py-2.5 px-4">{maxRpm != null ? Math.round(maxRpm) : '—'}</td>
               </tr>

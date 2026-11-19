@@ -8,6 +8,8 @@
 
 import { useMemo } from 'react';
 import type { TelemetryFrame, SeriesSource } from '@/lib/types';
+import { useUnits } from '@/app/unitSystem';
+import { convert } from '@/lib/units';
 import DiagnosticPanel from './DiagnosticPanel';
 import type {
   ComputedSeries,
@@ -47,7 +49,7 @@ const PIDS_THROTTLE_PEDAL = ['k11', 'k49'] as const;
 
 const YAXIS_RPM_SPEED: AxisOverrides = { 0: {}, 1: {} }; // RPM left, Speed right
 const YAXIS_O2_AFR: AxisOverrides = { 0: {}, 1: {} }; // O2 voltage left, AFR right
-const YAXIS_COOLANT: AxisOverrides = { 0: { min: 60, max: 95 } };
+const YAXIS_COOLANT: AxisOverrides = { 0: { min: 60, max: 95 } }; // °C bounds
 const YAXIS_BOOST_MAF: AxisOverrides = { 0: {}, 1: {} }; // Boost left, MAF right
 
 // Fuel-trim reference lines use the theme-neutral splitLine colour: their
@@ -71,6 +73,16 @@ function hasPids(required: string[], available: SeriesSource[]): boolean {
 // ── Component ────────────────────────────────────────────────────────────
 
 export default function DiagnosticPanels({ frames, available, forceExpanded = false }: Props) {
+  const { system } = useUnits();
+  // The coolant panel's 60–95 is °C; convert the bounds with the axis so a °F
+  // session is not clipped. Identity in metric → same min/max as before.
+  const yaxisCoolant = useMemo<AxisOverrides>(() => ({
+    0: {
+      min: convert(YAXIS_COOLANT[0].min as number, '°C', system) as number,
+      max: convert(YAXIS_COOLANT[0].max as number, '°C', system) as number,
+    },
+  }), [system]);
+
   // Pre-compute Total Trim series (memoized — only recomputes when frames change)
   const totalTrimData = useMemo(() => computeTotalTrim(frames), [frames]);
 
@@ -129,7 +141,7 @@ export default function DiagnosticPanels({ frames, available, forceExpanded = fa
         title="Engine Coolant Temp"
         frames={frames}
         pids={PIDS_COOLANT}
-        yAxisOverrides={YAXIS_COOLANT}
+        yAxisOverrides={yaxisCoolant}
         forceExpanded={forceExpanded}
       />
 

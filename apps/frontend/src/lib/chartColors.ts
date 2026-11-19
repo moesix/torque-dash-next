@@ -13,6 +13,8 @@
  * charts re-apply the neutrals on theme change without a full refetch.
  */
 
+import { kindOf } from './units';
+
 /** Brand accent, canvas-safe (sync with `--accent` in index.css). */
 export const ACCENT = '#14b8a6';
 /** Reference-band fill / dataZoom filler (accent at 15%). */
@@ -52,6 +54,16 @@ export const UNIT_COLORS: Record<string, string> = {
 };
 
 /**
+ * Unit-kind → colour, so converted labels (mph, °F, bar) keep the colour of
+ * their metric twin. The explicit UNIT_COLORS keys above stay as aliases.
+ */
+const KIND_COLORS: Record<string, string> = {
+  speed: UNIT_COLORS['km/h'],
+  temperature: UNIT_COLORS['°C'],
+  pressure: UNIT_COLORS.psi,
+};
+
+/**
  * Canonical per-metric colors for dashboards/aggregates, so the same metric
  * never disagrees across cards (SessionSummaryCard gauges vs UNIT_COLORS).
  */
@@ -63,7 +75,11 @@ export const METRIC_COLORS = {
 } as const;
 
 export function colorForUnit(unit: string, fallbackIndex: number): string {
-  return UNIT_COLORS[unit] ?? SERIES_COLORS[fallbackIndex % SERIES_COLORS.length];
+  const direct = UNIT_COLORS[unit];
+  if (direct) return direct;
+  const byKind = KIND_COLORS[kindOf(unit)];
+  if (byKind) return byKind;
+  return SERIES_COLORS[fallbackIndex % SERIES_COLORS.length];
 }
 
 // ── Theme-aware chart neutrals ───────────────────────────────────────────

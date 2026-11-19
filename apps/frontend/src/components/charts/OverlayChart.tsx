@@ -22,6 +22,8 @@ import {
 import { CanvasRenderer } from 'echarts/renderers';
 import type { TelemetryFrame, SeriesSource } from '@/lib/types';
 import { getSeriesData } from '@/lib/pidDecode';
+import { useUnits } from '@/app/unitSystem';
+import { convertSeries, format, unitLabel } from '@/lib/units';
 import {
   ACCENT,
   ACCENT_AREA,
@@ -74,22 +76,26 @@ export default function OverlayChart({
 }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<ReturnType<typeof echarts.init> | null>(null);
+  const { system } = useUnits();
 
   // Track the active theme — a flip of `.dark` on <html> re-applies the
   // theme-aware chart neutrals (axis labels, grid, tooltip) below.
   const [themeVersion, setThemeVersion] = useState(0);
   useEffect(() => subscribeChartTheme(() => setThemeVersion((v) => v + 1)), []);
 
-  // ── Group sources by unit ──────────────────────────────────────────
+  // ── Group sources by CONVERTED unit ────────────────────────────────
+  // Grouping on the display label (not the raw unit) keeps km/h and mph
+  // from ever sharing a y-axis. In metric mode labels are ids, so the
+  // grouping is unchanged.
   const unitGroups = useMemo(() => {
     const ug = new Map<string, SeriesSource[]>();
     for (const s of sources) {
-      const u = s.unit || '_';
+      const u = unitLabel(s.unit, system) || s.unit || '_';
       if (!ug.has(u)) ug.set(u, []);
       ug.get(u)!.push(s);
     }
     return ug;
-  }, [sources]);
+  }, [sources, system]);
 
   // ── Dynamic height class based on source count ─────────────────────
   const heightClass = useMemo(() => {
@@ -231,11 +237,12 @@ export default function OverlayChart({
 
     // Build series options
     const seriesOptions = sources.map((src, i) => {
-      const u = src.unit || '_';
+      const u = unitLabel(src.unit, system) || src.unit || '_';
       // Find yAxisIndex for this unit in the full frequency list
       const yi = unitFrequency.findIndex(([unit]) => unit === u);
       const color = SERIES_COLORS[i % SERIES_COLORS.length];
-      const data = getSeriesData(frames, src, epochs);
+      const raw = getSeriesData(frames, src, epochs);
+      const data = convertSeries(raw, src.unit, system);
 
       return {
         name: src.short,
@@ -267,6 +274,8 @@ export default function OverlayChart({
       };
     });
 
+    const unitBySeries = new Map(sources.map((s) => [s.short, s.unit]));
+
     chart.setOption(
       {
         animation: false,
@@ -276,6 +285,20 @@ export default function OverlayChart({
           backgroundColor: theme.tooltipBg,
           borderColor: theme.tooltipBorder,
           textStyle: { color: theme.tooltipText },
+          formatter: (params: any) => {
+            const list = Array.isArray(params) ? params : [params];
+            return list
+              .map((p) => {
+                const raw = Array.isArray(p.value) ? p.value[1] : p.value;
+                const text = format(
+                  typeof raw === 'number' ? raw : null,
+                  unitBySeries.get(p.seriesName) ?? '',
+                  system,
+                ).text;
+                return `${p.marker ?? ''}${p.seriesName}: ${text}`;
+              })
+              .join('<br/>');
+          },
         },
         xAxis: {
           type: 'time' as const,
@@ -303,7 +326,7 @@ export default function OverlayChart({
       },
       { notMerge: true },
     );
-  }, [sources, frames, epochs, unitGroups, themeVersion]);
+  }, [sources, frames, epochs, unitGroups, themeVersion, system]);
 
   // ── Cursor markLine effect (merge mode — does NOT re-render data) ──
   useEffect(() => {

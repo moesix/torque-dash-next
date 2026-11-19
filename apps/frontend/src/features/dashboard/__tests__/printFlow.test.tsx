@@ -42,9 +42,19 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { MemoryRouter, Routes, Route } from 'react-router';
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { Session, TelemetryFrame } from '@/lib/types';
+import { UnitSystemProvider } from '@/app/unitSystem';
 
 // ── Mocks (data/IO layer only) ─────────────────────────────────────────────
+
+// Unit preference is served by the provider; partial-mock so the rest of the
+// API surface (sessions/export) keeps its real implementation.
+const apiMocks = vi.hoisted(() => ({ getPreferences: vi.fn() }));
+vi.mock('@/lib/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/api')>();
+  return { ...actual, getPreferences: apiMocks.getPreferences };
+});
 
 // Fixture data + echarts spies need to be referencable from vi.mock factories,
 // which vitest hoists above imports — hence vi.hoisted.
@@ -168,12 +178,17 @@ function shimHtmlDialogMethods() {
 }
 
 function renderDashboard() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
-    <MemoryRouter initialEntries={['/sessions/s1']}>
-      <Routes>
-        <Route path="/sessions/:id" element={<ReplayDashboard />} />
-      </Routes>
-    </MemoryRouter>,
+    <QueryClientProvider client={client}>
+      <UnitSystemProvider>
+        <MemoryRouter initialEntries={['/sessions/s1']}>
+          <Routes>
+            <Route path="/sessions/:id" element={<ReplayDashboard />} />
+          </Routes>
+        </MemoryRouter>
+      </UnitSystemProvider>
+    </QueryClientProvider>,
   );
 }
 
@@ -216,6 +231,12 @@ describe('ReplayDashboard print state machine (jsdom)', () => {
       value: printSpy,
       configurable: true,
       writable: true,
+    });
+    apiMocks.getPreferences.mockReset();
+    apiMocks.getPreferences.mockResolvedValue({
+      unitSystem: 'us',
+      serverDefault: 'metric',
+      preference: 'us',
     });
     echartsMocks.init.mockClear();
   });
@@ -337,5 +358,19 @@ describe('ReplayDashboard print state machine (jsdom)', () => {
       vi.advanceTimersByTime(1000);
     });
     expect(printSpy).not.toHaveBeenCalled();
+  });
+
+  it('a US preference renders °F/mph in the print DOM and no °C/km/h', async () => {
+    // Real timers so Testing Library can wait for the preference query; this
+    // test never drives the rAF print chain.
+    vi.useRealTimers();
+    renderDashboard();
+
+    // Same tree that window.print() serializes — the summary card, decoded
+    // metrics and PID selector are all part of the report.
+    expect(await screen.findAllByText(/mph/)).not.toHaveLength(0);
+    expect(screen.getAllByText(/°F/).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/km\/h/)).toBeNull();
+    expect(screen.queryByText(/°C/)).toBeNull();
   });
 });

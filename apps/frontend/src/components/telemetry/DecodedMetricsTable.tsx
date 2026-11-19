@@ -7,6 +7,8 @@
 import { useMemo } from 'react';
 import type { SeriesSource } from '@/lib/types';
 import type { SeriesStats } from '@/lib/pidDecode';
+import { useUnits } from '@/app/unitSystem';
+import { convert, unitLabel } from '@/lib/units';
 
 // ── Props ────────────────────────────────────────────────────────────────
 
@@ -27,6 +29,7 @@ function fmtNum(v: number): string {
 // ── Component ────────────────────────────────────────────────────────────
 
 export default function DecodedMetricsTable({ sources, stats }: Props) {
+  const { system } = useUnits();
   const rows = useMemo(() => {
     return sources.map((src) => ({
       src,
@@ -35,6 +38,10 @@ export default function DecodedMetricsTable({ sources, stats }: Props) {
   }, [sources, stats]);
 
   const summary = `${sources.length} metrics decoded`;
+
+  /** Convert the stat into the current display system, then apply the table's
+   *  existing numeric formatting (precision stays as today). */
+  const fmtStat = (src: SeriesSource, v: number) => fmtNum(convert(v, src.unit, system) ?? v);
 
   // Separate column sources from pid sources for display clarity
   const columnRows = rows.filter((r) => r.src.source === 'column');
@@ -73,18 +80,18 @@ export default function DecodedMetricsTable({ sources, stats }: Props) {
                   <td className="py-1 pr-2 font-mono text-gray-400 dark:text-[var(--text-muted)]">
                     {src.pid}
                   </td>
-                  <td className="py-1 pr-2 text-gray-400 dark:text-[var(--text-muted)]">{src.unit}</td>
+                  <td className="py-1 pr-2 text-gray-400 dark:text-[var(--text-muted)]">{unitLabel(src.unit, system) || src.unit}</td>
                   <td className="py-1 pr-2 text-right tabular-nums">
-                    {stats ? fmtNum(stats.min) : '—'}
+                    {stats ? fmtStat(src, stats.min) : '—'}
                   </td>
                   <td className="py-1 pr-2 text-right tabular-nums">
-                    {stats ? fmtNum(stats.max) : '—'}
+                    {stats ? fmtStat(src, stats.max) : '—'}
                   </td>
                   <td className="py-1 pr-2 text-right tabular-nums">
-                    {stats ? fmtNum(stats.avg) : '—'}
+                    {stats ? fmtStat(src, stats.avg) : '—'}
                   </td>
                   <td className="py-1 text-right tabular-nums">
-                    {stats?.last != null ? fmtNum(stats.last) : '—'}
+                    {stats?.last != null ? fmtStat(src, stats.last) : '—'}
                   </td>
                 </tr>
               ))}
@@ -108,18 +115,18 @@ export default function DecodedMetricsTable({ sources, stats }: Props) {
                   <td className="py-1 pr-2 font-mono text-gray-400 dark:text-[var(--text-muted)]">
                     {src.pid}
                   </td>
-                  <td className="py-1 pr-2 text-gray-400 dark:text-[var(--text-muted)]">{src.unit}</td>
+                  <td className="py-1 pr-2 text-gray-400 dark:text-[var(--text-muted)]">{unitLabel(src.unit, system) || src.unit}</td>
                   <td className="py-1 pr-2 text-right tabular-nums">
-                    {stats ? fmtNum(stats.min) : '—'}
+                    {stats ? fmtStat(src, stats.min) : '—'}
                   </td>
                   <td className="py-1 pr-2 text-right tabular-nums">
-                    {stats ? fmtNum(stats.max) : '—'}
+                    {stats ? fmtStat(src, stats.max) : '—'}
                   </td>
                   <td className="py-1 pr-2 text-right tabular-nums">
-                    {stats ? fmtNum(stats.avg) : '—'}
+                    {stats ? fmtStat(src, stats.avg) : '—'}
                   </td>
                   <td className="py-1 text-right tabular-nums">
-                    {stats?.last != null ? fmtNum(stats.last) : '—'}
+                    {stats?.last != null ? fmtStat(src, stats.last) : '—'}
                   </td>
                 </tr>
               ))}

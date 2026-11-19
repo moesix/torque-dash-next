@@ -24,6 +24,8 @@ import {
 import { CanvasRenderer } from 'echarts/renderers';
 import type { TelemetryFrame, SeriesSource } from '@/lib/types';
 import { getSeriesData, getAvailableSeries } from '@/lib/pidDecode';
+import { useUnits } from '@/app/unitSystem';
+import { convertSeries } from '@/lib/units';
 import ChevronIcon from '@/components/ui/ChevronIcon';
 import {
   ACCENT,
@@ -115,6 +117,7 @@ function DiagnosticPanel({
   const [expanded, setExpanded] = useState(!defaultCollapsed);
   const [themeVersion, setThemeVersion] = useState(0);
   useEffect(() => subscribeChartTheme(() => setThemeVersion((v) => v + 1)), []);
+  const { system } = useUnits();
   const isExpanded = forceExpanded || expanded;
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<ReturnType<typeof echarts.init> | null>(null);
@@ -190,7 +193,9 @@ function DiagnosticPanel({
 
     for (let i = 0; i < resolvedSources.length; i++) {
       const src = resolvedSources[i];
-      const data = getSeriesData(frames, src);
+      const data = convertSeries(getSeriesData(frames, src), src.unit, system);
+      // Colours key off the ORIGINAL unit so a series keeps its colour after
+      // conversion (mph still renders in the speed colour).
       const color = colorForUnit(src.unit, i);
 
       seriesOptions.push({
@@ -313,6 +318,7 @@ function DiagnosticPanel({
     markAreas,
     yAxisOverrides,
     themeVersion,
+    system,
   ]);
 
   // ── Render ─────────────────────────────────────────────────────────

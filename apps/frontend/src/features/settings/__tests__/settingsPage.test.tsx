@@ -19,10 +19,12 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import SettingsPage from '../SettingsPage';
 import {
   ApiError,
   getFullSettings,
+  getPreferences,
   updateSettings,
   generateUploadToken,
 } from '@/lib/api';
@@ -40,6 +42,8 @@ vi.mock('@/lib/api', () => ({
   getFullSettings: vi.fn(),
   updateSettings: vi.fn(),
   generateUploadToken: vi.fn(),
+  getPreferences: vi.fn(),
+  updatePreferences: vi.fn(),
 }));
 
 vi.mock('@/lib/useVersion', () => ({
@@ -62,6 +66,7 @@ vi.mock('@/components/ai/AnalysisHistory', () => ({
 const getFullMock = vi.mocked(getFullSettings);
 const updateMock = vi.mocked(updateSettings);
 const generateMock = vi.mocked(generateUploadToken);
+const getPreferencesMock = vi.mocked(getPreferences);
 
 function settingsFixture(overrides: Partial<Settings> = {}): Settings {
   return {
@@ -92,7 +97,17 @@ function settingsFixture(overrides: Partial<Settings> = {}): Settings {
 /** Resolve the initial load and wait for the admin gate to settle. */
 async function renderLoaded(settings: Settings) {
   getFullMock.mockResolvedValue(settings);
-  render(<SettingsPage />);
+  getPreferencesMock.mockResolvedValue({
+    unitSystem: 'metric',
+    serverDefault: 'metric',
+    preference: null,
+  });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(
+    <QueryClientProvider client={client}>
+      <SettingsPage />
+    </QueryClientProvider>,
+  );
   // The page renders nothing admin-only until getFullSettings resolves.
   await screen.findByText('Settings');
   return settings;
@@ -103,6 +118,7 @@ describe('SettingsPage (jsdom)', () => {
     getFullMock.mockReset();
     updateMock.mockReset();
     generateMock.mockReset();
+    getPreferencesMock.mockReset();
     updateMock.mockResolvedValue(settingsFixture());
   });
 

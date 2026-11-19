@@ -2,6 +2,8 @@ import { useMemo } from 'react';
 import type { TelemetryFrame } from '@/lib/types';
 import { getSeriesData, findNearestFrameIndex } from '@/lib/pidDecode';
 import { usePlaybackStore } from '@/app/playbackStore';
+import { useUnits } from '@/app/unitSystem';
+import { convert, unitLabel } from '@/lib/units';
 import { METRIC_COLORS } from '@/lib/chartColors';
 
 interface Props {
@@ -59,6 +61,9 @@ function RingGauge({ label, value, max, unit, color }: GaugeProps) {
         viewBox="0 0 100 100"
         role="img"
         aria-label={`${label}: ${display}${unit}`}
+        data-value={display}
+        data-max={Math.round(max)}
+        data-unit={unit.trim()}
       >
         {/* Background ring */}
         <circle
@@ -121,6 +126,7 @@ export default function SessionSummaryCard({
   maxCoolant,
 }: Props) {
   const cursorTime = usePlaybackStore((s) => s.cursorTime);
+  const { system } = useUnits();
 
   // Pre-compute sorted timestamp array for binary search
   const sortedTimestamps = useMemo(() => {
@@ -190,7 +196,8 @@ export default function SessionSummaryCard({
     <div className="card">
       <h3 className="text-lg font-semibold leading-relaxed">Session Summary</h3>
 
-      {/* Top: 3 SVG ring gauges */}
+      {/* Top: 3 SVG ring gauges. Value, max and label convert together — a
+          gauge whose max stays 240 while the label says mph would be a bug. */}
       <div className="flex items-center justify-around py-4 flex-wrap gap-2" aria-live="polite">
         <RingGauge
           label="RPM"
@@ -201,16 +208,16 @@ export default function SessionSummaryCard({
         />
         <RingGauge
           label="Coolant"
-          value={currentValues.coolant}
-          max={maxCoolant ?? 120}
-          unit="°C"
+          value={convert(currentValues.coolant, '°C', system) ?? 0}
+          max={convert(maxCoolant ?? 120, '°C', system) ?? 120}
+          unit={unitLabel('°C', system)}
           color={METRIC_COLORS.coolant}
         />
         <RingGauge
           label="Speed"
-          value={currentValues.speed}
-          max={maxSpeed ?? 240}
-          unit=" km/h"
+          value={convert(currentValues.speed, 'km/h', system) ?? 0}
+          max={convert(maxSpeed ?? 240, 'km/h', system) ?? 240}
+          unit={` ${unitLabel('km/h', system)}`}
           color={METRIC_COLORS.speed}
         />
       </div>
@@ -229,26 +236,31 @@ export default function SessionSummaryCard({
           </thead>
           <tbody className="text-gray-700 dark:text-[var(--text-secondary)]">
             {[
-              { label: 'Engine RPM', unit: 'rpm', s: rpmStats },
-              { label: 'Coolant', unit: '°C', s: coolantStats },
-              { label: 'Speed', unit: 'km/h', s: speedStats },
-            ].map((row) => (
-              <tr key={row.label} className="border-t border-gray-100 dark:border-[var(--border-default)]">
-                <td className="py-1 pr-2 font-medium">
-                  {row.label}
-                  <span className="ml-1 text-fg-muted">{row.unit}</span>
-                </td>
-                <td className="py-1 pr-2 text-right tabular-nums">
-                  {row.s != null ? Math.round(row.s.min) : '—'}
-                </td>
-                <td className="py-1 pr-2 text-right tabular-nums">
-                  {row.s != null ? Math.round(row.s.max) : '—'}
-                </td>
-                <td className="py-1 text-right tabular-nums">
-                  {row.s != null ? Math.round(row.s.median) : '—'}
-                </td>
-              </tr>
-            ))}
+              { label: 'Engine RPM', from: 'rpm', s: rpmStats },
+              { label: 'Coolant', from: '°C', s: coolantStats },
+              { label: 'Speed', from: 'km/h', s: speedStats },
+            ].map((row) => {
+              const display = (v: number) => Math.round(convert(v, row.from, system) ?? v);
+              return (
+                <tr key={row.label} className="border-t border-gray-100 dark:border-[var(--border-default)]">
+                  <td className="py-1 pr-2 font-medium">
+                    {row.label}
+                    <span className="ml-1 text-fg-muted">
+                      {unitLabel(row.from, system) || row.from}
+                    </span>
+                  </td>
+                  <td className="py-1 pr-2 text-right tabular-nums">
+                    {row.s != null ? display(row.s.min) : '—'}
+                  </td>
+                  <td className="py-1 pr-2 text-right tabular-nums">
+                    {row.s != null ? display(row.s.max) : '—'}
+                  </td>
+                  <td className="py-1 text-right tabular-nums">
+                    {row.s != null ? display(row.s.median) : '—'}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
