@@ -88,6 +88,13 @@ router.get('/settings/full', writeLimiter, authenticate, UserController.getSetti
 router.put('/settings', writeLimiter, authenticate, UserController.updateSettings);
 router.post('/settings/upload-token', writeLimiter, authenticate, UserController.generateUploadToken);
 
+// ── Per-user display preferences (plan 045) ──────────────────────────
+// Unit system lives on Users (NULL = inherit DEFAULT_UNIT_SYSTEM), not in the
+// global Settings singleton. Declared before the catch-all limiter (the PUT
+// uses writeLimiter, like the settings mutation above).
+router.get('/users/preferences', authenticate, UserController.getPreferences);
+router.put('/users/preferences', writeLimiter, authenticate, UserController.updatePreferences);
+
 // ── VERSION ─────────────────────────────────────────────────────────
 router.get('/version', (req, res) => {
   try {

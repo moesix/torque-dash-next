@@ -4,8 +4,10 @@ const sequelize = require('../models').sequelize;
 const passport = require('passport');
 const crypto = require('crypto');
 const runtime = require('../config/runtime');
+const config = require('../config/config');
 const { userByIdCache } = require('../config/passport');
-const { settingsUpdateSchema } = require('../lib/validators');
+const { settingsUpdateSchema, preferencesSchema } = require('../lib/validators');
+const { resolveUnitSystem } = require('../lib/units');
 
 // Admin = first registered user (bootstrap at register time, plan 099). Any
 // admin-only mutation must call this first and return 403 when it fails.
@@ -57,6 +59,61 @@ class UserController {
             });
         });
     }
+    // ── Per-user display preferences (plan 045) ────────────────────────
+    // The unit system is NOT a Settings key: Settings is a global singleton
+    // and this preference belongs to the authenticated user. `unitSystem`
+    // returned here is the RESOLVED value (user → env default → metric);
+    // `serverDefault` lets the UI label the "Server default" inherit option.
+    static async getPreferences(req, res, next) {
+        try {
+            if (!req.user || !req.user.id) {
+                return res.status(401).json({ error: 'Unauthorized' });
+            }
+            const serverDefault = config.units.defaultSystem;
+            res.set('Cache-Control', 'private, no-store');
+            res.vary('Cookie');
+            return res.json({
+                unitSystem: resolveUnitSystem(req.user.unitSystem, serverDefault),
+                serverDefault,
+            });
+        } catch (err) {
+            next(err);
+        }
+    }
+
+    // PUT { unitSystem: 'metric'|'us'|'uk'|null } — null clears the column so
+    // the user inherits DEFAULT_UNIT_SYSTEM. Display-only: no telemetry rows
+    // are touched. The passport user cache is invalidated so the very next
+    // request (including CSV default / AI prompt) reads the new value.
+    static async updatePreferences(req, res, next) {
+        try {
+            if (!req.user || !req.user.id) {
+                return res.status(401).json({ error: 'Unauthorized' });
+            }
+            const { error, value } = preferencesSchema.validate(req.body);
+            if (error) {
+                return res.status(400).json({ error: error.details[0].message });
+            }
+
+            const unitSystem = value.unitSystem ?? null;
+            await User.update({ unitSystem }, { where: { id: req.user.id } });
+
+            userByIdCache.del(req.user.id);
+            // The current request's req.user is a plain object detached from
+            // the row — keep it consistent for downstream handlers.
+            req.user.unitSystem = unitSystem;
+
+            const serverDefault = config.units.defaultSystem;
+            res.set('Cache-Control', 'private, no-store');
+            return res.json({
+                unitSystem: resolveUnitSystem(unitSystem, serverDefault),
+                serverDefault,
+            });
+        } catch (err) {
+            next(err);
+        }
+    }
+
     static async register(req, res, next) {
         try {
             // Hard-disable via env always wins (deploy-time kill switch).

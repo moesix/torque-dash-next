@@ -43,6 +43,15 @@ The application **will not start** without these:
 | `POSTGRES_PASSWORD` | `openssl rand -base64 24` | Database password. Use the same value for all three `POSTGRES_*` vars. |
 | `SESSION_KEYS` | `openssl rand -hex 24` | Express session secrets. For key rotation, use comma-separated values. |
 
+### Unit system default (optional)
+
+`DEFAULT_UNIT_SYSTEM` sets the display units for users who have not chosen one
+(`metric` — the default — `us`, or `uk`). It is validated at config load: any
+other value aborts startup. Precedence is **explicit user preference →
+`DEFAULT_UNIT_SYSTEM` → `metric`**, so changing the env never rewrites an
+existing user's saved choice. Telemetry is always stored canonically
+(km/h, °C, kPa, L); the setting only affects rendering and exports.
+
 ### Upload API token (required for production)
 
 As of 2026, token authentication is the required security baseline for Torque

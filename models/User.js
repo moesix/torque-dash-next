@@ -26,6 +26,13 @@ module.exports = (sequelize, DataTypes) => {
             allowNull: false,
             defaultValue: false,
         },
+        // NULL = inherit DEFAULT_UNIT_SYSTEM (resolved at read time).
+        // Display-only preference — telemetry remains canonical.
+        unitSystem: {
+            type: DataTypes.STRING(16),
+            allowNull: true,
+            defaultValue: null,
+        },
     }, {
         hooks: {
             beforeCreate: [hashPassword, normalizeEmail],

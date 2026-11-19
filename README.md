@@ -181,6 +181,7 @@ After creating all user accounts, disable public registration via the Settings U
 | `DATABASE_URL` | **REQUIRED** | PostgreSQL/TimescaleDB connection string. App crashes on startup if missing. |
 | `POSTGRES_PASSWORD` | **REQUIRED** | Database password for Docker deployments. Generate with `openssl rand -base64 24`. |
 | `SESSION_KEYS` | **REQUIRED** | Comma-separated express-session secrets. App crashes on startup if missing. |
+| `DEFAULT_UNIT_SYSTEM` | `metric` | Server default unit system: `metric`, `us`, or `uk`. Invalid values crash startup. A user who explicitly chose a system overrides it; users who have not chosen (`Users.unitSystem` NULL) inherit it. Changing it never rewrites stored rows. |
 | `PORT` | `3000` | Backend HTTP port. |
 | `NODE_ENV` | _(unset)_ | Optional. `production` skips the app-internal `sequelize.sync()` in `app.js`. The Docker image CMD runs `node scripts/migrate.js && node app.js` and does not sync at all, regardless of NODE_ENV; the migrations create an empty database's baseline tables too, so a fresh database boots migrations-only. |
 | `COOKIE_SECURE` | `false` | `true` to set `Secure` on session cookies (requires HTTPS). `SameSite` is derived from it in `app.js` (`none` when true, else `lax`) — there is no separate `COOKIE_SAMESITE` variable. |
