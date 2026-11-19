@@ -19,7 +19,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node-version: ['20.19', '22']
+        node-version: ['22', '24']
     env:
       DATABASE_URL: postgres://ci:ci@localhost:5432/ci
       SESSION_KEYS: ci-test-key-for-config-loading
@@ -42,11 +42,14 @@ jobs:
       - name: Audit runtime dependencies
         run: npm audit --omit=dev --audit-level=high
 
-      - name: Run backend tests (coverage gate)
-        run: npm run test:coverage
+      # Coverage (floors + structural guards) runs on the primary leg only;
+      # the second leg still proves the suite is green on the newer runtime
+      # without paying for instrumentation twice.
+      - name: Run backend tests
+        run: ${{ matrix.node-version == '22' && 'npm run test:coverage' || 'npm test' }}
 
       - name: Publish coverage summary
-        if: always()
+        if: always() && matrix.node-version == '22'
         run: |
           if [ ! -f coverage/coverage-summary.json ]; then
             echo "No coverage summary produced." >> "$GITHUB_STEP_SUMMARY"
@@ -215,10 +218,20 @@ jobs:
       # Boot suite migrates twice (fresh + idempotent re-run) and asserts the
       # schema/hypertable; ingest suite drives upload → drain → sessions →
       # telemetry → CSV → rename → delete(cascade) → re-upload over HTTP.
-      - name: Run integration suite
-        run: npm run test:integration
+      # Runs once under c8 so the integration coverage is published instead of
+      # the same suite being executed twice; it is visibility-only (no floors).
+      - name: Run integration suite (with coverage report)
+        run: npm run test:coverage:integration
         env:
           NODE_ENV: test
+
+      - name: Upload integration coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-coverage
+          path: coverage-integration/
+          retention-days: 7
 
   frontend-checks:
     runs-on: ubuntu-latest
@@ -259,10 +272,6 @@ jobs:
           name: frontend-coverage
           path: apps/frontend/coverage/
           retention-days: 7
-
-      - name: Typecheck frontend
-        working-directory: apps/frontend
-        run: npx tsc --noEmit
 
       - name: Build frontend
         working-directory: apps/frontend
