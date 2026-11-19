@@ -151,8 +151,10 @@ which enforces ownership and returns
   older than 7 days (`add_compression_policy('"Logs"', INTERVAL '7 days')`).
   The migration temporarily disables compression during ALTER TABLE operations
   (TimescaleDB does not support ALTER on compressed hypertables).
-- **Continuous aggregate** `log_1min` (1-minute buckets of avg/max rpm & speed,
-  count) with a refresh policy. Currently **unused** by the API (Known Issues, LOW).
+- **Continuous aggregate** — a 1-minute bucket aggregate (avg/max rpm & speed,
+  count) was created by `001` but **retired by `029`**: it had no reader and its
+  refresh policy cost write amplification. A future overview feature must
+  define a new aggregate sized to that feature.
 
 > Columns are **camelCase** (`sessionId`, `engine_rpm`) because no
 > `underscore: true` is set; the SQL uses quoted identifiers accordingly.
@@ -163,7 +165,7 @@ order — top-level files (`001_log_hypertable.sql` … `020_analyses_created_id
 sort before the nested `migrations/` directory, so the legacy PID backfill
 (`migrations/002_backfill_pid_columns.sql`) is now discovered and applied after
 the numbered series (previously orphaned). The series is append-only and
-currently runs through **027**; see `infra/timescale/` for the authoritative
+currently runs through **029**; see `infra/timescale/` for the authoritative
 list rather than relying on this document:
 `017_user_admin.sql` adds `Users.isAdmin` (first-user bootstrap + lowest-id
 upgrade backfill), `018_drop_forward_urls.sql` drops the retired webhook
