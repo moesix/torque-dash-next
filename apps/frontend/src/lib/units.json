@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "_note": "Single source of truth for unit factors/presets. Also required by backend lib/units.js (require('../../apps/frontend/src/lib/units.json')) — keep it dependency-free JSON. The backend deliberately reaches into apps/frontend because the frontend Docker build context is ./apps/frontend and this file must ship with the SPA.",
+  "factors": {
+    "kmPerMile": 1.609344,
+    "fahrenheitOffset": 32,
+    "fahrenheitScale": 1.8,
+    "psiPerKpa": 0.1450377377,
+    "feetPerMetre": 3.280839895,
+    "litresPerUsGallon": 3.785411784,
+    "litresPerUkGallon": 4.54609,
+    "mpgUsNumerator": 235.214583,
+    "mpgUkNumerator": 282.480936
+  },
+  "systems": {
+    "metric": {
+      "speed": "km/h",
+      "distance": "km",
+      "temperature": "°C",
+      "pressure": "kPa",
+      "altitude": "m",
+      "volume": "L",
+      "economy": "L/100km",
+      "flow": "cc/min"
+    },
+    "us": {
+      "speed": "mph",
+      "distance": "mi",
+      "temperature": "°F",
+      "pressure": "psi",
+      "altitude": "ft",
+      "volume": "gal (US)",
+      "economy": "MPG (US)",
+      "flow": "gal/h (US)"
+    },
+    "uk": {
+      "speed": "mph",
+      "distance": "mi",
+      "temperature": "°C",
+      "pressure": "psi",
+      "altitude": "m",
+      "volume": "L",
+      "economy": "MPG (UK)",
+      "flow": "cc/min"
+    }
+  }
+}
