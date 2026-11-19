@@ -359,6 +359,53 @@ test('a duplicate frame is ignored (ON CONFLICT) and still answers OK!', async (
     assert.strictEqual(listed.sessions[0].maxRpm, 800, 'duplicate must not skew summaries');
 });
 
+// Plan 026: ingest must merge summaries monotonically (never lower / never
+// resurrect) while a cut's authoritative recompute still wins afterwards.
+test('ingest summary merge is monotonic; a cut recompute lowers it authoritatively', async (t) => {
+    if (state.skip) return t.skip(state.skip);
+    await resetDatabase();
+
+    const { email, cookie } = await registerAndLogin();
+    const sessionKey = 'it-trip-summary';
+    const start = Date.UTC(2026, 0, 20, 9, 0, 0);
+
+    // High-RPM window first: maxRpm = 5500.
+    await uploadSeries(makeSeries({ session: sessionKey, eml: email, count: 3, start, rpmBase: 5000, speedBase: 100 }));
+    let session = await Session.findOne({ where: { sessionId: sessionKey } });
+    assert.ok(session, 'upload must create the session');
+    assert.strictEqual(session.maxRpm, 5500);
+    assert.strictEqual(session.maxSpeed, 102);
+
+    // A later, slower window into the SAME session must not lower the maxima
+    // (GREATEST merge), and must widen the timestamp window.
+    const laterStart = start + 10 * 60_000;
+    await uploadSeries(makeSeries({ session: sessionKey, eml: email, count: 2, start: laterStart, rpmBase: 700, speedBase: 15 }));
+    session = await Session.findOne({ where: { sessionId: sessionKey } });
+    assert.strictEqual(session.maxRpm, 5500, 'ingest merge must never lower maxRpm');
+    assert.strictEqual(session.maxSpeed, 102, 'ingest merge must never lower maxSpeed');
+    assert.strictEqual(new Date(session.lastTimestamp).getTime(), laterStart + 1000, 'merge widens lastTimestamp');
+
+    // Cut away the high-RPM window: the authoritative recompute lowers the
+    // maxima to what the remaining Logs actually hold.
+    const cut = await request(`/api/sessions/cut/${session.id}`, {
+        method: 'PATCH',
+        cookie,
+        body: {
+            from: new Date(start).toISOString(),
+            to: new Date(start + 2000).toISOString(),
+        },
+    });
+    assert.strictEqual(cut.status, 200, `cut failed: ${await cut.text()}`);
+
+    session = await Session.findOne({ where: { sessionId: sessionKey } });
+    assert.strictEqual(session.maxRpm, 950, 'recompute after a cut is authoritative and may lower maxRpm');
+    assert.strictEqual(session.maxSpeed, 16);
+
+    const listed = await listSessions(cookie);
+    assert.strictEqual(listed.sessions[0].maxRpm, 950,
+        'the list view must reflect the cut, not the deleted rows');
+});
+
 function importAppProcess() {
     return new Promise((resolve) => {
         const child = spawn(process.execPath, ['-e', "require('./app')"], {

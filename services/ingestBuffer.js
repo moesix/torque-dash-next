@@ -18,9 +18,10 @@
  * would otherwise land after the mutation and resurrect deleted ranges.
  */
 const Log = require('../models').Log;
-const Session = require('../models').Session;
 // pidRegistry has no heavy deps and does not require models — no cycle.
 const { invalidatePidKeys } = require('../lib/pidRegistry');
+// sessionSummaries resolves models lazily, so requiring it here is cycle-safe.
+const { mergeWrittenRows } = require('./sessionSummaries');
 
 const BATCH_SIZE = 1000;
 const FLUSH_MS = 1000;
@@ -53,12 +54,6 @@ function toLogRow(item) {
 
 let flushing = false;
 let currentFlushPromise = null;
-
-// JS-side LEAST/GREATEST equivalents that COALESCE NULLs (either side null
-// yields the other candidate; both non-null yields the min/max).
-function minDate(a, b) { if (a == null) return b; if (b == null) return a; return b < a ? b : a; }
-function maxDate(a, b) { if (a == null) return b; if (b == null) return a; return b > a ? b : a; }
-function maxNum(a, b)  { if (a == null) return b; if (b == null) return a; return b > a ? b : a; }
 
 // Put a failed subset back at the FRONT of the buffer. Only these rows advance
 // the retry counter; rows that were written never touch it.
@@ -143,41 +138,19 @@ async function runFlush() {
 
     // Merge the successfully-written rows' min/max into the denormalized
     // summary columns so list views read Sessions instead of scanning Logs.
-    // Values are computed in JS from the rows we already hold and bound as
-    // parameters — no SQL aliases, no literal fragments (a previous version
-    // referenced a nonexistent "sub" alias and silently failed on every flush).
-    // Stats are derived from toLogRow-shaped rows
-    // ({ timestamp, engine_rpm, vehicle_speed }) because the raw buffered items
-    // use different key names (time/engineRpm/...). Gated on at least one
-    // successfully-written chunk: when every Log write failed (rows re-queued or
-    // dropped), these Session updates must NOT run — otherwise denormalized
-    // summaries would advance AHEAD of the Logs table they derive from.
+    // One monotonic UPDATE per affected session via the single shared merge
+    // path (LEAST/GREATEST in SQL, no read-modify-write, so a flush can never
+    // write stale pre-delete maxima back after a cut/filter recompute).
+    // Gated on at least one successfully-written chunk: when every Log write
+    // failed (rows re-queued or dropped), these Session updates must NOT run —
+    // otherwise denormalized summaries would advance AHEAD of the Logs table
+    // they derive from.
     try {
-        const stats = new Map(); // sessionId -> {minTs, maxTs, maxRpm, maxSpeed}
-        for (const r of writtenRows) {
-            let s = stats.get(r.sessionId);
-            if (!s) stats.set(r.sessionId, s = {});
-            if (r.timestamp != null && (s.minTs === undefined || r.timestamp < s.minTs)) s.minTs = r.timestamp;
-            if (r.timestamp != null && (s.maxTs === undefined || r.timestamp > s.maxTs)) s.maxTs = r.timestamp;
-            if (r.engine_rpm != null && (s.maxRpm === undefined || r.engine_rpm > s.maxRpm)) s.maxRpm = r.engine_rpm;
-            if (r.vehicle_speed != null && (s.maxSpeed === undefined || r.vehicle_speed > s.maxSpeed)) s.maxSpeed = r.vehicle_speed;
-        }
-
-        // One update per affected session, merging against current column values.
-        // COALESCE handles the NULL (never-backfilled) case; LEAST/GREATEST run
-        // in JS because both candidates are known here.
-        for (const [sessionId, s] of stats) {
-            const existing = await Session.findByPk(sessionId, {
-                attributes: ['id', 'firstTimestamp', 'lastTimestamp', 'maxRpm', 'maxSpeed'],
-            });
-            if (!existing) continue;
-            const merged = {
-                firstTimestamp: minDate(existing.firstTimestamp, s.minTs),
-                lastTimestamp: maxDate(existing.lastTimestamp, s.maxTs),
-                maxRpm: maxNum(existing.maxRpm, s.maxRpm ?? null),
-                maxSpeed: maxNum(existing.maxSpeed, s.maxSpeed ?? null),
-            };
-            await Session.update(merged, { where: { id: sessionId } });
+        for (const sessionId of new Set(writtenRows.map(r => r.sessionId))) {
+            await mergeWrittenRows(
+                sessionId,
+                writtenRows.filter(r => r.sessionId === sessionId)
+            );
         }
     } catch (err) {
         console.error('[ingestBuffer] summary update failed:', err.message);
