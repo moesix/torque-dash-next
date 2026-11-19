@@ -28,7 +28,13 @@ import OverlayChart from '@/components/charts/OverlayChart';
 import DiagnosticPanels from '@/components/charts/DiagnosticPanels';
 import PidTogglePanel from '@/components/telemetry/PidTogglePanel';
 import DecodedMetricsTable from '@/components/telemetry/DecodedMetricsTable';
-import { getAvailableSeries, getSeriesData, precomputeEpochs, coerceScalar } from '@/lib/pidDecode';
+import {
+  getAvailableSeries,
+  getSeriesStats,
+  precomputeEpochs,
+  coerceScalar,
+} from '@/lib/pidDecode';
+import type { SeriesStats } from '@/lib/pidDecode';
 import { useSessionTelemetry } from './hooks/useSessionTelemetry';
 import { usePidSelection } from './hooks/usePidSelection';
 import { usePrintMode } from './hooks/usePrintMode';
@@ -92,6 +98,10 @@ export default function ReplayDashboard() {
   // View mode: 'dash' is the default landing view; 'map' shows the
   // GPS track near-fullscreen with the playback transport beneath it.
   const [viewMode, setViewMode] = useState<'dash' | 'map'>('dash');
+  // The expanded-chart dialog stays mounted (it owns `closedby` + the ref),
+  // but its chart only exists while open: a closed <dialog> is display:none,
+  // and a chart initializing/updating there is pure waste (plan 037).
+  const [expanded, setExpanded] = useState(false);
 
   // Feature state machines, each self-contained in ./hooks (plans/017).
   // Print-to-PDF: force-expand panels → double-rAF → window.print(), reset on
@@ -130,12 +140,13 @@ export default function ReplayDashboard() {
   // change would otherwise re-parse every frame per selected series).
   const epochs = useMemo(() => precomputeEpochs(frames), [frames]);
 
-  // Build series data for ALL available sources (used by DecodedMetricsTable).
-  // Memoized — no re-scan of frames on re-render.
-  const allSeriesData = useMemo(() => {
-    const map = new Map<string, [number, number | null][]>();
+  // Fold per-PID stats for ALL available sources (used by DecodedMetricsTable).
+  // One pass per source, no tuple array materialized; memoized so re-renders
+  // never re-scan frames.
+  const statsByPid = useMemo(() => {
+    const map = new Map<string, SeriesStats | null>();
     for (const src of available) {
-      map.set(src.pid, getSeriesData(frames, src, epochs));
+      map.set(src.pid, getSeriesStats(frames, src, epochs));
     }
     return map;
   }, [frames, available, epochs]);
@@ -147,10 +158,12 @@ export default function ReplayDashboard() {
   );
 
   const handleExpand = useCallback(() => {
+    setExpanded(true);
     dialogRef.current?.showModal();
   }, []);
 
   const handleCollapse = useCallback(() => {
+    setExpanded(false);
     dialogRef.current?.close();
   }, []);
 
@@ -409,7 +422,7 @@ export default function ReplayDashboard() {
             onReset={handleReset}
           />
         </div>
-        <DecodedMetricsTable sources={available} seriesData={allSeriesData} />
+        <DecodedMetricsTable sources={available} stats={statsByPid} />
       </div>
 
       {/* Time Series — full width */}
@@ -453,13 +466,15 @@ export default function ReplayDashboard() {
                 ↓
               </button>
             </div>
-            <OverlayChartWithCursor
-              frames={frames}
-              sources={selectedSources}
-              epochs={epochs}
-              onCursorMove={handleCursorMove}
-              className="h-full"
-            />
+            {expanded && (
+              <OverlayChartWithCursor
+                frames={frames}
+                sources={selectedSources}
+                epochs={epochs}
+                onCursorMove={handleCursorMove}
+                className="h-full"
+              />
+            )}
           </div>
         </dialog>
       </div>

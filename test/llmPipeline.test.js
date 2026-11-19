@@ -858,6 +858,7 @@ describe('computeGapSummary (SQL gap/peak parity)', () => {
       { kind: 'gap', gap_start: new Date(iso(9000)), gap_end: new Date(iso(21000)), seconds: 12, cnt: null },
       { kind: 'gap', gap_start: new Date(iso(30000)), gap_end: new Date(iso(74000)), seconds: 44, cnt: null },
       { kind: 'peak', gap_start: null, gap_end: null, seconds: null, cnt: '20' },
+      { kind: 'stats', gap_start: new Date(iso(0)), gap_end: new Date(iso(79000)), seconds: null, cnt: String(timestamps.length) },
     ]);
 
     const expected = [
@@ -866,6 +867,9 @@ describe('computeGapSummary (SQL gap/peak parity)', () => {
     ];
     assert.deepStrictEqual(summary.gaps, expected);
     assert.strictEqual(summary.maxRowsInMinute, 20);
+    assert.strictEqual(summary.totalCount, timestamps.length);
+    assert.strictEqual(summary.startTs.toISOString(), iso(0));
+    assert.strictEqual(summary.endTs.toISOString(), iso(79000));
     assert.deepStrictEqual(summary.gaps, detectBackfillGaps(timestamps).gaps);
     assert.strictEqual(summary.maxRowsInMinute, detectBackfillGaps(timestamps).maxRowsInMinute);
   });
@@ -885,30 +889,42 @@ describe('computeGapSummary (SQL gap/peak parity)', () => {
       { kind: 'gap', gap_start: new Date(iso(72000)), gap_end: new Date(iso(102000)), seconds: 30, cnt: null },
       { kind: 'gap', gap_start: new Date(iso(111000)), gap_end: new Date(iso(126000)), seconds: 15, cnt: null },
       { kind: 'peak', gap_start: null, gap_end: null, seconds: null, cnt: '30' },
+      { kind: 'stats', gap_start: new Date(iso(0)), gap_end: new Date(iso(135000)), seconds: null, cnt: String(timestamps.length) },
     ]);
 
     assert.deepStrictEqual(summary.gaps.map(g => g.seconds), [30, 20, 15]);
     assert.deepStrictEqual(summary.gaps.map(g => g.startIso), [iso(72000), iso(24000), iso(111000)]);
     assert.strictEqual(summary.maxRowsInMinute, 30);
+    assert.strictEqual(summary.totalCount, timestamps.length);
     assert.deepStrictEqual(summary.gaps, detectBackfillGaps(timestamps).gaps);
     assert.strictEqual(summary.maxRowsInMinute, detectBackfillGaps(timestamps).maxRowsInMinute);
   });
 
-  test('empty session → no gaps, maxRowsInMinute 0 (NULL peak row)', async () => {
+  test('empty session → no gaps, maxRowsInMinute 0, zero count, null bounds', async () => {
     const summary = await drive([
       { kind: 'peak', gap_start: null, gap_end: null, seconds: null, cnt: null },
+      { kind: 'stats', gap_start: null, gap_end: null, seconds: null, cnt: '0' },
     ]);
-    assert.deepStrictEqual(summary, detectBackfillGaps([]));
-    assert.deepStrictEqual(summary, { gaps: [], maxRowsInMinute: 0 });
+    const pure = detectBackfillGaps([]);
+    assert.deepStrictEqual(summary.gaps, pure.gaps);
+    assert.strictEqual(summary.maxRowsInMinute, pure.maxRowsInMinute);
+    assert.strictEqual(summary.totalCount, 0);
+    assert.strictEqual(summary.startTs, null);
+    assert.strictEqual(summary.endTs, null);
   });
 
-  test('single-row session → peak of 1, no gaps', async () => {
+  test('single-row session → peak of 1, no gaps, bounds from the stats row', async () => {
     const timestamps = [iso(0)];
     const summary = await drive([
       { kind: 'peak', gap_start: null, gap_end: null, seconds: null, cnt: '1' },
+      { kind: 'stats', gap_start: new Date(iso(0)), gap_end: new Date(iso(0)), seconds: null, cnt: '1' },
     ]);
-    assert.deepStrictEqual(summary, { gaps: [], maxRowsInMinute: 1 });
-    assert.deepStrictEqual(summary, detectBackfillGaps(timestamps));
+    assert.deepStrictEqual(summary.gaps, []);
+    assert.strictEqual(summary.maxRowsInMinute, 1);
+    assert.strictEqual(summary.totalCount, 1);
+    assert.strictEqual(summary.startTs.toISOString(), iso(0));
+    assert.strictEqual(summary.endTs.toISOString(), iso(0));
+    assert.deepStrictEqual(summary.gaps, detectBackfillGaps(timestamps).gaps);
   });
 
   test('5.4s fractional gap rounds to 5 whole seconds in the summary', async () => {
@@ -919,12 +935,12 @@ describe('computeGapSummary (SQL gap/peak parity)', () => {
     const summary = await drive([
       { kind: 'gap', gap_start: new Date(iso(0)), gap_end: new Date(iso(5400)), seconds: 5.4, cnt: null },
       { kind: 'peak', gap_start: null, gap_end: null, seconds: null, cnt: '2' },
+      { kind: 'stats', gap_start: new Date(iso(0)), gap_end: new Date(iso(5400)), seconds: null, cnt: '2' },
     ]);
-    assert.deepStrictEqual(summary, {
-      gaps: [{ startIso: iso(0), endIso: iso(5400), seconds: 5 }],
-      maxRowsInMinute: 2,
-    });
-    assert.deepStrictEqual(summary, detectBackfillGaps(timestamps));
+    assert.deepStrictEqual(summary.gaps, [{ startIso: iso(0), endIso: iso(5400), seconds: 5 }]);
+    assert.strictEqual(summary.maxRowsInMinute, 2);
+    assert.strictEqual(summary.totalCount, 2);
+    assert.deepStrictEqual(summary.gaps, detectBackfillGaps(timestamps).gaps);
   });
 
   test('transfer is bounded: LIMIT :maxGaps = 3 and only 3 rows reach JS', async () => {
@@ -956,6 +972,25 @@ describe('computeGapSummary (SQL gap/peak parity)', () => {
     assert.strictEqual((sql.match(/FROM "Logs"/g) || []).length, 1, sql);
     assert.match(sql, /FROM base\s*\)\s*,\s*gap_rows AS \(/);
     assert.match(sql, /FROM base\s+GROUP BY 1/);
+  });
+
+  test('stats row parses into totalCount + startTs/endTs from the same statement', async () => {
+    const summary = await drive([
+      { kind: 'gap', gap_start: new Date(iso(9000)), gap_end: new Date(iso(15000)), seconds: 6, cnt: null },
+      { kind: 'peak', gap_start: null, gap_end: null, seconds: null, cnt: '20' },
+      { kind: 'stats', gap_start: new Date(iso(0)), gap_end: new Date(iso(40000)), seconds: null, cnt: '26' },
+    ]);
+
+    assert.strictEqual(summary.totalCount, 26);
+    assert.strictEqual(summary.startTs.toISOString(), iso(0));
+    assert.strictEqual(summary.endTs.toISOString(), iso(40000));
+    // One round trip answered gaps, peak, bounds and count.
+    assert.strictEqual(preworkQueryCalls.length, 1);
+    const { sql } = preworkQueryCalls[0];
+    assert.match(
+      sql,
+      /SELECT 'stats', MIN\("timestamp"\), MAX\("timestamp"\), NULL::float, COUNT\(\*\)::bigint FROM base/,
+    );
   });
 
   test('threshold comes from GAP_ANALYSIS.MIN_GAP_SECONDS as a numeric predicate', async () => {
@@ -1110,13 +1145,19 @@ describe('analyzeSession single-flight guard', () => {
   function installQueries() {
     preworkQueryHandler = async (sql) => {
       if (sql.includes('jsonb_object_keys')) return [[]];
-      if (sql.includes('MIN("timestamp")')) {
-        return [[{
-          startTs: new Date('2026-10-01T10:00:00.000Z'),
-          endTs: new Date('2026-10-01T10:01:00.000Z'),
-        }]];
+      // Gap/peak/bounds/count all come from this one MATERIALIZED scan.
+      if (sql.includes('MATERIALIZED')) {
+        return [
+          { kind: 'peak', gap_start: null, gap_end: null, seconds: null, cnt: '1' },
+          {
+            kind: 'stats',
+            gap_start: new Date('2026-10-01T10:00:00.000Z'),
+            gap_end: new Date('2026-10-01T10:01:00.000Z'),
+            seconds: null,
+            cnt: '1',
+          },
+        ];
       }
-      if (sql.includes('COUNT(*)')) return [[{ cnt: '1' }]];
       return [];
     };
   }
@@ -1339,11 +1380,18 @@ describe('analysis sample deduplication (large sessions)', () => {
     };
     preworkQueryHandler = async (sql, opts) => {
       if (sql.includes('jsonb_object_keys')) return [[]];
-      if (sql.includes('MATERIALIZED')) return [];
-      if (sql.includes('MIN("timestamp")')) {
-        return [{ startTs: rows[0].timestamp, endTs: rows[rows.length - 1].timestamp }];
+      if (sql.includes('MATERIALIZED')) {
+        return [
+          { kind: 'peak', gap_start: null, gap_end: null, seconds: null, cnt: '60' },
+          {
+            kind: 'stats',
+            gap_start: rows[0].timestamp,
+            gap_end: rows[rows.length - 1].timestamp,
+            seconds: null,
+            cnt: String(rows.length),
+          },
+        ];
       }
-      if (sql.includes('COUNT(*)')) return [{ cnt: String(rows.length) }];
       if (sql.includes('ROW_NUMBER()')) return strideIds.map(id => ({ id }));
       if (sql.includes('WHERE id IN')) {
         const ids = opts?.replacements?.ids || [];

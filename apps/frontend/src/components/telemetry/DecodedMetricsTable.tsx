@@ -1,20 +1,20 @@
 /**
  * "What was uploaded" table — shows all decoded PIDs with their stats.
  *
- * Uses pre-computed memoized series data (no re-scan of frames).
+ * Receives pre-computed stats (folded in one pass, no tuple arrays).
  */
 
 import { useMemo } from 'react';
 import type { SeriesSource } from '@/lib/types';
-import { computeStats } from '@/lib/pidDecode';
+import type { SeriesStats } from '@/lib/pidDecode';
 
 // ── Props ────────────────────────────────────────────────────────────────
 
 interface Props {
   /** All available sources (columns + PIDs). */
   sources: SeriesSource[];
-  /** Pre-computed time-series data keyed by pid (NOT re-scanned). */
-  seriesData: Map<string, [number, number | null][]>;
+  /** Pre-computed aggregate stats keyed by pid (NOT re-scanned). */
+  stats: Map<string, SeriesStats | null>;
 }
 
 // ── Format helpers ───────────────────────────────────────────────────────
@@ -26,14 +26,13 @@ function fmtNum(v: number): string {
 
 // ── Component ────────────────────────────────────────────────────────────
 
-export default function DecodedMetricsTable({ sources, seriesData }: Props) {
+export default function DecodedMetricsTable({ sources, stats }: Props) {
   const rows = useMemo(() => {
-    return sources.map((src) => {
-      const data = seriesData.get(src.pid);
-      const stats = data ? computeStats(data) : null;
-      return { src, stats };
-    });
-  }, [sources, seriesData]);
+    return sources.map((src) => ({
+      src,
+      stats: stats.get(src.pid) ?? null,
+    }));
+  }, [sources, stats]);
 
   const summary = `${sources.length} metrics decoded`;
 

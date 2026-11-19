@@ -26,7 +26,9 @@ class AnalysisController {
   //
   // Both branches read the session's timestamps through one MATERIALIZED
   // `base` CTE, so the table is scanned once and only the capped gap rows
-  // (LIMIT :maxGaps) travel back to Node.
+  // (LIMIT :maxGaps) travel back to Node. The same CTE also yields the
+  // session bounds and row count (a 'stats' row), so analyzeSession needs no
+  // separate MIN/MAX or COUNT(*) round trip.
   static async computeGapSummary(sessionId) {
     const rows = await sequelize.query(`
       WITH base AS MATERIALIZED (
@@ -56,6 +58,8 @@ class AnalysisController {
       SELECT 'gap' AS kind, gap_start, gap_end, seconds, NULL::bigint AS cnt FROM reported_gaps
       UNION ALL
       SELECT 'peak', NULL::timestamptz, NULL::timestamptz, NULL::float, MAX(cnt) FROM minute_counts
+      UNION ALL
+      SELECT 'stats', MIN("timestamp"), MAX("timestamp"), NULL::float, COUNT(*)::bigint FROM base
       ORDER BY gap_start NULLS LAST
     `, {
       replacements: {
@@ -80,7 +84,16 @@ class AnalysisController {
       .slice(0, GAP_ANALYSIS.MAX_REPORTED_GAPS);
 
     const peak = rows.find(r => r.kind === 'peak');
-    return { gaps, maxRowsInMinute: peak && peak.cnt != null ? Number(peak.cnt) : 0 };
+    // Session bounds + row count ride along in the same MATERIALIZED scan, so
+    // analyzeSession needs no separate MIN/MAX or COUNT(*) statement.
+    const stats = rows.find(r => r.kind === 'stats');
+    return {
+      gaps,
+      maxRowsInMinute: peak && peak.cnt != null ? Number(peak.cnt) : 0,
+      totalCount: stats && stats.cnt != null ? Number(stats.cnt) : 0,
+      startTs: stats ? stats.gap_start : null,
+      endTs: stats ? stats.gap_end : null,
+    };
   }
 
   // Evenly spaced middle ids for large sessions (plans/014). Same selection
@@ -156,29 +169,18 @@ class AnalysisController {
       // 3. Discover PID keys
       const pidKeys = await discoverPidKeys(session.id, sequelize);
 
-      // 3b. Compute session duration from LOG bounds (never createdAt —
-      // backfilled uploads create the row after the trip ends, which made
-      // the AI prompt show negative durations; plans/087).
-      const [logBounds] = await sequelize.query(`
-        SELECT MIN("timestamp") AS "startTs", MAX("timestamp") AS "endTs"
-        FROM "Logs" WHERE "sessionId" = :sessionId
-      `, { replacements: { sessionId: session.id } });
-      const startTs = logBounds[0]?.startTs || session.firstTimestamp;
-      const endTs = logBounds[0]?.endTs || session.lastTimestamp;
+      // 3b. Session bounds come from the gap summary's MATERIALIZED scan
+      // (plans/037) — never createdAt — because backfilled uploads create the
+      // row after the trip ends, which made the AI prompt show negative
+      // durations (plans/087). Empty sessions fall back to the stored bounds.
+      const gapSummary = await AnalysisController.computeGapSummary(session.id);
+      const startTs = gapSummary.startTs ?? session.firstTimestamp;
+      const endTs = gapSummary.endTs ?? session.lastTimestamp;
       const durationStr = formatSessionDuration(startTs, endTs);
 
       // 4. Fetch telemetry sample (first 50 + last 50 + evenly-spaced 100 for large sessions).
-      //    4b's gap/peak query runs in the SAME Promise.all: it does not depend
-      //    on the sample, so the second round trip overlaps the count instead
-      //    of serializing behind it.
-      const [countResult, gapSummary] = await Promise.all([
-        sequelize.query(
-          `SELECT COUNT(*) AS cnt FROM "Logs" WHERE "sessionId" = :sessionId`,
-          { replacements: { sessionId: session.id } }
-        ),
-        AnalysisController.computeGapSummary(session.id),
-      ]);
-      const totalCount = parseInt(countResult[0]?.cnt || '0', 10);
+      //    The row count now arrives with the gap/bounds/stats statement above.
+      const totalCount = gapSummary.totalCount;
 
       let sample;
       if (totalCount <= 400) {

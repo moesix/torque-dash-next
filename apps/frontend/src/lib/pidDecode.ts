@@ -217,7 +217,7 @@ export function getAvailableSeries(frames: TelemetryFrame[]): SeriesSource[] {
  * Parse every frame timestamp to epoch ms ONCE, preserving the exact
  * `new Date(timestamp).getTime()` semantics the series helpers always had.
  * Callers that derive several series from the same frames array (dashboard
- * `allSeriesData`, overlay chart options, GPS map) pass the result as the
+ * `statsByPid`, overlay chart options, GPS map) pass the result as the
  * optional `epochs` argument instead of paying one Date construction per
  * frame per series.
  */
@@ -274,6 +274,67 @@ export function getSeriesData(
   }
 
   return data;
+}
+
+/** Aggregate stats for a single series — the fold of `getSeriesData`. */
+export interface SeriesStats {
+  min: number;
+  max: number;
+  avg: number;
+  last: number | null;
+  count: number;
+}
+
+/**
+ * Same value extraction as getSeriesData, but folds to stats without
+ * allocating a tuple per point. Must stay numerically identical to
+ * `computeStats(getSeriesData(frames, src, epochs))` — the aggregation order
+ * (single forward pass, sum accumulated left to right) is intentionally the
+ * same. Returns null when no valid (non-null) data points exist.
+ *
+ * `epochs` (optional) must be `precomputeEpochs(frames)` for the SAME frames
+ * array; it is only validated against `frames.length` here because stats do
+ * not need timestamps, but a mismatch would still mean the caller paired the
+ * wrong epochs with these frames.
+ */
+export function getSeriesStats(
+  frames: TelemetryFrame[],
+  source: SeriesSource,
+  epochs?: number[],
+): SeriesStats | null {
+  if (epochs && epochs.length !== frames.length) throw new Error('epochs length mismatch');
+
+  let min = Infinity;
+  let max = -Infinity;
+  let sum = 0;
+  let count = 0;
+  let last: number | null = null;
+
+  if (source.source === 'column') {
+    for (let i = 0; i < frames.length; i++) {
+      const v = coerceScalar(frames[i][source.field]);
+      if (v === null) continue;
+      if (v < min) min = v;
+      if (v > max) max = v;
+      sum += v;
+      count++;
+      last = v;
+    }
+  } else {
+    for (let i = 0; i < frames.length; i++) {
+      const v = coerceScalar(frames[i].values?.[source.pid]);
+      if (v === null) continue;
+      if (v < min) min = v;
+      if (v > max) max = v;
+      sum += v;
+      count++;
+      last = v;
+    }
+  }
+
+  if (count === 0) return null;
+
+  return { min, max, avg: sum / count, last, count };
 }
 
 /**
