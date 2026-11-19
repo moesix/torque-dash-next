@@ -38,6 +38,7 @@ describe('migration loader', () => {
             '024_session_max_types.sql',
             '025_settings_timestamps.sql',
             '026_session_user_created_idx.sql',
+            '027_vehicle_default_unique.sql',
             'migrations/001_add_upload_token.sql',
             'migrations/002_backfill_pid_columns.sql',
             'migrations/003_recompute_session_summaries.sql',
@@ -131,6 +132,25 @@ describe('baseline schema', () => {
                 `024 must retype Sessions.${column}`
             );
         }
+        assert.ok(!/\$\$/.test(sql), 'no dollar-quoted blocks (the runner splits on ;)');
+    });
+
+    it('027_vehicle_default_unique.sql dedupes before enforcing one default per user', () => {
+        const sql = fs.readFileSync(path.join(SQL_DIR, '027_vehicle_default_unique.sql'), 'utf8');
+        const dedupeAt = sql.indexOf('UPDATE "Vehicles" v SET "isDefault" = false');
+        const indexAt = sql.indexOf('CREATE UNIQUE INDEX IF NOT EXISTS "Vehicles_one_default_per_user"');
+        assert.ok(dedupeAt !== -1, '027 must clear duplicate defaults');
+        assert.ok(indexAt !== -1, '027 must create the partial unique index');
+        assert.ok(dedupeAt < indexAt, 'dedupe must run before the unique index is created');
+        assert.ok(
+            /WHERE\s+d\."userId"\s*=\s*v\."userId"\s+AND\s+d\."isDefault"\s*=\s*true\s+AND\s+d\.id\s*<\s*v\.id/
+                .test(sql),
+            'dedupe must keep the lowest-id default per user'
+        );
+        assert.ok(
+            sql.includes('ON "Vehicles" ("userId") WHERE "isDefault" = true'),
+            'the index must be partial on isDefault = true'
+        );
         assert.ok(!/\$\$/.test(sql), 'no dollar-quoted blocks (the runner splits on ;)');
     });
 });

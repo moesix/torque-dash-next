@@ -13,6 +13,9 @@ const { test, describe } = require('node:test');
 const assert = require('node:assert');
 
 // ── Pre-populate require.cache for ../models ────────────────────────
+// `transaction` is instrumented so the setDefault tests can prove both writes
+// run inside one transaction (plan 033).
+const dbCalls = { transactions: 0 };
 const mockModels = {
     Vehicle: {
         findOne: async () => null,
@@ -25,6 +28,12 @@ const mockModels = {
         update: async () => [0],
         findOne: async () => null,
         findAll: async () => [],
+    },
+    sequelize: {
+        transaction: async (fn) => {
+            dbCalls.transactions += 1;
+            return fn({ LOCK: { UPDATE: 'UPDATE' } });
+        },
     },
 };
 
@@ -64,13 +73,22 @@ function makeStubRes() {
 
 // Per-test model wiring + recorders.
 function install({ vehicle = null, vehicleList = [], sessionUpdateResult = [0] } = {}) {
-    const calls = { vehicleFindAll: [], vehicleFindOne: [], vehicleCreate: [], sessionUpdate: [], destroys: [] };
+    dbCalls.transactions = 0;
+    const calls = { vehicleFindAll: [], vehicleFindOne: [], vehicleCreate: [], vehicleUpdate: [], sessionUpdate: [], destroys: [] };
     mockModels.Vehicle.findAll = async (opts) => { calls.vehicleFindAll.push(opts); return vehicleList; };
     mockModels.Vehicle.findOne = async (opts) => { calls.vehicleFindOne.push(opts); return vehicle; };
     mockModels.Vehicle.create = async (attrs) => { calls.vehicleCreate.push(attrs); return attrs; };
+    mockModels.Vehicle.update = async (patch, opts) => { calls.vehicleUpdate.push({ patch, opts }); return [1]; };
     mockModels.Session.update = async (patch, opts) => { calls.sessionUpdate.push({ patch, opts }); return sessionUpdateResult; };
     if (vehicle && typeof vehicle.destroy !== 'function') {
         vehicle.destroy = async () => { calls.destroys.push(vehicle.id); return vehicle; };
+    }
+    if (vehicle && typeof vehicle.update !== 'function') {
+        vehicle.update = async (patch, opts) => {
+            calls.vehicleUpdate.push({ patch, opts, instance: vehicle.id });
+            Object.assign(vehicle, patch);
+            return vehicle;
+        };
     }
     return calls;
 }
@@ -248,5 +266,46 @@ describe('VehicleController (with mocked models)', () => {
         assert.deepStrictEqual(out.body, { error: 'Vehicle not found' });
         assert.strictEqual(calls.sessionUpdate.length, 0, 'no session unassign for a foreign vehicle');
         assert.strictEqual(calls.destroys.length, 0, 'no destroy for a foreign vehicle');
+    });
+
+    test('setDefault runs both writes in one transaction and locks the target row', async () => {
+        const vehicle = makeVehicle(5);
+        const calls = install({ vehicle });
+
+        const req = makeStubReq();
+        const { res, calls: out } = makeStubRes();
+        await VehicleController.setDefault(req, res);
+
+        assert.strictEqual(dbCalls.transactions, 1, 'setDefault must open exactly one transaction');
+        assert.strictEqual(out.statusCode, null, 'a successful call must not set an error status');
+        assert.deepStrictEqual(out.body, vehicle);
+
+        const find = calls.vehicleFindOne[0];
+        assert.deepStrictEqual(find.where, { id: '5', userId: 1 });
+        assert.ok(find.transaction, 'findOne must join the transaction');
+        assert.strictEqual(find.lock, 'UPDATE', 'findOne must take the row lock');
+
+        // 1) clear every default for this user (in the tx)
+        assert.deepStrictEqual(calls.vehicleUpdate[0].patch, { isDefault: false });
+        assert.deepStrictEqual(calls.vehicleUpdate[0].opts.where, { userId: 1 });
+        assert.ok(calls.vehicleUpdate[0].opts.transaction, 'the bulk unset must join the transaction');
+        // 2) set only the target default (in the tx)
+        assert.strictEqual(calls.vehicleUpdate[1].instance, 5);
+        assert.deepStrictEqual(calls.vehicleUpdate[1].patch, { isDefault: true });
+        assert.ok(calls.vehicleUpdate[1].opts.transaction, 'the instance update must join the transaction');
+        assert.strictEqual(calls.vehicleUpdate.length, 2, 'no third write');
+    });
+
+    test('setDefault on a foreign vehicle returns 404 and writes nothing', async () => {
+        const calls = install({ vehicle: null });
+
+        const req = makeStubReq({ params: { vehicleId: '99' } });
+        const { res, calls: out } = makeStubRes();
+        await VehicleController.setDefault(req, res);
+
+        assert.strictEqual(out.statusCode, 404);
+        assert.deepStrictEqual(out.body, { error: 'Vehicle not found' });
+        assert.strictEqual(calls.vehicleUpdate.length, 0, 'no unset for a foreign vehicle');
+        assert.strictEqual(dbCalls.transactions, 1, 'the lookup still ran in a transaction');
     });
 });
