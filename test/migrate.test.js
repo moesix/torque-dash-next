@@ -41,6 +41,7 @@ describe('migration loader', () => {
             '027_vehicle_default_unique.sql',
             '028_unit_preferences.sql',
             '029_drop_log1min.sql',
+            '030_settings_timestamp_defaults.sql',
             'migrations/001_add_upload_token.sql',
             'migrations/002_backfill_pid_columns.sql',
             'migrations/003_recompute_session_summaries.sql',
@@ -115,6 +116,50 @@ describe('baseline schema', () => {
         ]) {
             assert.ok(sql.includes(column), `002 must define ${column}`);
         }
+    });
+
+    it('002 seeds Settings on every schema shape (sync-created and pre-#83)', () => {
+        const sql = fs.readFileSync(path.join(SQL_DIR, '002_settings.sql'), 'utf8');
+        assert.ok(!/\$\$/.test(sql), 'no dollar-quoted blocks (the runner splits on ;)');
+
+        // The timestamps must be guaranteed BEFORE the seed: a targeted INSERT
+        // cannot name a missing column even under a FALSE information_schema
+        // guard (target columns resolve at parse time), and a sync()-created
+        // column has no DB default. The ALTERs are the same idempotent
+        // guarantee 025 makes; the seed then names both timestamps explicitly.
+        for (const column of ['createdAt', 'updatedAt']) {
+            const alter = `ALTER TABLE "Settings" ADD COLUMN IF NOT EXISTS "${column}" TIMESTAMPTZ NOT NULL DEFAULT NOW();`;
+            const at = sql.indexOf(alter);
+            assert.ok(at !== -1, `002 must ensure Settings."${column}" exists`);
+            assert.ok(
+                at < sql.indexOf('INSERT INTO "Settings"'),
+                `002 must add "${column}" before seeding`
+            );
+        }
+
+        const inserts = [...sql.matchAll(/INSERT INTO "Settings"/g)];
+        assert.strictEqual(inserts.length, 1, '002 must have a single unconditional seed');
+        assert.match(
+            sql,
+            /INSERT INTO "Settings" \(id, "disableRegistration", "uploadApiToken", "createdAt", "updatedAt"\)\s*SELECT 1, false, NULL, NOW\(\), NOW\(\)/,
+            'the seed must name both timestamps explicitly (sync() has no default)'
+        );
+        assert.strictEqual(
+            [...sql.matchAll(/ON CONFLICT \(id\) DO NOTHING/g)].length,
+            1,
+            'the seed must stay idempotent'
+        );
+    });
+
+    it('030 sets both Settings timestamp defaults', () => {
+        const sql = fs.readFileSync(path.join(SQL_DIR, '030_settings_timestamp_defaults.sql'), 'utf8');
+        for (const column of ['createdAt', 'updatedAt']) {
+            assert.ok(
+                sql.includes(`ALTER TABLE "Settings" ALTER COLUMN "${column}" SET DEFAULT NOW();`),
+                `030 must set a DB default on Settings."${column}"`
+            );
+        }
+        assert.ok(!/\$\$/.test(sql), 'no dollar-quoted blocks (the runner splits on ;)');
     });
 
     it('023_user_admin_guarded.sql promotes only when no admin exists', () => {
