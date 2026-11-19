@@ -1,9 +1,10 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import { getAllAnalyses, getAnalysis, exportAnalyses, getVehicles, deleteAnalysis, ApiError } from '@/lib/api';
-import type { AnalysisPreview, Analysis, Vehicle } from '@/lib/types';
+import type { AnalysisPreview, Analysis } from '@/lib/types';
 import Button from '@/components/ui/Button';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
 import ChevronIcon from '@/components/ui/ChevronIcon';
@@ -14,12 +15,10 @@ import Skeleton from '@/components/ui/Skeleton';
  * with optional vehicle filtering, expand-to-detail, and markdown export.
  */
 export default function AnalysisHistory() {
-  const [analyses, setAnalyses] = useState<AnalysisPreview[]>([]);
-  const [total, setTotal] = useState(0);
+  const queryClient = useQueryClient();
   const [page, setPage] = useState(0);
   const [limit] = useState(20);
   const [vehicleFilter, setVehicleFilter] = useState<number | undefined>(undefined);
-  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [expandedMap, setExpandedMap] = useState<Map<number, Analysis>>(new Map());
   const [loadingId, setLoadingId] = useState<number | null>(null);
   // Rows whose body-fetch FAILED — an inline error + retry renders under the
@@ -31,33 +30,53 @@ export default function AnalysisHistory() {
   const [deletingIds, setDeletingIds] = useState<Set<number>>(new Set());
   // Delete confirmation target (replaces the native window.confirm).
   const [deleteTarget, setDeleteTarget] = useState<AnalysisPreview | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  // Local (mutation) error line. List-load failures come from the query.
+  const [actionError, setActionError] = useState<string | null>(null);
 
-  // Load vehicles for filter dropdown
-  useEffect(() => {
-    getVehicles().then((v) => setVehicles(v ?? [])).catch(() => {});
-  }, []);
+  // The list lives in TanStack Query, keyed by page + vehicle filter. Two
+  // consequences the manual fetch could not give us:
+  //   - a response can only ever land in its own key, so "Next" twice quickly
+  //     can never render page 1's rows under the "Page 3 of N" footer;
+  //   - deletes invalidate the `['analyses']` prefix, so every cached page
+  //     (and the total) refetches instead of drifting from the server.
+  // `placeholderData` keeps the previous page's rows on screen while a new
+  // page loads (no skeleton flash on every paging click).
+  const listKey = ['analyses', 'page', page, 'vehicle', vehicleFilter ?? 'all'] as const;
+  const {
+    data,
+    isLoading,
+    error: listError,
+    refetch,
+  } = useQuery({
+    queryKey: listKey,
+    queryFn: () => getAllAnalyses(limit, page * limit, vehicleFilter),
+    placeholderData: (prev) => prev,
+  });
+  const analyses: AnalysisPreview[] = data?.analyses ?? [];
+  const total = data?.total ?? 0;
 
-  const fetchAnalyses = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await getAllAnalyses(limit, page * limit, vehicleFilter);
-      if (res) {
-        setAnalyses(res.analyses);
-        setTotal(res.total);
-      }
-    } catch {
-      setError('Failed to load analyses.');
-    } finally {
-      setLoading(false);
-    }
-  }, [limit, page, vehicleFilter]);
+  // Vehicles for the filter dropdown. Shares the ['vehicles'] key with the
+  // rest of the app, so a vehicle CRUD elsewhere refreshes this list.
+  const vehiclesQuery = useQuery({ queryKey: ['vehicles'], queryFn: getVehicles });
+  const vehicles = vehiclesQuery.data ?? [];
 
-  useEffect(() => {
-    fetchAnalyses();
-  }, [fetchAnalyses]);
+  /** Drop a row's expanded detail / in-flight expand marker after it is gone
+   *  from the server. The list itself is owned by the query cache. */
+  function forgetExpanded(preview: AnalysisPreview) {
+    setExpandedMap((prev) => {
+      if (!prev.has(preview.id)) return prev;
+      const next = new Map(prev);
+      next.delete(preview.id);
+      return next;
+    });
+    if (loadingId === preview.id) setLoadingId(null);
+  }
+
+  /** Refetch every page of the analysis list. A delete changes the pagination
+   *  and the total, so the cache is the source of truth — no local splice. */
+  function invalidateAnalyses() {
+    void queryClient.invalidateQueries({ queryKey: ['analyses'] });
+  }
 
   async function toggleExpand(preview: AnalysisPreview) {
     if (expandedMap.has(preview.id)) {
@@ -98,15 +117,18 @@ export default function AnalysisHistory() {
     // ownership server-side regardless.
     const sessionId = preview.sessionId;
     if (sessionId == null) {
-      setError('This analysis is missing its session and cannot be deleted.');
+      setActionError('This analysis is missing its session and cannot be deleted.');
       return;
     }
     setDeletingIds((ids) => new Set(ids).add(preview.id));
-    setError(null);
+    setActionError(null);
     try {
       await deleteAnalysis(String(sessionId), preview.id);
-      removeAnalysisLocally(preview);
-      setTotal((t) => Math.max(0, t - 1));
+      forgetExpanded(preview);
+      // Invalidate the whole ['analyses'] prefix so every cached page and the
+      // total refetch from the server (a local splice would leave the count
+      // and other pages stale).
+      invalidateAnalyses();
       // If the deleted row was the last one on a non-first page, step back so
       // the list doesn't strand the user on an empty page.
       if (analyses.length === 1 && page > 0) {
@@ -121,8 +143,8 @@ export default function AnalysisHistory() {
       // DELETE, or another tab deleted it) — the desired end state is met,
       // so treat it as success rather than showing a spurious error.
       if (err instanceof ApiError && err.status === 404) {
-        removeAnalysisLocally(preview);
-        setTotal((t) => Math.max(0, t - 1));
+        forgetExpanded(preview);
+        invalidateAnalyses();
         if (analyses.length === 1 && page > 0) {
           setPage((p) => p - 1);
         }
@@ -132,7 +154,7 @@ export default function AnalysisHistory() {
         // open + busy-gated); `busy` clears below when the in-flight Set
         // entry drops, re-enabling Confirm/Cancel. The list's inline error
         // line (rendered behind the modal) still surfaces the failure.
-        setError('Failed to delete analysis.');
+        setActionError('Failed to delete analysis.');
       }
     } finally {
       setDeletingIds((ids) => {
@@ -143,20 +165,8 @@ export default function AnalysisHistory() {
     }
   }
 
-  /** Drop a row from the local list and any expanded detail, no matter which
-   *  delete path (success or already-deleted 404) reached the end state. */
-  function removeAnalysisLocally(preview: AnalysisPreview) {
-    setAnalyses((rows) => rows.filter((x) => x.id !== preview.id));
-    setExpandedMap((prev) => {
-      if (!prev.has(preview.id)) return prev;
-      const next = new Map(prev);
-      next.delete(preview.id);
-      return next;
-    });
-    if (loadingId === preview.id) setLoadingId(null);
-  }
-
   const totalPages = Math.ceil(total / limit);
+  const displayError = actionError ?? (listError ? 'Failed to load analyses.' : null);
 
   return (
     <div className="card">
@@ -182,11 +192,22 @@ export default function AnalysisHistory() {
         </div>
       </div>
 
-      {error && (
-        <p className="text-sm text-rose-600 dark:text-rose-400 mb-4">{error}</p>
+      {displayError && (
+        <p className="text-sm text-rose-600 dark:text-rose-400 mb-4">
+          {displayError}
+          {listError && (
+            <button
+              type="button"
+              onClick={() => void refetch()}
+              className="ml-2 font-medium underline hover:no-underline"
+            >
+              Retry
+            </button>
+          )}
+        </p>
       )}
 
-      {loading ? (
+      {isLoading ? (
         // Row-shaped skeletons (3×) — mirrors the collapsed row heights
         // instead of a bare "Loading..." string.
         <div className="space-y-2" aria-busy="true">

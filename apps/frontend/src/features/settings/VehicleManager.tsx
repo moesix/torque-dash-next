@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   ApiError,
   getVehicles,
@@ -14,6 +15,7 @@ import ConfirmDialog from '@/components/ui/ConfirmDialog';
 import Skeleton from '@/components/ui/Skeleton';
 
 export default function VehicleManager() {
+  const queryClient = useQueryClient();
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -23,6 +25,10 @@ export default function VehicleManager() {
   // native window.confirm). null = no delete pending.
   const [deleteTarget, setDeleteTarget] = useState<Vehicle | null>(null);
   const [deleting, setDeleting] = useState(false);
+  // Vehicle whose "set as default" is in flight. Disables every star while
+  // the request runs so a rapid double-click cannot queue a second
+  // SetDefault (plan 033's frontend busy guard).
+  const [defaultingId, setDefaultingId] = useState<number | null>(null);
   const [formData, setFormData] = useState<UpdateVehicle>({
     name: '',
     make: null,
@@ -79,6 +85,10 @@ export default function VehicleManager() {
       await deleteVehicle(id);
       setDeleteTarget(null);
       await loadVehicles();
+      // VehicleController unassigns the deleted vehicle's sessions
+      // server-side, so the dashboard/session list must refetch too — its
+      // ['sessions'] cache still names the deleted vehicle otherwise.
+      void queryClient.invalidateQueries({ queryKey: ['sessions'] });
     } catch (err) {
       setError(err instanceof ApiError && err.message ? err.message : 'Failed to delete vehicle.');
     } finally {
@@ -87,11 +97,15 @@ export default function VehicleManager() {
   }
 
   async function handleSetDefault(id: number) {
+    if (defaultingId !== null) return; // single-flight guard
+    setDefaultingId(id);
     try {
       await setDefaultVehicle(id);
       await loadVehicles();
     } catch (err) {
       setError(err instanceof ApiError && err.message ? err.message : 'Failed to set default vehicle.');
+    } finally {
+      setDefaultingId(null);
     }
   }
 
@@ -197,6 +211,7 @@ export default function VehicleManager() {
                       variant="ghost"
                       size="sm"
                       onClick={() => handleSetDefault(v.id)}
+                      disabled={defaultingId !== null}
                       className="text-fg-muted"
                       title="Set as default"
                       aria-label={`Set ${v.name} as default vehicle`}
