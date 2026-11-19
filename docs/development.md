@@ -161,13 +161,13 @@ Changing any of these means a new numbered migration (never an edit to `009` /
 runs only when `NODE_ENV != production` (`app.js`), so the sync shape is dev/test
 only and never the schema a deployment runs.
 
-**Current migration files** — top-level series `000`–`025` (in execution order):
+**Current migration files** — top-level series `000`–`029` (in execution order):
 
 | File | Purpose |
 | --- | --- |
 | `000_baseline_tables.sql` | Creates the base `Logs` table — the only base table with no other owning migration — for sync-less installs (`001` converts it to a hypertable) |
 | `000_users_sessions_baseline.sql` | Creates `Users`/`Sessions` before `001`/`004` need them, and adds the `Logs.sessionId → Sessions(id)` foreign key (`ON DELETE CASCADE`) that sync-created databases already carry |
-| `001_log_hypertable.sql` | Creates the `Logs` hypertable, promoted columns `engine_rpm` / `vehicle_speed`, unique index on `id`, and the `log_1min` continuous aggregate |
+| `001_log_hypertable.sql` | Creates the `Logs` hypertable, promoted columns `engine_rpm` / `vehicle_speed`, unique index on `id`, and a 1-minute continuous aggregate (retired by `029`) |
 | `002_settings.sql` | Creates the `Settings` table and seeds the singleton row (misc global configuration) |
 | `003_add_llm_settings.sql` | Adds `llmProvider`, `llmModel`, `llmEndpoint`, `llmApiKeyEnc` columns to Settings |
 | `004_add_analyses_table.sql` | Creates the `Analyses` table for cached AI analysis results |
@@ -192,6 +192,10 @@ only and never the schema a deployment runs.
 | `023_user_admin_guarded.sql` | Re-runs 017's lowest-id promotion only when no admin exists, so a fresh-install re-run cannot promote a second account |
 | `024_session_max_types.sql` | Retypes `Sessions.maxRpm` / `maxSpeed` to `DOUBLE PRECISION` where an older sync created them as `INTEGER` (`016`'s `ADD COLUMN IF NOT EXISTS` cannot) |
 | `025_settings_timestamps.sql` | Adds `Settings."createdAt"` / `"updatedAt"` on databases whose `002` was applied before those columns existed (idempotent; no-op on fresh installs) |
+| `026_session_user_created_idx.sql` | Index on `Sessions("userId", "createdAt" DESC)` for the session list's per-user keyset order |
+| `027_vehicle_default_unique.sql` | Dedupes duplicate default vehicles (lowest id wins) then enforces one default per user with a partial unique index |
+| `028_unit_preferences.sql` | Adds nullable `Users.unitSystem` / `Analyses.unitSystem` display-preference columns with an allowlist CHECK |
+| `029_drop_log1min.sql` | Retires the unused 1-minute continuous aggregate: removes its refresh policy, then drops the view (see §10) |
 
 Nested under `migrations/`: `001_add_upload_token.sql` (no-op placeholder) and
 `002_backfill_pid_columns.sql` — the legacy `engine_rpm`/`vehicle_speed`
@@ -844,9 +848,12 @@ blockers are resolved and re-reviewed as PASS:
   handler; the frontend image's nginx serves the build and proxies `/api` to the
   backend. A separate origin/CDN is also supported but requires `CORS_ORIGINS`
   (and `COOKIE_SECURE=true` for cookie auth over HTTPS).
-- **`log_1min` continuous aggregate is unused.** The 1-minute continuous
-  aggregate exists but no endpoint reads from it. Consider serving dashboard
-  overviews from it to reduce load on the raw hypertable.
+- ✅ **`log_1min` continuous aggregate retired** (resolved by migration
+  `029_drop_log1min.sql`). The 1-minute aggregate had no reader — endpoints
+  fetch raw frames and sample client-side, and session summaries come from
+  `016`'s denormalized columns — while its refresh policy kept costing write
+  amplification against the hypertable. Do not resurrect it: a future overview
+  feature should define a new aggregate sized to that feature.
 - ✅ **`duration` now formatted + stale comments swept.** `SessionController`
   formats `duration` into a compact human string (e.g. `"1h 2m 5s"`) via a
   native `formatDuration()` helper that replaces the removed
