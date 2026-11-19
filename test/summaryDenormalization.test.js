@@ -150,6 +150,47 @@ describe('aggregateSummaries — reads from Session columns', () => {
     }
   });
 
+  test('preloaded rows replace the summary SELECT; NULL rows still fall back', async () => {
+    let sessionFindAllCalls = 0;
+    let logCalls = 0;
+    const preloaded = [
+      new (class Row {
+        constructor(v) { this.dataValues = v; }
+        toJSON() { return this.dataValues; }
+      })({ id: 's1', firstTimestamp: '2026-01-01T00:00:00Z', lastTimestamp: '2026-01-01T01:00:00Z', maxRpm: 5000, maxSpeed: 120 }),
+      // Legacy row: denormalized columns still NULL (pre-backfill / failed merge).
+      { id: 's2', firstTimestamp: null, lastTimestamp: null, maxRpm: null, maxSpeed: null },
+    ];
+    const mockModels = makeMockModels({
+      Session: { findAll: async () => { sessionFindAllCalls++; return []; } },
+      Log: {
+        findAll: async () => {
+          logCalls++;
+          return [{
+            dataValues: { sessionId: 's2', start: '2026-03-01T00:00:00Z', end: '2026-03-01T03:00:00Z', maxSpeed: 200, maxRpm: 7000 },
+          }];
+        },
+      },
+    });
+
+    const { restore } = loadWithMocks(mockModels);
+    try {
+      const { aggregateSummaries } = require('../controllers/SessionController');
+      // Session instance (toJSON) + plain object (list/detail JSON path) both work.
+      const map = await aggregateSummaries(['s1', 's2'], preloaded);
+
+      assert.strictEqual(sessionFindAllCalls, 0, 'preloaded rows must avoid the summary SELECT');
+      assert.strictEqual(logCalls, 1, 'only the NULL-summary id needs the fallback');
+      assert.strictEqual(map.get('s1').start, '2026-01-01T00:00:00Z');
+      assert.strictEqual(map.get('s1').maxRpm, 5000);
+      assert.strictEqual(map.get('s2').start, '2026-03-01T00:00:00Z');
+      assert.strictEqual(map.get('s2').maxSpeed, 200);
+      assert.strictEqual(map.get('s2').maxRpm, 7000);
+    } finally {
+      restore();
+    }
+  });
+
   test('returns empty map for empty sessionIds', async () => {
     const mockModels = makeMockModels();
     const { restore } = loadWithMocks(mockModels);
