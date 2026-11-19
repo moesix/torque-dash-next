@@ -136,4 +136,10 @@ describe('resolveUnitSystem precedence', () => {
     assert.strictEqual(resolveUnitSystem(null, undefined), 'metric');
     assert.strictEqual(resolveUnitSystem('bogus', 'bogus'), 'metric');
   });
+  it('normalizes case and surrounding whitespace on both arguments', () => {
+    assert.strictEqual(resolveUnitSystem(null, 'US'), 'us');
+    assert.strictEqual(resolveUnitSystem(' UK ', 'metric'), 'uk');
+    assert.strictEqual(resolveUnitSystem('bogus', 'US'), 'us');
+    assert.strictEqual(resolveUnitSystem('bogus', 'bogus'), 'metric');
+  });
 });
