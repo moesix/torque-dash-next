@@ -168,6 +168,19 @@ require.cache[pidRegistryPath] = {
     exports: { discoverPidKeys: async () => ({}) },
 };
 
+// Plan 019: stub the status collectors so the gate tests stay unit-scoped —
+// the real route + real requireAdmin gate are what these tests exercise.
+let statusPayload = {};
+const statusPath = require.resolve('../services/status');
+require.cache[statusPath] = {
+    id: statusPath,
+    filename: statusPath,
+    loaded: true,
+    exports: {
+        collectStatus: async () => statusPayload,
+    },
+};
+
 // Load the real router under the same require.cache mocks.
 let apiRouter;
 try {
@@ -626,5 +639,48 @@ describe('GET /api/settings/full — authenticated projection carries isAdmin', 
         assert.strictEqual(body.llmModel, 'operator-model');
         assert.strictEqual(body.llmEndpoint, 'https://llm.internal/v1');
         assert.strictEqual(body.hasLlmProvider, true);
+    });
+});
+
+// ── Plan 019: GET /api/status gate matrix ───────────────────────────
+
+describe('GET /api/status — admin gate (plan 019)', { skip: apiRouter ? false : 'routes/api.js could not load' }, () => {
+    const sample = {
+        version: '2.3.2',
+        uptimeSeconds: 12,
+        node: 'v26.13.0',
+        ingest: { bufferSize: 0, flushing: false },
+        analysesRetention: null,
+        retention: { enabled: true, days: 30, policyJobPresent: true },
+        timescale: { extensionVersion: '2.14.2', jobs: [] },
+    };
+
+    test('anonymous request is rejected by the route authenticate with 401', async () => {
+        statusPayload = sample;
+        const { status, body } = await withServer(null, (base) => getJson(base, '/api/status'));
+
+        assert.strictEqual(status, 401);
+        assert.deepStrictEqual(body, { error: 'Unauthorized' });
+    });
+
+    test('non-admin request is 403 with the REAL requireAdmin body', async () => {
+        statusPayload = sample;
+        const { status, body } = await withServer(NON_ADMIN, (base) => getJson(base, '/api/status'));
+
+        assert.strictEqual(status, 403);
+        assert.deepStrictEqual(body, { error: 'Admin access required.' });
+    });
+
+    test('admin receives 200 status:ok plus the collector keys', async () => {
+        statusPayload = sample;
+        const { status, body } = await withServer(ADMIN, (base) => getJson(base, '/api/status'));
+
+        assert.strictEqual(status, 200);
+        assert.strictEqual(body.status, 'ok');
+        for (const key of ['version', 'uptimeSeconds', 'node', 'ingest', 'analysesRetention', 'retention', 'timescale']) {
+            assert.ok(Object.prototype.hasOwnProperty.call(body, key), `missing ${key}`);
+        }
+        assert.deepStrictEqual(body.ingest, sample.ingest);
+        assert.deepStrictEqual(body.timescale, sample.timescale);
     });
 });

@@ -350,6 +350,42 @@ cat backup_20260717.sql | docker compose exec -T db \
 - Check the backend logs:
   `docker compose logs backend`
 
+### Status endpoint
+
+`GET /api/status` answers "is ingestion alive?" without `docker exec`. It is
+authenticated by session cookie **and admin-gated**: anonymous requests get
+`401 {"error":"Unauthorized"}`, non-admins get
+`403 {"error":"Admin access required."}`.
+
+```json
+{
+  "status": "ok",
+  "version": "2.3.2",
+  "uptimeSeconds": 3600,
+  "node": "v26.13.0",
+  "ingest": { "bufferSize": 0, "flushing": false },
+  "analysesRetention": { "lastRunAt": "2026-11-19T10:00:00.000Z", "pruned": 7, "enabled": true },
+  "retention": { "enabled": true, "days": 365, "policyJobPresent": true },
+  "timescale": {
+    "extensionVersion": "2.29.0",
+    "jobs": [{ "jobId": 1001, "scheduleInterval": "1 day", "lastRunStatus": "Success" }]
+  }
+}
+```
+
+Each block is null-safe: a failed probe returns that block as `null` (with a
+sibling `<block>Error: true` for ingest/analysesRetention/retention/timescale)
+instead of failing the request. `analysesRetention` is `null` until the pruner
+has completed its first pass. `retention.policyJobPresent` and the whole
+`timescale` block are `null`/partial on plain PostgreSQL or when the app's DB
+role cannot read `timescaledb_information` — the rest of the payload still
+populates.
+
+The backend publishes no host port, so curl it from inside the compose
+network (`docker compose exec backend wget -qO- ...`) or through the frontend
+edge with a valid session cookie. Tunnelled access does not bypass the admin
+gate. The payload never contains tokens, LLM keys or any settings secret.
+
 ### Viewing logs
 
 ```bash
